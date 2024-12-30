@@ -1,0 +1,10 @@
+[package]
+name = "dynamic-audio-graph"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.94"
+cpal = "0.15.3"
+petgraph = "0.6.5"
+koto = "0.14.1"
