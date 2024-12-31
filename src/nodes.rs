@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 pub const SAMPLE_RATE: f32 = 44100.0;
 
 pub(crate) trait Node: Send + Sync {
-    fn process(&mut self, input: f32) -> f32;
+    fn process(&mut self, input: f32, control: Option<f32>) -> f32;
 }
 
 pub(crate) struct Constant {
@@ -20,7 +20,7 @@ impl Constant {
 }
 
 impl Node for Constant {
-    fn process(&mut self, _: f32) -> f32 {
+    fn process(&mut self, _: f32, _: Option<f32>) -> f32 {
         self.value
     }
 }
@@ -36,7 +36,7 @@ impl Sine {
 }
 
 impl Node for Sine {
-    fn process(&mut self, hz: f32) -> f32 {
+    fn process(&mut self, hz: f32, _: Option<f32>) -> f32 {
         let y = (2.0 * PI * self.phase).sin();
         self.phase += hz / SAMPLE_RATE;
         if self.phase >= 1.0 {
@@ -57,8 +57,8 @@ impl Square {
 }
 
 impl Node for Square {
-    fn process(&mut self, x: f32) -> f32 {
-        let inc = 2.0 * PI * x / SAMPLE_RATE;
+    fn process(&mut self, hz: f32, _: Option<f32>) -> f32 {
+        let inc = 2.0 * PI * hz / SAMPLE_RATE;
         let y = if self.phase < PI { 1.0 } else { -1.0 };
         self.phase += inc;
 
@@ -83,39 +83,35 @@ impl Noise {
 }
 
 impl Node for Noise {
-    fn process(&mut self, _: f32) -> f32 {
+    fn process(&mut self, _: f32, _: Option<f32>) -> f32 {
         self.rng.lock().unwrap().gen::<f32>() * 2.0 - 1.0
     }
 }
 
-pub(crate) struct Gain {
-    gain: f32,
-}
+pub(crate) struct Gain {}
 
 impl Gain {
-    pub(crate) fn new(gain: f32) -> Self {
-        Self { gain }
+    pub(crate) fn new() -> Self {
+        Self {}
     }
 }
 
 impl Node for Gain {
-    fn process(&mut self, input: f32) -> f32 {
-        input * self.gain
+    fn process(&mut self, input: f32, gain: Option<f32>) -> f32 {
+        input * gain.expect("Gain node requires control input")
     }
 }
 
-pub(crate) struct Offset {
-    offset: f32,
-}
+pub(crate) struct Offset {}
 
 impl Offset {
     pub(crate) fn new(offset: f32) -> Self {
-        Self { offset }
+        Self {}
     }
 }
 
 impl Node for Offset {
-    fn process(&mut self, input: f32) -> f32 {
-        input + self.offset
+    fn process(&mut self, input: f32, offset: Option<f32>) -> f32 {
+        input + offset.expect("Offset node requires control input")
     }
 }

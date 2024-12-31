@@ -35,6 +35,14 @@ impl KotoObject for Expr {
                 }
                 .into(),
             )),
+            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Operator {
+                    kind: OperatorType::Offset,
+                    input: Box::new(self.clone()),
+                    args: vec![obj.cast::<Expr>()?.clone()],
+                }
+                .into(),
+            )),
             _ => panic!("invalid add operation"),
         }
     }
@@ -75,6 +83,15 @@ impl KotoObject for Expr {
                     kind: OperatorType::Gain,
                     input: Box::new(self.clone()),
                     args: vec![Expr::Number(num.into())],
+                }
+                .into(),
+            )),
+            // TODO: handle case where rhs is an operator
+            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Operator {
+                    kind: OperatorType::Gain,
+                    input: Box::new(self.clone()),
+                    args: vec![obj.cast::<Expr>()?.clone()],
                 }
                 .into(),
             )),
