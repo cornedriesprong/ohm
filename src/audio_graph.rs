@@ -64,9 +64,27 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                 let node: Box<dyn Node> = match kind {
                     OperatorType::Sine => Box::new(Sine::new()),
                     OperatorType::Square => Box::new(Square::new()),
+                    OperatorType::Noise => Box::new(Noise::new()),
                     OperatorType::Gain => {
                         let gain_value = if let Some(Expr::Number(n)) = args.get(0) {
                             *n
+                        // TODO: handle case where first parameter is an operator
+                        } else if let Some(Expr::Operator { kind, input, args }) = args.get(0) {
+                            let input_node = add_expr_to_graph(*input.clone(), graph);
+                            let node: Box<dyn Node> = match kind {
+                                OperatorType::Gain => {
+                                    let gain_value = if let Some(Expr::Number(n)) = args.get(0) {
+                                        *n
+                                    } else {
+                                        1.0 // Default gain
+                                    };
+                                    Box::new(Gain::new(gain_value))
+                                }
+                                _ => unimplemented!(),
+                            };
+                            let node_index = graph.add_node(node);
+                            graph.connect(input_node, node_index);
+                            return node_index;
                         } else {
                             1.0 // Default gain
                         };
@@ -87,6 +105,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                 node_index
             }
             Expr::Number(n) => graph.add_node(Box::new(Constant::new(n))),
+            Expr::Null => graph.add_node(Box::new(Constant::new(0.0))),
         }
     }
 

@@ -1,4 +1,7 @@
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
 use std::f32::consts::PI;
+use std::sync::{Arc, Mutex};
 
 pub const SAMPLE_RATE: f32 = 44100.0;
 
@@ -64,6 +67,24 @@ impl Node for Square {
         }
 
         y
+    }
+}
+
+pub(crate) struct Noise {
+    rng: Arc<Mutex<SmallRng>>,
+}
+
+impl Noise {
+    pub(crate) fn new() -> Self {
+        Self {
+            rng: Arc::new(Mutex::new(SmallRng::from_entropy())),
+        }
+    }
+}
+
+impl Node for Noise {
+    fn process(&mut self, _: f32) -> f32 {
+        self.rng.lock().unwrap().gen::<f32>() * 2.0 - 1.0
     }
 }
 

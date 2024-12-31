@@ -41,7 +41,7 @@ where
     koto.prelude().add_fn("sine", add_fn(OperatorType::Sine));
     koto.prelude()
         .add_fn("square", add_fn(OperatorType::Square));
-    koto.prelude().add_fn("noise", add_fn(OperatorType::Noise));
+    koto.prelude().add_fn("noise", add_noise_fn());
     koto.prelude().add_fn("skew", add_fn(OperatorType::Skew));
 
     let mut audio_graph = match koto.compile_and_run(&src)? {
@@ -75,12 +75,21 @@ where
     Ok(())
 }
 
+// TODO: define separate function for noise operator, which doesn't take any arguments
 fn add_fn(op_type: OperatorType) -> impl KotoFunction {
     move |ctx| match ctx.args() {
+        [] => Ok(KValue::Object(
+            Expr::Operator {
+                kind: op_type,
+                input: Box::new(Expr::Number(440.0)),
+                args: vec![],
+            }
+            .into(),
+        )),
         [KValue::Number(hz)] => Ok(KValue::Object(
             Expr::Operator {
                 kind: op_type,
-                input: Box::new(Expr::Number(hz.as_i64() as f32)),
+                input: Box::new(Expr::Number(hz.into())),
                 args: vec![],
             }
             .into(),
@@ -94,5 +103,19 @@ fn add_fn(op_type: OperatorType) -> impl KotoFunction {
             .into(),
         )),
         unexpected => type_error_with_slice("a number", unexpected),
+    }
+}
+
+fn add_noise_fn() -> impl KotoFunction {
+    move |ctx| match ctx.args() {
+        [] => Ok(KValue::Object(
+            Expr::Operator {
+                kind: OperatorType::Noise,
+                input: Box::new(Expr::Null), // TODO: fix
+                args: vec![],
+            }
+            .into(),
+        )),
+        unexpected => type_error_with_slice("no arguments", unexpected),
     }
 }

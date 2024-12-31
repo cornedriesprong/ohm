@@ -1,1 +1,2 @@
-(sine 1) * 1000 >> sine
+# sine(sine(sine(0.1)) * 500 + 200)
+noise() * 0.1
