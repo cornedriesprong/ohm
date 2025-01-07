@@ -110,39 +110,49 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                         graph.connect_audio(input_node, node_index);
 
                         // Process and connect the right-hand side (gain amount) as control input
-                        if let Some(gain_expr) = args.get(0) {
-                            match gain_expr {
+                        if let Some(expr) = args.get(0) {
+                            match expr {
                                 Expr::Number(n) => {
                                     let constant = Box::new(Constant::new(*n));
                                     let constant_index = graph.add_node(constant);
                                     graph.connect_control(constant_index, node_index);
                                 }
                                 Expr::Operator { .. } => {
-                                    let gain_node = add_expr_to_graph(gain_expr.clone(), graph);
-                                    graph.connect_control(gain_node, node_index);
+                                    let node = add_expr_to_graph(expr.clone(), graph);
+                                    graph.connect_control(node, node_index);
                                 }
-                                _ => {} // Handle other cases if needed
                             }
                         }
 
                         node_index
                     }
                     OperatorType::Offset => {
-                        let offset_value = if let Some(Expr::Number(n)) = args.get(0) {
-                            *n
-                        } else {
-                            0.0 // Default offset
-                        };
-                        let node = Box::new(Offset::new(offset_value));
+                        let node = Box::new(Offset::new());
                         let node_index = graph.add_node(node);
-                        graph.connect_control(input_node, node_index);
+
+                        graph.connect_audio(input_node, node_index);
+
+                        if let Some(expr) = args.get(0) {
+                            match expr {
+                                Expr::Number(n) => {
+                                    println!("offset: {:?}", n);
+                                    let constant = Box::new(Constant::new(*n));
+                                    let constant_index = graph.add_node(constant);
+                                    graph.connect_control(constant_index, node_index);
+                                }
+                                Expr::Operator { .. } => {
+                                    let node = add_expr_to_graph(expr.clone(), graph);
+                                    graph.connect_control(node, node_index);
+                                }
+                            }
+                        }
+
                         node_index
                     }
                     _ => unimplemented!(),
                 }
             }
             Expr::Number(n) => graph.add_node(Box::new(Constant::new(n))),
-            Expr::Null => graph.add_node(Box::new(Constant::new(0.0))),
         }
     }
 

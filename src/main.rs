@@ -44,6 +44,18 @@ where
     koto.prelude().add_fn("noise", add_noise_fn());
     koto.prelude().add_fn("skew", add_fn(OperatorType::Skew));
 
+    koto.prelude().add_fn("mix", move |ctx| match ctx.args() {
+        [KValue::Object(lhs), KValue::Object(rhs)] => Ok(KValue::Object(
+            Expr::Operator {
+                kind: OperatorType::Mix,
+                input: Box::new(lhs.cast::<Expr>()?.to_owned()),
+                args: vec![rhs.cast::<Expr>()?.to_owned()],
+            }
+            .into(),
+        )),
+        unexpected => type_error_with_slice("a number", unexpected),
+    });
+
     let mut audio_graph = match koto.compile_and_run(&src)? {
         KValue::Object(obj) if obj.is_a::<Expr>() => {
             parse_to_audio_graph(obj.cast::<Expr>()?.clone())
@@ -111,7 +123,7 @@ fn add_noise_fn() -> impl KotoFunction {
         [] => Ok(KValue::Object(
             Expr::Operator {
                 kind: OperatorType::Noise,
-                input: Box::new(Expr::Null), // TODO: fix
+                input: Box::new(Expr::Number(0.)), // TODO: fix
                 args: vec![],
             }
             .into(),

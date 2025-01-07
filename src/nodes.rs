@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 pub const SAMPLE_RATE: f32 = 44100.0;
 
 pub(crate) trait Node: Send + Sync {
-    fn process(&mut self, input: f32, control: Option<f32>) -> f32;
+    fn process(&mut self, a: f32, b: Option<f32>) -> f32;
 }
 
 pub(crate) struct Constant {
@@ -97,21 +97,21 @@ impl Gain {
 }
 
 impl Node for Gain {
-    fn process(&mut self, input: f32, gain: Option<f32>) -> f32 {
-        input * gain.expect("Gain node requires control input")
+    fn process(&mut self, a: f32, b: Option<f32>) -> f32 {
+        a * b.expect("Gain node requires control input")
     }
 }
 
 pub(crate) struct Offset {}
 
 impl Offset {
-    pub(crate) fn new(offset: f32) -> Self {
+    pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
 impl Node for Offset {
-    fn process(&mut self, input: f32, offset: Option<f32>) -> f32 {
-        input + offset.expect("Offset node requires control input")
+    fn process(&mut self, a: f32, b: Option<f32>) -> f32 {
+        a + b.expect("Offset node requires control input")
     }
 }
