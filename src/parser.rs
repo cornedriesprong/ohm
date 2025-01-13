@@ -5,10 +5,10 @@ pub(crate) enum OperatorType {
     Sine,
     Square,
     Noise,
-    Skew,
-    Offset,
+    Pulse,
     Mix,
     Gain,
+    AR,
 }
 
 #[derive(Debug, Clone, KotoType, KotoCopy)]
@@ -23,14 +23,13 @@ pub(crate) enum Expr {
 
 impl KotoObject for Expr {
     fn add(&self, rhs: &KValue) -> koto::Result<KValue> {
-        println!("add");
         match (self, rhs) {
             (Self::Number(value), KValue::Number(num)) => {
                 Ok(KValue::Number((value + f32::from(num)).into()))
             }
             (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Operator {
-                    kind: OperatorType::Offset,
+                    kind: OperatorType::Mix,
                     input: Box::new(self.clone()),
                     args: vec![Expr::Number(num.into())],
                 }
@@ -38,7 +37,7 @@ impl KotoObject for Expr {
             )),
             (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Operator {
-                    kind: OperatorType::Offset,
+                    kind: OperatorType::Mix,
                     input: Box::new(self.clone()),
                     args: vec![obj.cast::<Expr>()?.clone()],
                 }
@@ -80,7 +79,7 @@ impl KotoObject for Expr {
             }
             (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Operator {
-                    kind: OperatorType::Offset,
+                    kind: OperatorType::Mix,
                     input: Box::new(self.clone()),
                     args: vec![Expr::Number((-f32::from(num)).into())],
                 }
@@ -89,7 +88,7 @@ impl KotoObject for Expr {
             // TODO: handle case where rhs is an operator
             (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Operator {
-                    kind: OperatorType::Offset,
+                    kind: OperatorType::Mix,
                     input: Box::new(self.clone()),
                     args: vec![obj.cast::<Expr>()?.clone()],
                 }

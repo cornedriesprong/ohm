@@ -1,7 +1,5 @@
-use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::nodes::*;
@@ -15,7 +13,9 @@ enum EdgeType {
 
 pub(crate) struct AudioGraph {
     graph: DiGraph<Arc<Mutex<Box<dyn Node>>>, EdgeType>,
-    sorted_nodes: Vec<NodeIndex>, // Store sorted node order
+    sorted_nodes: Vec<NodeIndex>, // store sorted node order
+    outputs: Vec<f32>,
+    control_buffer: Vec<f32>,
 }
 
 impl AudioGraph {
@@ -23,6 +23,8 @@ impl AudioGraph {
         Self {
             graph: DiGraph::new(),
             sorted_nodes: Vec::new(),
+            outputs: Vec::new(),
+            control_buffer: Vec::new(),
         }
     }
 
@@ -43,41 +45,56 @@ impl AudioGraph {
         self.update_processing_order();
     }
 
+    #[inline]
     pub(crate) fn process(&mut self) -> f32 {
-        let mut outputs: HashMap<NodeIndex, f32> = HashMap::new();
-
         for &node_index in &self.sorted_nodes {
-            // Get audio inputs
             let audio_input = self
                 .graph
                 .edges_directed(node_index, petgraph::Direction::Incoming)
                 .filter(|edge| matches!(edge.weight(), EdgeType::Audio))
-                .map(|edge| outputs[&edge.source()])
+                .map(|edge| self.outputs[edge.source().index()])
                 .sum();
 
-            // Get control input
-            let control_input = self
-                .graph
-                .edges_directed(node_index, petgraph::Direction::Incoming)
-                .find(|edge| matches!(edge.weight(), EdgeType::Control))
-                .map(|edge| outputs[&edge.source()]);
+            self.control_buffer.clear();
+            self.control_buffer.extend(
+                self.graph
+                    .edges_directed(node_index, petgraph::Direction::Incoming)
+                    .filter(|edge| matches!(edge.weight(), EdgeType::Control))
+                    .map(|edge| self.outputs[edge.source().index()]),
+            );
 
             let node = self.graph[node_index].clone();
             let mut node = node.lock().unwrap();
-            let output_value = node.process(audio_input, control_input);
-            outputs.insert(node_index, output_value);
+            let output_value = node.process(audio_input, &self.control_buffer);
+
+            self.outputs[node_index.index()] = output_value;
         }
 
-        outputs[&self.sorted_nodes.last().unwrap()]
+        self.outputs[self.sorted_nodes.last().unwrap().index()]
     }
 
     fn update_processing_order(&mut self) {
-        self.sorted_nodes = toposort(&self.graph, None).expect("Graph has cycles");
+        self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
+        self.outputs.resize(self.graph.node_count(), 0.0);
     }
 }
 
 pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
     let mut graph = AudioGraph::new();
+
+    fn connect_control_input(expr: &Expr, graph: &mut AudioGraph, target_idx: NodeIndex) {
+        match expr {
+            Expr::Number(n) => {
+                let constant = Box::new(Constant::new(*n));
+                let constant_index = graph.add_node(constant);
+                graph.connect_control(constant_index, target_idx);
+            }
+            Expr::Operator { .. } => {
+                let node = add_expr_to_graph(expr.clone(), graph);
+                graph.connect_control(node, target_idx);
+            }
+        }
+    }
 
     fn add_expr_to_graph(expr: Expr, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
@@ -102,14 +119,18 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                         graph.connect_audio(input_node, node_index);
                         node_index
                     }
+                    OperatorType::Pulse => {
+                        let node = Box::new(Pulse::new());
+                        let node_index = graph.add_node(node);
+                        graph.connect_audio(input_node, node_index);
+                        node_index
+                    }
                     OperatorType::Gain => {
                         let node = Box::new(Gain::new());
                         let node_index = graph.add_node(node);
 
-                        // Connect the left-hand side as the audio input
                         graph.connect_audio(input_node, node_index);
 
-                        // Process and connect the right-hand side (gain amount) as control input
                         if let Some(expr) = args.get(0) {
                             match expr {
                                 Expr::Number(n) => {
@@ -126,8 +147,8 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
                         node_index
                     }
-                    OperatorType::Offset => {
-                        let node = Box::new(Offset::new());
+                    OperatorType::Mix => {
+                        let node = Box::new(Mix::new());
                         let node_index = graph.add_node(node);
 
                         graph.connect_audio(input_node, node_index);
@@ -135,7 +156,6 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                         if let Some(expr) = args.get(0) {
                             match expr {
                                 Expr::Number(n) => {
-                                    println!("offset: {:?}", n);
                                     let constant = Box::new(Constant::new(*n));
                                     let constant_index = graph.add_node(constant);
                                     graph.connect_control(constant_index, node_index);
@@ -149,7 +169,27 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
                         node_index
                     }
-                    _ => unimplemented!(),
+                    OperatorType::AR => {
+                        let node = Box::new(AR::new());
+                        let node_index = graph.add_node(node);
+
+                        graph.connect_audio(input_node, node_index);
+
+                        // nb: notes need to be connected in reverse order
+                        if let Some(release_expr) = args.get(2) {
+                            connect_control_input(release_expr, graph, node_index);
+                        }
+
+                        if let Some(attack_expr) = args.get(1) {
+                            connect_control_input(attack_expr, graph, node_index);
+                        }
+
+                        if let Some(trigger_expr) = args.get(0) {
+                            connect_control_input(trigger_expr, graph, node_index);
+                        }
+
+                        node_index
+                    }
                 }
             }
             Expr::Number(n) => graph.add_node(Box::new(Constant::new(n))),
