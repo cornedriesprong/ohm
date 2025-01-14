@@ -13,7 +13,7 @@ enum EdgeType {
 
 pub(crate) struct AudioGraph {
     graph: DiGraph<Arc<Mutex<Box<dyn Node>>>, EdgeType>,
-    sorted_nodes: Vec<NodeIndex>, // store sorted node order
+    sorted_nodes: Vec<NodeIndex>,
     outputs: Vec<f32>,
     control_buffer: Vec<f32>,
 }
@@ -46,7 +46,7 @@ impl AudioGraph {
     }
 
     #[inline]
-    pub(crate) fn process(&mut self) -> f32 {
+    pub(crate) fn tick(&mut self) -> f32 {
         for &node_index in &self.sorted_nodes {
             let audio_input = self
                 .graph
@@ -65,7 +65,7 @@ impl AudioGraph {
 
             let node = self.graph[node_index].clone();
             let mut node = node.lock().unwrap();
-            let output_value = node.process(audio_input, &self.control_buffer);
+            let output_value = node.tick(audio_input, &self.control_buffer);
 
             self.outputs[node_index.index()] = output_value;
         }
@@ -92,7 +92,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
         node_index
     }
 
-    fn connect_control(expr: &Expr, graph: &mut AudioGraph, target_idx: NodeIndex) {
+    fn connect_control(graph: &mut AudioGraph, expr: &Expr, target_idx: NodeIndex) {
         match expr {
             Expr::Number(n) => {
                 let constant = Box::new(Constant::new(*n));
@@ -121,7 +121,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                         let node_index =
                             connect_generator(graph, Box::new(Gain::new()), input_node);
                         if let Some(expr) = args.get(0) {
-                            connect_control(expr, graph, node_index);
+                            connect_control(graph, expr, node_index);
                         }
 
                         node_index
@@ -129,7 +129,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                     OT::Mix => {
                         let node_index = connect_generator(graph, Box::new(Mix::new()), input_node);
                         if let Some(expr) = args.get(0) {
-                            connect_control(expr, graph, node_index);
+                            connect_control(graph, expr, node_index);
                         }
 
                         node_index
@@ -137,16 +137,12 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                     OT::AR => {
                         let node_index = connect_generator(graph, Box::new(AR::new()), input_node);
                         // nb: notes need to be connected in reverse order
-                        if let Some(release_expr) = args.get(2) {
-                            connect_control(release_expr, graph, node_index);
+                        if let Some(release_expr) = args.get(1) {
+                            connect_control(graph, release_expr, node_index);
                         }
 
-                        if let Some(attack_expr) = args.get(1) {
-                            connect_control(attack_expr, graph, node_index);
-                        }
-
-                        if let Some(trigger_expr) = args.get(0) {
-                            connect_control(trigger_expr, graph, node_index);
+                        if let Some(attack_expr) = args.get(0) {
+                            connect_control(graph, attack_expr, node_index);
                         }
 
                         node_index

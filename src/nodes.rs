@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 pub const SAMPLE_RATE: f32 = 44100.;
 
 pub(crate) trait Node: Send + Sync {
-    fn process(&mut self, input: f32, args: &[f32]) -> f32;
+    fn tick(&mut self, input: f32, args: &[f32]) -> f32;
 }
 
 pub(crate) struct Constant {
@@ -21,7 +21,7 @@ impl Constant {
 }
 
 impl Node for Constant {
-    fn process(&mut self, _: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, _: f32, _: &[f32]) -> f32 {
         self.value
     }
 }
@@ -37,7 +37,8 @@ impl Sine {
 }
 
 impl Node for Sine {
-    fn process(&mut self, hz: f32, _: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
         let y = (2. * PI * self.phase).sin();
         self.phase += hz / SAMPLE_RATE;
         if self.phase >= 1. {
@@ -58,7 +59,8 @@ impl Square {
 }
 
 impl Node for Square {
-    fn process(&mut self, hz: f32, _: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
         let inc = 2. * PI * hz / SAMPLE_RATE;
         let y = if self.phase < PI { 1. } else { -1. };
         self.phase += inc;
@@ -84,7 +86,8 @@ impl Noise {
 }
 
 impl Node for Noise {
-    fn process(&mut self, _: f32, _: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, _: f32, _: &[f32]) -> f32 {
         self.rng.lock().unwrap().gen::<f32>() * 2. - 1.
     }
 }
@@ -104,7 +107,8 @@ impl Pulse {
 }
 
 impl Node for Pulse {
-    fn process(&mut self, hz: f32, _: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
         self.prev_phase = self.phase;
         self.phase += 2. * PI * hz / SAMPLE_RATE;
 
@@ -126,7 +130,8 @@ impl Gain {
 }
 
 impl Node for Gain {
-    fn process(&mut self, a: f32, args: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, a: f32, args: &[f32]) -> f32 {
         let b = args.first().expect("Mix node requires control input");
         a * b
     }
@@ -141,7 +146,8 @@ impl Mix {
 }
 
 impl Node for Mix {
-    fn process(&mut self, a: f32, args: &[f32]) -> f32 {
+    #[inline]
+    fn tick(&mut self, a: f32, args: &[f32]) -> f32 {
         let b = args.first().expect("Mix node requires control input");
         a + b
     }
@@ -179,12 +185,12 @@ impl AR {
 }
 
 impl Node for AR {
-    fn process(&mut self, input: f32, args: &[f32]) -> f32 {
-        let trig = args.get(0).unwrap_or(&0.0);
-        let attack = args.get(1).unwrap_or(&1.0);
-        let release = args.get(2).unwrap_or(&1.0);
+    #[inline]
+    fn tick(&mut self, trig: f32, args: &[f32]) -> f32 {
+        let attack = args.get(0).unwrap_or(&1.0);
+        let release = args.get(1).unwrap_or(&1.0);
 
-        if *trig > 0.0 {
+        if trig > 0.0 {
             self.state = EnvelopeState::Attack;
         }
 
@@ -217,6 +223,6 @@ impl Node for AR {
         }
         self.time += 1.0;
 
-        input * self.value
+        self.value
     }
 }
