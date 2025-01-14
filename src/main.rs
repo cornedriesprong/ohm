@@ -3,6 +3,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
 };
+use fundsp::hacker::{AudioUnit, BufferRef};
 use koto::prelude::*;
 use std::fs;
 use std::time::Duration;
@@ -68,9 +69,10 @@ where
     let mut koto = Koto::default();
     create_env(&koto);
 
-    let mut audio_graph = match koto.compile_and_run(&src)? {
+    let mut net = match koto.compile_and_run(&src)? {
         KValue::Object(obj) if obj.is_a::<Expr>() => {
-            parse_to_audio_graph(obj.cast::<Expr>()?.clone())
+            // parse_to_audio_graph(obj.cast::<Expr>()?.clone())
+            parse_to_net(obj.cast::<Expr>()?.clone())
         }
         other => bail!(
             "Expected a Map, found '{}': ({})",
@@ -79,13 +81,14 @@ where
         ),
     };
 
+    let mut next_value = move || net.get_mono();
+
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             for frame in data.chunks_mut(2) {
-                let s = audio_graph.process();
                 for sample in frame.iter_mut() {
-                    *sample = s;
+                    *sample = next_value();
                 }
             }
         },

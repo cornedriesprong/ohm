@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.94"
 cpal = "0.15.3"
-petgraph = "0.6.5"
+fundsp = "0.20.0"
 koto = "0.14.1"
+petgraph = "0.6.5"
 rand = { version = "0.8.5", features = ["small_rng"] }
