@@ -4,11 +4,13 @@ use koto::{derive::*, prelude::*};
 pub(crate) enum OperatorType {
     Sine,
     Square,
+    Saw,
     Noise,
     Pulse,
     Mix,
     Gain,
     AR,
+    SVF,
 }
 
 #[derive(Debug, Clone, KotoType, KotoCopy)]

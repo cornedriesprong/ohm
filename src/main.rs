@@ -34,23 +34,43 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("sine", add_fn(OperatorType::Sine));
     koto.prelude()
         .add_fn("square", add_fn(OperatorType::Square));
+    koto.prelude().add_fn("saw", add_fn(OperatorType::Saw));
     koto.prelude().add_fn("pulse", add_fn(OperatorType::Pulse));
     koto.prelude().add_fn("noise", add_noise_fn());
     koto.prelude().add_fn("ar", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return type_error_with_slice("3 arguments: trig, attack, release", args);
+            return type_error_with_slice("3 arguments: attack, release, trig", args);
         }
 
-        let trig = ExprInput::from_kvalue(&args[0])?;
-        let attack = ExprInput::from_kvalue(&args[1])?;
-        let release = ExprInput::from_kvalue(&args[2])?;
+        let attack = ExprInput::from_kvalue(&args[0])?;
+        let release = ExprInput::from_kvalue(&args[1])?;
+        let trig = ExprInput::from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
             Expr::Operator {
                 kind: OperatorType::AR,
                 input: Box::new(trig.clone().into_expr()),
                 args: vec![attack.into_expr(), release.into_expr()],
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("svf", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 3 {
+            return type_error_with_slice("3 arguments: cutoff, resonance, input", args);
+        }
+
+        let cutoff = ExprInput::from_kvalue(&args[0])?;
+        let resonance = ExprInput::from_kvalue(&args[1])?;
+        let input = ExprInput::from_kvalue(&args[2])?;
+
+        Ok(KValue::Object(
+            Expr::Operator {
+                kind: OperatorType::SVF,
+                input: Box::new(input.clone().into_expr()),
+                args: vec![cutoff.into_expr(), resonance.into_expr()],
             }
             .into(),
         ))
@@ -81,9 +101,8 @@ where
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             for frame in data.chunks_mut(2) {
-                let s = audio_graph.tick();
                 for sample in frame.iter_mut() {
-                    *sample = s;
+                    *sample = audio_graph.tick();
                 }
             }
         },

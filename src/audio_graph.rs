@@ -115,6 +115,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                 match kind {
                     OT::Sine => connect_generator(graph, Box::new(Sine::new()), input_node),
                     OT::Square => connect_generator(graph, Box::new(Square::new()), input_node),
+                    OT::Saw => connect_generator(graph, Box::new(Saw::new()), input_node),
                     OT::Noise => connect_generator(graph, Box::new(Noise::new()), input_node),
                     OT::Pulse => connect_generator(graph, Box::new(Pulse::new()), input_node),
                     OT::Gain => {
@@ -143,6 +144,19 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
                         if let Some(attack_expr) = args.get(0) {
                             connect_control(graph, attack_expr, node_index);
+                        }
+
+                        node_index
+                    }
+                    OT::SVF => {
+                        let node_index = connect_generator(graph, Box::new(SVF::new()), input_node);
+
+                        if let Some(resonance_expr) = args.get(1) {
+                            connect_control(graph, resonance_expr, node_index);
+                        }
+
+                        if let Some(cutoff_expr) = args.get(0) {
+                            connect_control(graph, cutoff_expr, node_index);
                         }
 
                         node_index
