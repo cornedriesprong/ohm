@@ -105,20 +105,6 @@ impl Saw {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.inc = 0.0;
-        self.phase = 0.0;
-        self.sin0 = 0.0;
-        self.sin1 = 0.0;
-        self.dsin = 0.0;
-        self.dc = 0.0;
-        self.saw = 0.0;
-    }
-
-    pub fn set_freq(&mut self, freq: f32) {
-        self.period = self.sample_rate / freq;
-    }
-
     fn next_sample(&mut self) -> f32 {
         let y;
         self.phase += self.inc;
@@ -359,6 +345,7 @@ impl SVF {
         }
     }
 
+    #[inline]
     fn update_coefficients(&mut self) {
         self.a1 = 1.0 / (1.0 + self.g * (self.g + self.k));
         self.a2 = self.g * self.a1;
@@ -386,5 +373,34 @@ impl Node for SVF {
             SVFMode::Highpass => input - self.ic2eq - self.a2 * self.ic1eq,
             SVFMode::Bandpass => self.k * v1,
         }
+    }
+}
+
+pub(crate) struct Seq {
+    values: Vec<f32>,
+    step: usize,
+}
+
+impl Seq {
+    pub(crate) fn new(values: Vec<f32>) -> Self {
+        Self { values, step: 0 }
+    }
+
+    fn increment(&mut self) {
+        self.step += 1;
+        if self.step >= self.values.len() {
+            self.step = 0;
+        }
+    }
+}
+
+impl Node for Seq {
+    #[inline]
+    fn tick(&mut self, trig: f32, _: &[f32]) -> f32 {
+        if trig > 0.0 {
+            self.increment();
+        }
+
+        self.values[self.step]
     }
 }

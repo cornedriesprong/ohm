@@ -43,15 +43,15 @@ fn create_env(koto: &Koto) {
             return type_error_with_slice("3 arguments: attack, release, trig", args);
         }
 
-        let attack = ExprInput::from_kvalue(&args[0])?;
-        let release = ExprInput::from_kvalue(&args[1])?;
-        let trig = ExprInput::from_kvalue(&args[2])?;
+        let attack = expr_from_kvalue(&args[0])?;
+        let release = expr_from_kvalue(&args[1])?;
+        let trig = expr_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
             Expr::Operator {
                 kind: OperatorType::AR,
-                input: Box::new(trig.clone().into_expr()),
-                args: vec![attack.into_expr(), release.into_expr()],
+                input: Box::new(trig),
+                args: vec![attack, release],
             }
             .into(),
         ))
@@ -62,15 +62,33 @@ fn create_env(koto: &Koto) {
             return type_error_with_slice("3 arguments: cutoff, resonance, input", args);
         }
 
-        let cutoff = ExprInput::from_kvalue(&args[0])?;
-        let resonance = ExprInput::from_kvalue(&args[1])?;
-        let input = ExprInput::from_kvalue(&args[2])?;
+        let cutoff = expr_from_kvalue(&args[0])?;
+        let resonance = expr_from_kvalue(&args[1])?;
+        let input = expr_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
             Expr::Operator {
                 kind: OperatorType::SVF,
-                input: Box::new(input.clone().into_expr()),
-                args: vec![cutoff.into_expr(), resonance.into_expr()],
+                input: Box::new(input),
+                args: vec![cutoff, resonance],
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("seq", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 2 {
+            return type_error_with_slice("2 arguments: list, trig", args);
+        }
+
+        let list = expr_from_kvalue(&args[0])?;
+        let trig = expr_from_kvalue(&args[1])?;
+
+        Ok(KValue::Object(
+            Expr::Operator {
+                kind: OperatorType::Seq,
+                input: Box::new(trig),
+                args: vec![list],
             }
             .into(),
         ))
@@ -101,8 +119,9 @@ where
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             for frame in data.chunks_mut(2) {
+                let s = audio_graph.tick();
                 for sample in frame.iter_mut() {
-                    *sample = audio_graph.tick();
+                    *sample = s;
                 }
             }
         },
@@ -122,7 +141,7 @@ fn add_fn(op_type: OperatorType) -> impl KotoFunction {
         let args = ctx.args();
         let input = match args.len() {
             0 => Expr::Number(440.0),
-            1 => ExprInput::from_kvalue(&args[0])?.into_expr(),
+            1 => expr_from_kvalue(&args[0])?,
             _ => return type_error_with_slice("zero or one argument", &args),
         };
 
@@ -151,27 +170,21 @@ fn add_noise_fn() -> impl KotoFunction {
     }
 }
 
-#[derive(Clone)]
-pub(crate) enum ExprInput {
-    Number(f32),
-    Expression(Expr),
-}
-
-impl ExprInput {
-    pub fn from_kvalue(value: &KValue) -> Result<Self, koto::Error> {
-        match value {
-            KValue::Number(n) => Ok(ExprInput::Number(n.into())),
-            KValue::Object(obj) if obj.is_a::<Expr>() => {
-                Ok(ExprInput::Expression(obj.cast::<Expr>()?.to_owned()))
-            }
-            unexpected => type_error("number or expr", unexpected)?,
+fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::Error> {
+    match value {
+        KValue::Number(n) => Ok(Expr::Number(n.into())),
+        KValue::Object(obj) if obj.is_a::<Expr>() => Ok(obj.cast::<Expr>()?.to_owned()),
+        KValue::List(list) => {
+            let vec: Result<Vec<f32>, _> = list
+                .data()
+                .iter()
+                .map(|v| match v {
+                    KValue::Number(n) => Ok((*n).into()),
+                    _ => type_error("number", v),
+                })
+                .collect();
+            Ok(Expr::List(vec?))
         }
-    }
-
-    pub fn into_expr(self) -> Expr {
-        match self {
-            ExprInput::Number(n) => Expr::Number(n),
-            ExprInput::Expression(e) => e,
-        }
+        unexpected => type_error("number, expr, or list", unexpected),
     }
 }

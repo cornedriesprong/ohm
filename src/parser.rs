@@ -11,6 +11,7 @@ pub(crate) enum OperatorType {
     Gain,
     AR,
     SVF,
+    Seq,
 }
 
 #[derive(Debug, Clone, KotoType, KotoCopy)]
@@ -20,6 +21,7 @@ pub(crate) enum Expr {
         input: Box<Expr>,
         args: Vec<Expr>,
     },
+    List(Vec<f32>),
     Number(f32),
 }
 

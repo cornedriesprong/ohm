@@ -103,6 +103,13 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                 let node = add_expr_to_graph(expr.clone(), graph);
                 graph.connect_control(node, target_idx);
             }
+            Expr::List(list) => {
+                for &n in list {
+                    let constant = Box::new(Constant::new(n));
+                    let constant_index = graph.add_node(constant);
+                    graph.connect_control(constant_index, target_idx);
+                }
+            }
         }
     }
 
@@ -161,9 +168,21 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
                         node_index
                     }
+                    OT::Seq => args
+                        .get(0)
+                        .and_then(|expr| match expr {
+                            Expr::List(list) => Some(connect_generator(
+                                graph,
+                                Box::new(Seq::new(list.to_vec())),
+                                input_node,
+                            )),
+                            _ => None,
+                        })
+                        .expect("Seq operator requires a list of nodes"),
                 }
             }
             Expr::Number(n) => graph.add_node(Box::new(Constant::new(n))),
+            _ => panic!("Invalid expression"),
         }
     }
 
