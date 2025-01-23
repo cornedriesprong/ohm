@@ -5,7 +5,6 @@ use cpal::{
 };
 use koto::prelude::*;
 use std::fs;
-use std::time::Duration;
 
 mod nodes;
 mod utils;
@@ -130,7 +129,7 @@ where
     )?;
     stream.play()?;
 
-    std::thread::sleep(Duration::from_millis(360000));
+    loop {}
 
     Ok(())
 }
