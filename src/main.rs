@@ -39,7 +39,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("ar", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return type_error_with_slice("3 arguments: attack, release, trig", args);
+            return unexpected_args("3 arguments: attack, release, trig", args);
         }
 
         let attack = expr_from_kvalue(&args[0])?;
@@ -58,7 +58,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("svf", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return type_error_with_slice("3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("3 arguments: cutoff, resonance, input", args);
         }
 
         let cutoff = expr_from_kvalue(&args[0])?;
@@ -77,7 +77,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
         if args.len() != 2 {
-            return type_error_with_slice("2 arguments: list, trig", args);
+            return unexpected_args("2 arguments: list, trig", args);
         }
 
         let list = expr_from_kvalue(&args[0])?;
@@ -104,9 +104,10 @@ where
     create_env(&koto);
 
     let mut audio_graph = match koto.compile_and_run(&src)? {
-        KValue::Object(obj) if obj.is_a::<Expr>() => {
-            parse_to_audio_graph(obj.cast::<Expr>()?.clone())
-        }
+        KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
+            Ok(expr) => parse_to_audio_graph(expr.to_owned()),
+            Err(e) => bail!("Failed to cast to Expr: {}", e),
+        },
         other => bail!(
             "Expected a Map, found '{}': ({})",
             other.type_as_string(),
@@ -130,8 +131,6 @@ where
     stream.play()?;
 
     loop {}
-
-    Ok(())
 }
 
 // TODO: define separate function for noise operator, which doesn't take any arguments
@@ -141,7 +140,7 @@ fn add_fn(op_type: OperatorType) -> impl KotoFunction {
         let input = match args.len() {
             0 => Expr::Number(440.0),
             1 => expr_from_kvalue(&args[0])?,
-            _ => return type_error_with_slice("zero or one argument", &args),
+            _ => return unexpected_args("zero or one argument", &args),
         };
 
         Ok(KValue::Object(
@@ -165,11 +164,11 @@ fn add_noise_fn() -> impl KotoFunction {
             }
             .into(),
         )),
-        unexpected => type_error_with_slice("no arguments", unexpected),
+        unexpected => unexpected_args("no arguments", &unexpected),
     }
 }
 
-fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::Error> {
+fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(Expr::Number(n.into())),
         KValue::Object(obj) if obj.is_a::<Expr>() => Ok(obj.cast::<Expr>()?.to_owned()),
@@ -179,11 +178,11 @@ fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::Error> {
                 .iter()
                 .map(|v| match v {
                     KValue::Number(n) => Ok((*n).into()),
-                    _ => type_error("number", v),
+                    _ => unexpected_type("number", v),
                 })
                 .collect();
             Ok(Expr::List(vec?))
         }
-        unexpected => type_error("number, expr, or list", unexpected),
+        unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
 }

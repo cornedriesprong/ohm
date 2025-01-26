@@ -1,4 +1,4 @@
-use koto::{derive::*, prelude::*};
+use koto::{derive::*, prelude::*, runtime::Result};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OperatorType {
@@ -26,7 +26,7 @@ pub(crate) enum Expr {
 }
 
 impl KotoObject for Expr {
-    fn add(&self, rhs: &KValue) -> koto::Result<KValue> {
+    fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Number(value), KValue::Number(num)) => {
                 Ok(KValue::Number((value + f32::from(num)).into()))
@@ -51,7 +51,7 @@ impl KotoObject for Expr {
         }
     }
 
-    fn multiply(&self, rhs: &KValue) -> koto::Result<KValue> {
+    fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Number(value), KValue::Number(num)) => {
                 Ok(KValue::Number((value * f32::from(num)).into()))
@@ -76,7 +76,7 @@ impl KotoObject for Expr {
         }
     }
 
-    fn subtract(&self, rhs: &KValue) -> koto::Result<KValue> {
+    fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Number(value), KValue::Number(num)) => {
                 Ok(KValue::Number((value - f32::from(num)).into()))
@@ -102,7 +102,7 @@ impl KotoObject for Expr {
         }
     }
 
-    fn divide(&self, rhs: &KValue) -> koto::Result<KValue> {
+    fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Number(value), KValue::Number(num)) => {
                 Ok(KValue::Number((value / f32::from(num)).into()))
