@@ -9,3 +9,4 @@ cpal = "0.15.3"
 petgraph = "0.6.5"
 koto = "0.15"
 rand = { version = "0.8.5", features = ["small_rng"] }
+notify = "8.0.0"

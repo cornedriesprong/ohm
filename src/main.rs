@@ -4,7 +4,10 @@ use cpal::{
     FromSample, SizedSample,
 };
 use koto::prelude::*;
+use notify::{Event, RecursiveMode, Watcher};
 use std::fs;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 mod nodes;
 mod utils;
@@ -16,16 +19,91 @@ mod parser;
 use parser::*;
 
 fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <filename>", args[0]);
+        std::process::exit(1);
+    }
+
+    let filename = &args[1];
+
     let host = cpal::default_host();
     let device = host
         .default_output_device()
-        .expect("Failed to get default output device");
-    let config = device.default_output_config().unwrap();
+        .expect("no output device available");
+    let config = device.default_output_config()?;
 
-    match config.sample_format() {
-        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into()),
-        sample_format => panic!("Unsupported sample format '{sample_format}'"),
+    run::<f32>(&device, &config.into(), filename)
+}
+
+pub fn run<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    filename: &str,
+) -> Result<(), anyhow::Error>
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+    let mut koto = Koto::default();
+    create_env(&koto);
+
+    let audio_graph: Arc<Mutex<Option<AudioGraph>>> = Arc::new(Mutex::new(None));
+    let audio_graph_clone = audio_graph.clone();
+
+    let stream = device.build_output_stream(
+        config,
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            if let Some(graph) = audio_graph_clone.lock().unwrap().as_mut() {
+                for frame in data.chunks_mut(2) {
+                    let s = graph.tick();
+                    for sample in frame.iter_mut() {
+                        *sample = s;
+                    }
+                }
+            }
+        },
+        err_fn,
+        None,
+    )?;
+
+    stream.play()?;
+
+    let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
+        let src = fs::read_to_string(path)?;
+        match koto.compile_and_run(&src)? {
+            KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
+                Ok(expr) => {
+                    let new_graph = parse_to_audio_graph(expr.to_owned());
+                    *audio_graph.lock().unwrap() = Some(new_graph);
+                    Ok(())
+                }
+                Err(e) => bail!("Failed to cast to Expr: {}", e),
+            },
+            other => bail!("Expected a Map, found '{}'", other.type_as_string(),),
+        }
+    };
+
+    update_audio_graph(Path::new(filename))?;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(tx)?;
+    watcher.watch(Path::new(filename), RecursiveMode::NonRecursive)?;
+
+    for res in rx {
+        match res {
+            Ok(Event { kind, .. }) if kind.is_modify() => {
+                if let Err(e) = update_audio_graph(Path::new(filename)) {
+                    eprintln!("Error updating audio graph: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Watch error: {}", e),
+            _ => {}
+        }
     }
+
+    Ok(())
 }
 
 fn create_env(koto: &Koto) {
@@ -92,45 +170,6 @@ fn create_env(koto: &Koto) {
             .into(),
         ))
     });
-}
-
-pub fn run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<(), anyhow::Error>
-where
-    T: SizedSample + FromSample<f32>,
-{
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-    let src = fs::read_to_string("./script.koto").unwrap();
-    let mut koto = Koto::default();
-    create_env(&koto);
-
-    let mut audio_graph = match koto.compile_and_run(&src)? {
-        KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
-            Ok(expr) => parse_to_audio_graph(expr.to_owned()),
-            Err(e) => bail!("Failed to cast to Expr: {}", e),
-        },
-        other => bail!(
-            "Expected a Map, found '{}': ({})",
-            other.type_as_string(),
-            koto.value_to_string(other)?
-        ),
-    };
-
-    let stream = device.build_output_stream(
-        config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            for frame in data.chunks_mut(2) {
-                let s = audio_graph.tick();
-                for sample in frame.iter_mut() {
-                    *sample = s;
-                }
-            }
-        },
-        err_fn,
-        None,
-    )?;
-    stream.play()?;
-
-    loop {}
 }
 
 // TODO: define separate function for noise operator, which doesn't take any arguments

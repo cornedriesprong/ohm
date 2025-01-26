@@ -331,7 +331,6 @@ pub struct SVF {
 
 impl SVF {
     pub fn new() -> SVF {
-        println!("new SVF");
         Self {
             g: 0.0,
             k: 0.0,
