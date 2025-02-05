@@ -32,7 +32,6 @@ impl AudioGraph {
 
     pub(crate) fn add_node(&mut self, node: NodeKind) -> NodeIndex {
         let index = self.graph.add_node(Box::new(node));
-        self.graph[index].set_index(index);
         self.update_processing_order();
         index
     }
@@ -213,19 +212,13 @@ pub(crate) fn diff_graph<'a>(
     let mut to_add = Vec::new();
     let mut to_remove = Vec::new();
 
-    // Now you can directly compare nodes
     for old_idx in old.graph.node_indices() {
         let old_node = &old.graph[old_idx];
 
-        // Find matching node in new graph
-        let matching_node = new
-            .graph
-            .node_indices()
-            .find(|&idx| new.graph[idx].is_identical(old_node));
+        let matching_node = new.graph.node_indices().find(|&idx| idx == old_idx);
 
         match matching_node {
             Some(new_idx) => {
-                // Compare nodes directly using PartialEq
                 if **old_node != *new.graph[new_idx] {
                     to_update.push((old_idx, *new.graph[new_idx].clone()));
                 }
@@ -234,15 +227,9 @@ pub(crate) fn diff_graph<'a>(
         }
     }
 
-    // Find additions
     for new_idx in new.graph.node_indices() {
-        let new_node = &new.graph[new_idx];
-        if !old
-            .graph
-            .node_indices()
-            .any(|idx| old.graph[idx].is_identical(new_node))
-        {
-            to_add.push((new_idx, *new_node.clone()));
+        if !old.graph.node_indices().any(|idx| idx == new_idx) {
+            to_add.push((new_idx, *new.graph[new_idx].clone()));
         }
     }
 

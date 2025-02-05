@@ -95,7 +95,7 @@ where
                             old.remove_node(id);
                         }
                     } else {
-                        // first time creating the graph
+                        // first time creating the graph, no diff needed
                         *guard = Some(new);
                     }
 

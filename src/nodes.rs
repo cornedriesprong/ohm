@@ -1,6 +1,5 @@
 use core::fmt;
 use fmt::{Debug, Formatter};
-use petgraph::graph::NodeIndex;
 use std::f32::consts::PI;
 
 pub const SAMPLE_RATE: f32 = 44100.;
@@ -20,31 +19,7 @@ pub(crate) enum NodeKind {
     // Seq(Seq),
 }
 
-impl NodeKind {
-    pub(crate) fn set_index(&mut self, index: NodeIndex) {
-        match self {
-            NodeKind::Constant(node) => node.id = Some(index),
-            NodeKind::Sine(node) => node.id = Some(index),
-        }
-    }
-
-    pub(crate) fn is_identical(&self, other: &Self) -> bool {
-        match (self, other) {
-            (NodeKind::Constant(a), NodeKind::Constant(b)) => a.id == b.id,
-            (NodeKind::Sine(a), NodeKind::Sine(b)) => a.id == b.id,
-            _ => false,
-        }
-    }
-}
-
 impl Node for NodeKind {
-    fn id(&self) -> Option<NodeIndex> {
-        match self {
-            NodeKind::Constant(node) => node.id(),
-            NodeKind::Sine(node) => node.id(),
-        }
-    }
-
     #[inline(always)]
     fn tick(&mut self, input: f32, args: &[f32]) -> f32 {
         match self {
@@ -67,7 +42,6 @@ impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (NodeKind::Constant(a), NodeKind::Constant(b)) => a.value == b.value,
-            // (NodeKind::Constant(a), NodeKind::Constant(b)) => a.value == b.value,
             (NodeKind::Sine(a), NodeKind::Sine(b)) => true,
             _ => false,
         }
@@ -93,27 +67,21 @@ impl Debug for NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
-    fn id(&self) -> Option<NodeIndex>;
     fn tick(&mut self, input: f32, args: &[f32]) -> f32;
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Constant {
-    pub(crate) id: Option<NodeIndex>,
     value: f32,
 }
 
 impl Constant {
     pub(crate) fn new(value: f32) -> Self {
-        Self { id: None, value }
+        Self { value }
     }
 }
 
 impl Node for Constant {
-    fn id(&self) -> Option<NodeIndex> {
-        self.id
-    }
-
     #[inline(always)]
     fn tick(&mut self, _: f32, _: &[f32]) -> f32 {
         self.value
@@ -122,24 +90,16 @@ impl Node for Constant {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Sine {
-    id: Option<NodeIndex>,
     phase: f32,
 }
 
 impl Sine {
     pub(crate) fn new() -> Self {
-        Self {
-            id: None,
-            phase: 0.,
-        }
+        Self { phase: 0. }
     }
 }
 
 impl Node for Sine {
-    fn id(&self) -> Option<NodeIndex> {
-        self.id
-    }
-
     #[inline(always)]
     fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
         let y = (2. * PI * self.phase).sin();
