@@ -75,8 +75,30 @@ where
         match koto.compile_and_run(&src)? {
             KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
                 Ok(expr) => {
-                    let new_graph = parse_to_audio_graph(expr.to_owned());
-                    *audio_graph.lock().unwrap() = Some(new_graph);
+                    let new = parse_to_audio_graph(expr.to_owned());
+                    let mut guard = audio_graph.lock().unwrap();
+
+                    if let Some(old) = guard.as_mut() {
+                        // apply a diff between the old and new graphs to avoid
+                        // discontinuities in the audio
+                        let (updates, additions, removals) = diff_graph(&old, &new);
+
+                        for (id, node) in updates {
+                            old.replace_node(id, node);
+                        }
+
+                        for (_, node) in additions {
+                            old.add_node(node);
+                        }
+
+                        for id in removals {
+                            old.remove_node(id);
+                        }
+                    } else {
+                        // first time creating the graph
+                        *guard = Some(new);
+                    }
+
                     Ok(())
                 }
                 Err(e) => bail!("Failed to cast to Expr: {}", e),
@@ -109,67 +131,67 @@ where
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
     koto.prelude().add_fn("sine", add_fn(OperatorType::Sine));
-    koto.prelude()
-        .add_fn("square", add_fn(OperatorType::Square));
-    koto.prelude().add_fn("saw", add_fn(OperatorType::Saw));
-    koto.prelude().add_fn("pulse", add_fn(OperatorType::Pulse));
-    koto.prelude().add_fn("noise", add_noise_fn());
-    koto.prelude().add_fn("ar", move |ctx| {
-        let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("3 arguments: attack, release, trig", args);
-        }
-
-        let attack = expr_from_kvalue(&args[0])?;
-        let release = expr_from_kvalue(&args[1])?;
-        let trig = expr_from_kvalue(&args[2])?;
-
-        Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::AR,
-                input: Box::new(trig),
-                args: vec![attack, release],
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("svf", move |ctx| {
-        let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
-        }
-
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
-
-        Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::SVF,
-                input: Box::new(input),
-                args: vec![cutoff, resonance],
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("seq", move |ctx| {
-        let args = ctx.args();
-        if args.len() != 2 {
-            return unexpected_args("2 arguments: list, trig", args);
-        }
-
-        let list = expr_from_kvalue(&args[0])?;
-        let trig = expr_from_kvalue(&args[1])?;
-
-        Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::Seq,
-                input: Box::new(trig),
-                args: vec![list],
-            }
-            .into(),
-        ))
-    });
+    // koto.prelude()
+    //     .add_fn("square", add_fn(OperatorType::Square));
+    // koto.prelude().add_fn("saw", add_fn(OperatorType::Saw));
+    // koto.prelude().add_fn("pulse", add_fn(OperatorType::Pulse));
+    // koto.prelude().add_fn("noise", add_noise_fn());
+    // koto.prelude().add_fn("ar", move |ctx| {
+    //     let args = ctx.args();
+    //     if args.len() != 3 {
+    //         return unexpected_args("3 arguments: attack, release, trig", args);
+    //     }
+    //
+    //     let attack = expr_from_kvalue(&args[0])?;
+    //     let release = expr_from_kvalue(&args[1])?;
+    //     let trig = expr_from_kvalue(&args[2])?;
+    //
+    //     Ok(KValue::Object(
+    //         Expr::Operator {
+    //             kind: OperatorType::AR,
+    //             input: Box::new(trig),
+    //             args: vec![attack, release],
+    //         }
+    //         .into(),
+    //     ))
+    // });
+    // koto.prelude().add_fn("svf", move |ctx| {
+    //     let args = ctx.args();
+    //     if args.len() != 3 {
+    //         return unexpected_args("3 arguments: cutoff, resonance, input", args);
+    //     }
+    //
+    //     let cutoff = expr_from_kvalue(&args[0])?;
+    //     let resonance = expr_from_kvalue(&args[1])?;
+    //     let input = expr_from_kvalue(&args[2])?;
+    //
+    //     Ok(KValue::Object(
+    //         Expr::Operator {
+    //             kind: OperatorType::SVF,
+    //             input: Box::new(input),
+    //             args: vec![cutoff, resonance],
+    //         }
+    //         .into(),
+    //     ))
+    // });
+    // koto.prelude().add_fn("seq", move |ctx| {
+    //     let args = ctx.args();
+    //     if args.len() != 2 {
+    //         return unexpected_args("2 arguments: list, trig", args);
+    //     }
+    //
+    //     let list = expr_from_kvalue(&args[0])?;
+    //     let trig = expr_from_kvalue(&args[1])?;
+    //
+    //     Ok(KValue::Object(
+    //         Expr::Operator {
+    //             kind: OperatorType::Seq,
+    //             input: Box::new(trig),
+    //             args: vec![list],
+    //         }
+    //         .into(),
+    //     ))
+    // });
 }
 
 // TODO: define separate function for noise operator, which doesn't take any arguments
@@ -193,19 +215,19 @@ fn add_fn(op_type: OperatorType) -> impl KotoFunction {
     }
 }
 
-fn add_noise_fn() -> impl KotoFunction {
-    move |ctx| match ctx.args() {
-        [] => Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::Noise,
-                input: Box::new(Expr::Number(0.)), // TODO: fix
-                args: vec![],
-            }
-            .into(),
-        )),
-        unexpected => unexpected_args("no arguments", &unexpected),
-    }
-}
+// fn add_noise_fn() -> impl KotoFunction {
+//     move |ctx| match ctx.args() {
+//         [] => Ok(KValue::Object(
+//             Expr::Operator {
+//                 kind: OperatorType::Noise,
+//                 input: Box::new(Expr::Number(0.)), // TODO: fix
+//                 args: vec![],
+//             }
+//             .into(),
+//         )),
+//         unexpected => unexpected_args("no arguments", &unexpected),
+//     }
+// }
 
 fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::runtime::Error> {
     match value {
