@@ -159,7 +159,12 @@ impl Sine {
 
 impl Node for Sine {
     #[inline(always)]
-    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
+        let reset_phase = args.first().unwrap_or(&0.0);
+        if *reset_phase > 0.0 {
+            self.phase = 0.0;
+        }
+
         let y = (2. * PI * self.phase).sin();
         self.phase += hz / SAMPLE_RATE;
         if self.phase >= 1. {
@@ -182,7 +187,12 @@ impl Square {
 
 impl Node for Square {
     #[inline]
-    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
+        let reset_phase = args.first().unwrap_or(&0.0);
+        if *reset_phase > 0.0 {
+            self.phase = 0.0;
+        }
+
         let inc = 2. * PI * hz / SAMPLE_RATE;
         let y = if self.phase < PI { 1. } else { -1. };
         self.phase += inc;
@@ -268,7 +278,12 @@ impl Saw {
 
 impl Node for Saw {
     #[inline]
-    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
+        let reset_phase = args.first().unwrap_or(&0.0);
+        if *reset_phase > 0.0 {
+            self.phase = 0.0;
+        }
+
         self.period = self.sample_rate / hz;
         let sample = self.next_sample();
         self.saw = self.saw * 0.997 + sample;
@@ -313,7 +328,12 @@ impl Pulse {
 
 impl Node for Pulse {
     #[inline]
-    fn tick(&mut self, hz: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
+        let reset_phase = args.first().unwrap_or(&0.0);
+        if *reset_phase > 0.0 {
+            self.phase = 0.0;
+        }
+
         self.prev_phase = self.phase;
         self.phase += 2. * PI * hz / SAMPLE_RATE;
 

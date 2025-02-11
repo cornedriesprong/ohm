@@ -214,17 +214,22 @@ fn create_env(koto: &Koto) {
 fn add_fn(op_type: OperatorType) -> impl KotoFunction {
     move |ctx| {
         let args = ctx.args();
-        let input = match args.len() {
-            0 => Expr::Number(440.0),
-            1 => expr_from_kvalue(&args[0])?,
-            _ => return unexpected_args("zero or one argument", &args),
+        let (hz, op_args) = match args.len() {
+            0 => (Expr::Number(440.0), vec![]),
+            1 => (expr_from_kvalue(&args[0])?, vec![]),
+            2 => {
+                let input = expr_from_kvalue(&args[0])?;
+                let reset_phase = expr_from_kvalue(&args[1])?;
+                (input, vec![reset_phase])
+            }
+            _ => return unexpected_args("zero, one, or two arguments", &args),
         };
 
         Ok(KValue::Object(
             Expr::Operator {
                 kind: op_type,
-                input: Box::new(input),
-                args: vec![],
+                input: Box::new(hz),
+                args: op_args,
             }
             .into(),
         ))

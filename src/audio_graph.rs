@@ -73,7 +73,7 @@ impl AudioGraph {
         self.update_processing_order();
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn tick(&mut self) -> f32 {
         for &node_index in &self.sorted_nodes {
             let audio_input = self
@@ -145,52 +145,87 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
                 use OperatorType as OT;
                 match kind {
-                    OT::Sine => connect_generator(graph, NodeKind::sine(), input_node),
-                    OT::Square => connect_generator(graph, NodeKind::square(), input_node),
-                    OT::Saw => connect_generator(graph, NodeKind::saw(), input_node),
-                    OT::Noise => connect_generator(graph, NodeKind::noise(), input_node),
-                    OT::Pulse => connect_generator(graph, NodeKind::pulse(), input_node),
-                    OT::Gain => {
-                        let node_index = connect_generator(graph, NodeKind::gain(), input_node);
+                    OT::Sine => {
+                        let node_idx = connect_generator(graph, NodeKind::sine(), input_node);
                         if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_index);
+                            connect_control(graph, expr, node_idx);
                         }
 
-                        node_index
+                        node_idx
+                    }
+                    OT::Square => {
+                        let node_idx = connect_generator(graph, NodeKind::square(), input_node);
+                        if let Some(expr) = args.get(0) {
+                            connect_control(graph, expr, node_idx);
+                        }
+
+                        node_idx
+                    }
+                    OT::Saw => {
+                        let node_idx = connect_generator(graph, NodeKind::saw(), input_node);
+                        if let Some(expr) = args.get(0) {
+                            connect_control(graph, expr, node_idx);
+                        }
+
+                        node_idx
+                    }
+                    OT::Noise => {
+                        let node_idx = connect_generator(graph, NodeKind::noise(), input_node);
+                        if let Some(expr) = args.get(0) {
+                            connect_control(graph, expr, node_idx);
+                        }
+
+                        node_idx
+                    }
+                    OT::Pulse => {
+                        let node_idx = connect_generator(graph, NodeKind::pulse(), input_node);
+                        if let Some(expr) = args.get(0) {
+                            connect_control(graph, expr, node_idx);
+                        }
+
+                        node_idx
+                    }
+                    OT::Gain => {
+                        let node_idx = connect_generator(graph, NodeKind::gain(), input_node);
+                        if let Some(expr) = args.get(0) {
+                            connect_control(graph, expr, node_idx);
+                        }
+
+                        node_idx
                     }
                     OT::Mix => {
-                        let node_index = connect_generator(graph, NodeKind::mix(), input_node);
+                        let node_idx = connect_generator(graph, NodeKind::mix(), input_node);
                         if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_index);
+                            connect_control(graph, expr, node_idx);
                         }
 
-                        node_index
+                        node_idx
                     }
                     OT::AR => {
-                        let node_index = connect_generator(graph, NodeKind::ar(), input_node);
+                        let node_idx = connect_generator(graph, NodeKind::ar(), input_node);
                         // nb: notes need to be connected in reverse order
                         if let Some(release_expr) = args.get(1) {
-                            connect_control(graph, release_expr, node_index);
+                            connect_control(graph, release_expr, node_idx);
                         }
 
                         if let Some(attack_expr) = args.get(0) {
-                            connect_control(graph, attack_expr, node_index);
+                            connect_control(graph, attack_expr, node_idx);
                         }
 
-                        node_index
+                        node_idx
                     }
                     OT::SVF => {
-                        let node_index = connect_generator(graph, NodeKind::svf(), input_node);
+                        let node_idx = connect_generator(graph, NodeKind::svf(), input_node);
 
                         if let Some(resonance_expr) = args.get(1) {
-                            connect_control(graph, resonance_expr, node_index);
+                            connect_control(graph, resonance_expr, node_idx);
                         }
 
                         if let Some(cutoff_expr) = args.get(0) {
-                            connect_control(graph, cutoff_expr, node_index);
+                            connect_control(graph, cutoff_expr, node_idx);
                         }
 
-                        node_index
+                        node_idx
                     }
                     OT::Seq => args
                         .get(0)
