@@ -5,13 +5,27 @@ type Signal = Box<Expr>;
 #[derive(Debug, Clone, KotoType, KotoCopy)]
 pub(crate) enum Expr {
     Constant(f32),
-    Sine(Signal),
-    Square(Signal),
-    Saw(Signal),
-    Pulse(Signal),
+    Sine {
+        freq: Signal,
+    },
+    Square {
+        freq: Signal,
+    },
+    Saw {
+        freq: Signal,
+    },
+    Pulse {
+        freq: Signal,
+    },
     Noise,
-    Mix(Signal, Signal),
-    Gain(Signal, Signal),
+    Mix {
+        a: Signal,
+        b: Signal,
+    },
+    Gain {
+        a: Signal,
+        b: Signal,
+    },
     AR {
         trig: Signal,
         attack: Signal,
@@ -36,13 +50,17 @@ impl KotoObject for Expr {
                 Expr::Constant(value + f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Mix(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+                Expr::Mix {
+                    a: Box::new(self.clone()),
+                    b: Box::new(Expr::Constant(num.into())).into(),
+                }
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Mix(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Expr>()?.clone()),
-                )
+                Expr::Mix {
+                    a: Box::new(self.clone()),
+                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                }
                 .into(),
             )),
             _ => panic!("invalid add operation"),
@@ -55,13 +73,17 @@ impl KotoObject for Expr {
                 Expr::Constant(value * f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Gain(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+                Expr::Gain {
+                    a: Box::new(self.clone()),
+                    b: Box::new(Expr::Constant((num).into())),
+                }
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Gain(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Expr>()?.clone()),
-                )
+                Expr::Gain {
+                    a: Box::new(self.clone()),
+                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                }
                 .into(),
             )),
             _ => panic!("invalid multiply operation"),
@@ -74,17 +96,17 @@ impl KotoObject for Expr {
                 Expr::Constant(value - f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Mix(
-                    Box::new(self.clone()),
-                    Box::new(Expr::Constant((-num).into())),
-                )
+                Expr::Mix {
+                    a: Box::new(self.clone()),
+                    b: Box::new(Expr::Constant((-num).into())),
+                }
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Mix(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Expr>()?.clone()),
-                )
+                Expr::Mix {
+                    a: Box::new(self.clone()),
+                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                }
                 .into(),
             )),
             _ => panic!("invalid subtract operation"),
@@ -97,13 +119,17 @@ impl KotoObject for Expr {
                 Expr::Constant(value / f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Gain(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+                Expr::Gain {
+                    a: Box::new(self.clone()),
+                    b: Box::new(Expr::Constant(num.into())),
+                }
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Gain(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Expr>()?.clone()),
-                )
+                Expr::Gain {
+                    a: Box::new(self.clone()),
+                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                }
                 .into(),
             )),
             _ => panic!("invalid divide operation"),

@@ -146,14 +146,30 @@ where
 
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
-    koto.prelude()
-        .add_fn("sine", make_expr_node(|hz| Expr::Sine(Box::new(hz))));
-    koto.prelude()
-        .add_fn("square", make_expr_node(|hz| Expr::Square(Box::new(hz))));
-    koto.prelude()
-        .add_fn("saw", make_expr_node(|hz| Expr::Saw(Box::new(hz))));
-    koto.prelude()
-        .add_fn("pulse", make_expr_node(|hz| Expr::Pulse(Box::new(hz))));
+    koto.prelude().add_fn(
+        "sine",
+        make_expr_node(|args| Expr::Sine {
+            freq: Box::new(args[0].clone()),
+        }),
+    );
+    koto.prelude().add_fn(
+        "square",
+        make_expr_node(|args| Expr::Square {
+            freq: Box::new(args[0].clone()),
+        }),
+    );
+    koto.prelude().add_fn(
+        "saw",
+        make_expr_node(|args| Expr::Saw {
+            freq: Box::new(args[0].clone()),
+        }),
+    );
+    koto.prelude().add_fn(
+        "pulse",
+        make_expr_node(|args| Expr::Pulse {
+            freq: Box::new(args[0].clone()),
+        }),
+    );
     koto.prelude()
         .add_fn("noise", make_expr_node(|_| Expr::Noise));
     koto.prelude().add_fn("ar", move |ctx| {
@@ -227,15 +243,13 @@ fn create_env(koto: &Koto) {
 
 fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
 where
-    F: Fn(Expr) -> Expr + 'static,
+    F: Fn(Vec<Expr>) -> Expr + 'static,
 {
     move |ctx| {
-        // For now, we expect exactly one argument.
-        let arg = expr_from_kvalue(&ctx.args()[0])?;
-        Ok(KValue::Object(node_constructor(arg).into()))
+        let args: Result<Vec<Expr>, _> = ctx.args().iter().map(expr_from_kvalue).collect();
+        Ok(KValue::Object(node_constructor(args?).into()))
     }
 }
-
 fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(Expr::Constant(n.into())),

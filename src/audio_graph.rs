@@ -93,67 +93,42 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
     fn add_expr_to_graph(expr: Expr, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
             Expr::Constant(n) => graph.add_node(NodeKind::constant(n)),
-            Expr::Sine(input) => add_node(input, NodeKind::sine(), graph),
-            Expr::Square(input) => add_node(input, NodeKind::square(), graph),
-            Expr::Saw(input) => add_node(input, NodeKind::saw(), graph),
-            Expr::Pulse(input) => add_node(input, NodeKind::pulse(), graph),
+            Expr::Sine { freq } => add_node(vec![freq], NodeKind::sine(), graph),
+            Expr::Square { freq } => add_node(vec![freq], NodeKind::square(), graph),
+            Expr::Saw { freq } => add_node(vec![freq], NodeKind::saw(), graph),
+            Expr::Pulse { freq } => add_node(vec![freq], NodeKind::pulse(), graph),
             Expr::Noise => graph.add_node(NodeKind::noise()),
-            Expr::Gain(input, mult) => {
-                let input_idx = add_expr_to_graph(*input, graph);
-                let mult_idx = add_expr_to_graph(*mult, graph);
-                let gain_idx = graph.add_node(NodeKind::gain());
-                graph.connect_node(input_idx, gain_idx);
-                graph.connect_node(mult_idx, gain_idx);
-                gain_idx
-            }
-            Expr::Mix(a, b) => {
-                let a_idx = add_expr_to_graph(*a, graph);
-                let b_idx = add_expr_to_graph(*b, graph);
-                let mix_idx = graph.add_node(NodeKind::mix());
-                graph.connect_node(a_idx, mix_idx);
-                graph.connect_node(b_idx, mix_idx);
-                mix_idx
-            }
+            Expr::Gain { a, b } => add_node(vec![a, b], NodeKind::gain(), graph),
+            Expr::Mix { a, b } => add_node(vec![a, b], NodeKind::mix(), graph),
             Expr::AR {
                 attack,
                 release,
                 trig,
-            } => {
-                let attack_idx = add_expr_to_graph(*attack, graph);
-                let release_idx = add_expr_to_graph(*release, graph);
-                let trig_idx = add_expr_to_graph(*trig, graph);
-                let ar_idx = graph.add_node(NodeKind::ar());
-
-                graph.connect_node(trig_idx, ar_idx);
-                graph.connect_node(release_idx, ar_idx);
-                graph.connect_node(attack_idx, ar_idx);
-
-                ar_idx
-            }
+            } => add_node(vec![attack, release, trig], NodeKind::ar(), graph),
             Expr::SVF {
                 cutoff,
                 resonance,
                 input,
-            } => {
-                let cutoff_idx = add_expr_to_graph(*cutoff, graph);
-                let resonance_idx = add_expr_to_graph(*resonance, graph);
-                let input_idx = add_expr_to_graph(*input, graph);
-                let svf_idx = graph.add_node(NodeKind::svf());
-
-                graph.connect_node(input_idx, svf_idx);
-                graph.connect_node(resonance_idx, svf_idx);
-                graph.connect_node(cutoff_idx, svf_idx);
-
-                svf_idx
-            }
+            } => add_node(vec![cutoff, resonance, input], NodeKind::svf(), graph),
             _ => panic!("Invalid expression"),
         }
     }
 
-    fn add_node(input: Box<Expr>, kind: NodeKind, graph: &mut AudioGraph) -> NodeIndex {
-        let input_idx = add_expr_to_graph(*input, graph);
+    fn add_node(inputs: Vec<Box<Expr>>, kind: NodeKind, graph: &mut AudioGraph) -> NodeIndex {
+        let mut input_indices: Vec<_> = inputs
+            .into_iter()
+            .map(|input| add_expr_to_graph(*input, graph))
+            .collect();
+
         let node_idx = graph.add_node(kind);
-        graph.connect_node(input_idx, node_idx);
+
+        // inputs need to be connected in reverse order
+        input_indices.reverse();
+
+        for &input_idx in &input_indices {
+            graph.connect_node(input_idx, node_idx);
+        }
+
         node_idx
     }
 
