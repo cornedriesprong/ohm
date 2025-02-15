@@ -3,21 +3,15 @@ use petgraph::prelude::StableDiGraph;
 use petgraph::visit::EdgeRef;
 
 use crate::nodes::*;
-use crate::parser::{Expr, OperatorType};
+use crate::parser::Expr;
 
-#[derive(Clone, Debug)]
-pub(crate) enum EdgeKind {
-    Audio,
-    Control,
-}
-
-type GraphType = StableDiGraph<Box<NodeKind>, EdgeKind>;
+type GraphType = StableDiGraph<Box<NodeKind>, ()>;
 
 pub(crate) struct AudioGraph {
     pub(crate) graph: GraphType,
     sorted_nodes: Vec<NodeIndex>,
+    inputs: Vec<f32>,
     outputs: Vec<f32>,
-    control_buffer: Vec<f32>,
 }
 
 impl AudioGraph {
@@ -25,8 +19,8 @@ impl AudioGraph {
         Self {
             graph: StableDiGraph::new(),
             sorted_nodes: Vec::new(),
+            inputs: Vec::new(),
             outputs: Vec::new(),
-            control_buffer: Vec::new(),
         }
     }
 
@@ -46,14 +40,28 @@ impl AudioGraph {
         self.update_processing_order();
     }
 
-    pub(crate) fn connect_generator(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph.add_edge(from.into(), to.into(), EdgeKind::Audio);
+    pub(crate) fn connect_node(&mut self, from: NodeIndex, to: NodeIndex) {
+        self.graph.add_edge(from.into(), to.into(), ());
         self.update_processing_order();
     }
 
-    pub(crate) fn connect_control(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph
-            .add_edge(from.into(), to.into(), EdgeKind::Control);
+    #[inline(always)]
+    pub(crate) fn tick(&mut self) -> f32 {
+        for &node_index in &self.sorted_nodes {
+            self.inputs.clear();
+
+            // TODO: make sure we don't allocate, maybe resize inputs vec on graph update
+            self.inputs.extend(
+                self.graph
+                    .edges_directed(node_index, petgraph::Direction::Incoming)
+                    .filter(|edge| matches!(edge.weight(), ()))
+                    .map(|edge| self.outputs[edge.source().index()]),
+            );
+
+            self.outputs[node_index.index()] = self.graph[node_index].tick(&self.inputs);
+        }
+
+        self.outputs[self.sorted_nodes.last().unwrap().index()]
     }
 
     pub fn reconnect_edges(&mut self, new: &AudioGraph) {
@@ -73,31 +81,6 @@ impl AudioGraph {
         self.update_processing_order();
     }
 
-    #[inline(always)]
-    pub(crate) fn tick(&mut self) -> f32 {
-        for &node_index in &self.sorted_nodes {
-            let audio_input = self
-                .graph
-                .edges_directed(node_index, petgraph::Direction::Incoming)
-                .filter(|edge| matches!(edge.weight(), EdgeKind::Audio))
-                .map(|edge| self.outputs[edge.source().index()])
-                .sum();
-
-            self.control_buffer.clear();
-            self.control_buffer.extend(
-                self.graph
-                    .edges_directed(node_index, petgraph::Direction::Incoming)
-                    .filter(|edge| matches!(edge.weight(), EdgeKind::Control))
-                    .map(|edge| self.outputs[edge.source().index()]),
-            );
-
-            self.outputs[node_index.index()] =
-                self.graph[node_index].tick(audio_input, &self.control_buffer);
-        }
-
-        self.outputs[self.sorted_nodes.last().unwrap().index()]
-    }
-
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
         self.outputs.resize(self.graph.node_count(), 0.0);
@@ -107,142 +90,71 @@ impl AudioGraph {
 pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
     let mut graph = AudioGraph::new();
 
-    fn connect_generator(
-        graph: &mut AudioGraph,
-        node: NodeKind,
-        input_node: NodeIndex,
-    ) -> NodeIndex {
-        let node_index = graph.add_node(node);
-        graph.connect_generator(input_node, node_index);
-        node_index
-    }
-
-    fn connect_control(graph: &mut AudioGraph, expr: &Expr, target_idx: NodeIndex) {
-        match expr {
-            Expr::Number(n) => {
-                let constant = NodeKind::Constant(Constant::new(*n));
-                let constant_index = graph.add_node(constant);
-                graph.connect_control(constant_index, target_idx);
-            }
-            Expr::Operator { .. } => {
-                let node = add_expr_to_graph(expr.clone(), graph);
-                graph.connect_control(node, target_idx);
-            }
-            Expr::List(list) => {
-                for &n in list {
-                    let constant = NodeKind::Constant(Constant::new(n));
-                    let constant_index = graph.add_node(constant);
-                    graph.connect_control(constant_index, target_idx);
-                }
-            }
-        }
-    }
-
     fn add_expr_to_graph(expr: Expr, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            Expr::Operator { kind, input, args } => {
-                let input_node = add_expr_to_graph(*input, graph);
-
-                use OperatorType as OT;
-                match kind {
-                    OT::Sine => {
-                        let node_idx = connect_generator(graph, NodeKind::sine(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Square => {
-                        let node_idx = connect_generator(graph, NodeKind::square(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Saw => {
-                        let node_idx = connect_generator(graph, NodeKind::saw(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Noise => {
-                        let node_idx = connect_generator(graph, NodeKind::noise(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Pulse => {
-                        let node_idx = connect_generator(graph, NodeKind::pulse(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Gain => {
-                        let node_idx = connect_generator(graph, NodeKind::gain(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Mix => {
-                        let node_idx = connect_generator(graph, NodeKind::mix(), input_node);
-                        if let Some(expr) = args.get(0) {
-                            connect_control(graph, expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::AR => {
-                        let node_idx = connect_generator(graph, NodeKind::ar(), input_node);
-                        // nb: notes need to be connected in reverse order
-                        if let Some(release_expr) = args.get(1) {
-                            connect_control(graph, release_expr, node_idx);
-                        }
-
-                        if let Some(attack_expr) = args.get(0) {
-                            connect_control(graph, attack_expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::SVF => {
-                        let node_idx = connect_generator(graph, NodeKind::svf(), input_node);
-
-                        if let Some(resonance_expr) = args.get(1) {
-                            connect_control(graph, resonance_expr, node_idx);
-                        }
-
-                        if let Some(cutoff_expr) = args.get(0) {
-                            connect_control(graph, cutoff_expr, node_idx);
-                        }
-
-                        node_idx
-                    }
-                    OT::Seq => args
-                        .get(0)
-                        .and_then(|expr| match expr {
-                            Expr::List(list) => Some(connect_generator(
-                                graph,
-                                NodeKind::seq(list.to_vec()),
-                                input_node,
-                            )),
-                            _ => None,
-                        })
-                        .expect("Seq operator requires a list of nodes"),
-                }
+            Expr::Constant(n) => graph.add_node(NodeKind::constant(n)),
+            Expr::Sine(input) => add_node(input, NodeKind::sine(), graph),
+            Expr::Square(input) => add_node(input, NodeKind::square(), graph),
+            Expr::Saw(input) => add_node(input, NodeKind::saw(), graph),
+            Expr::Pulse(input) => add_node(input, NodeKind::pulse(), graph),
+            Expr::Noise => graph.add_node(NodeKind::noise()),
+            Expr::Gain(input, mult) => {
+                let input_idx = add_expr_to_graph(*input, graph);
+                let mult_idx = add_expr_to_graph(*mult, graph);
+                let gain_idx = graph.add_node(NodeKind::gain());
+                graph.connect_node(input_idx, gain_idx);
+                graph.connect_node(mult_idx, gain_idx);
+                gain_idx
             }
-            Expr::Number(n) => graph.add_node(NodeKind::constant(n)),
+            Expr::Mix(a, b) => {
+                let a_idx = add_expr_to_graph(*a, graph);
+                let b_idx = add_expr_to_graph(*b, graph);
+                let mix_idx = graph.add_node(NodeKind::mix());
+                graph.connect_node(a_idx, mix_idx);
+                graph.connect_node(b_idx, mix_idx);
+                mix_idx
+            }
+            Expr::AR {
+                attack,
+                release,
+                trig,
+            } => {
+                let attack_idx = add_expr_to_graph(*attack, graph);
+                let release_idx = add_expr_to_graph(*release, graph);
+                let trig_idx = add_expr_to_graph(*trig, graph);
+                let ar_idx = graph.add_node(NodeKind::ar());
+
+                graph.connect_node(trig_idx, ar_idx);
+                graph.connect_node(release_idx, ar_idx);
+                graph.connect_node(attack_idx, ar_idx);
+
+                ar_idx
+            }
+            Expr::SVF {
+                cutoff,
+                resonance,
+                input,
+            } => {
+                let cutoff_idx = add_expr_to_graph(*cutoff, graph);
+                let resonance_idx = add_expr_to_graph(*resonance, graph);
+                let input_idx = add_expr_to_graph(*input, graph);
+                let svf_idx = graph.add_node(NodeKind::svf());
+
+                graph.connect_node(input_idx, svf_idx);
+                graph.connect_node(resonance_idx, svf_idx);
+                graph.connect_node(cutoff_idx, svf_idx);
+
+                svf_idx
+            }
             _ => panic!("Invalid expression"),
         }
+    }
+
+    fn add_node(input: Box<Expr>, kind: NodeKind, graph: &mut AudioGraph) -> NodeIndex {
+        let input_idx = add_expr_to_graph(*input, graph);
+        let node_idx = graph.add_node(kind);
+        graph.connect_node(input_idx, node_idx);
+        node_idx
     }
 
     add_expr_to_graph(expr, &mut graph);
@@ -311,11 +223,11 @@ mod tests {
 
         let const_idx1 = old.add_node(NodeKind::Constant(Constant::new(1.0)));
         let sine_idx1 = old.add_node(NodeKind::Sine(Sine::new()));
-        old.connect_generator(const_idx1, sine_idx1);
+        old.connect_node(const_idx1, sine_idx1);
 
         let const_idx2 = new.add_node(NodeKind::Constant(Constant::new(2.0))); // Same
         let sine_idx2 = new.add_node(NodeKind::Sine(Sine::new()));
-        new.connect_generator(const_idx2, sine_idx2);
+        new.connect_node(const_idx2, sine_idx2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
 
@@ -331,7 +243,7 @@ mod tests {
     #[test]
     fn test_node_tick() {
         let mut node = NodeKind::Constant(Constant::new(42.0));
-        assert_eq!(node.tick(0.0, &[]), 42.0);
+        assert_eq!(node.tick(&[]), 42.0);
     }
 
     fn create_complex_graph() -> AudioGraph {
@@ -350,13 +262,13 @@ mod tests {
         let filter = graph.add_node(NodeKind::SVF(SVF::new()));
 
         // Connect everything
-        graph.connect_generator(freq, osc);
-        graph.connect_generator(amp, gain);
-        graph.connect_generator(osc, gain);
-        graph.connect_generator(env, gain);
-        graph.connect_generator(gain, filter);
-        graph.connect_generator(cutoff, filter);
-        graph.connect_generator(resonance, filter);
+        graph.connect_node(freq, osc);
+        graph.connect_node(amp, gain);
+        graph.connect_node(osc, gain);
+        graph.connect_node(env, gain);
+        graph.connect_node(gain, filter);
+        graph.connect_node(cutoff, filter);
+        graph.connect_node(resonance, filter);
 
         graph
     }
@@ -368,11 +280,11 @@ mod tests {
 
         let const_idx1 = old.add_node(NodeKind::Constant(Constant::new(1.0)));
         let sine_idx1 = old.add_node(NodeKind::Sine(Sine::new()));
-        old.connect_generator(const_idx1, sine_idx1);
+        old.connect_node(const_idx1, sine_idx1);
 
         let const_idx2 = new.add_node(NodeKind::Constant(Constant::new(2.0)));
         let sine_idx2 = new.add_node(NodeKind::Sine(Sine::new()));
-        new.connect_generator(const_idx2, sine_idx2);
+        new.connect_node(const_idx2, sine_idx2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
         assert_eq!(updates.len(), 1, "Should have one update");
@@ -388,12 +300,12 @@ mod tests {
         // Create original graph with Sine
         let freq1 = old.add_node(NodeKind::constant(440.0));
         let osc1 = old.add_node(NodeKind::sine());
-        old.connect_generator(freq1, osc1);
+        old.connect_node(freq1, osc1);
 
         // Create new graph with Square
         let freq2 = new.add_node(NodeKind::Constant(Constant::new(440.0)));
         let osc2 = new.add_node(NodeKind::Square(Square::new()));
-        new.connect_generator(freq2, osc2);
+        new.connect_node(freq2, osc2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
         assert_eq!(updates.len(), 1, "Should update oscillator type");
@@ -409,16 +321,16 @@ mod tests {
         // Original simple oscillator
         let freq1 = old.add_node(NodeKind::Constant(Constant::new(440.0)));
         let osc1 = old.add_node(NodeKind::Sine(Sine::new()));
-        old.connect_generator(freq1, osc1);
+        old.connect_node(freq1, osc1);
 
         // New graph with added filter
         let freq2 = new.add_node(NodeKind::Constant(Constant::new(440.0)));
         let osc2 = new.add_node(NodeKind::Sine(Sine::new()));
         let cutoff = new.add_node(NodeKind::Constant(Constant::new(1000.0)));
         let filter = new.add_node(NodeKind::SVF(SVF::new()));
-        new.connect_generator(freq2, osc2);
-        new.connect_generator(osc2, filter);
-        new.connect_generator(cutoff, filter);
+        new.connect_node(freq2, osc2);
+        new.connect_node(osc2, filter);
+        new.connect_node(cutoff, filter);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
         assert!(updates.is_empty(), "No updates expected");
@@ -447,10 +359,10 @@ mod tests {
         let mix = new.add_node(NodeKind::Mix(Mix::new()));
 
         // Connect new components
-        new.connect_generator(new_freq, new_osc);
-        new.connect_generator(seq_amp, seq);
-        new.connect_generator(seq, mix);
-        new.connect_generator(noise, mix);
+        new.connect_node(new_freq, new_osc);
+        new.connect_node(seq_amp, seq);
+        new.connect_node(seq, mix);
+        new.connect_node(noise, mix);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
 
@@ -489,7 +401,7 @@ mod tests {
         // Create simplified version with just oscillator
         let freq = new.add_node(NodeKind::Constant(Constant::new(440.0)));
         let osc = new.add_node(NodeKind::Sine(Sine::new()));
-        new.connect_generator(freq, osc);
+        new.connect_node(freq, osc);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
 

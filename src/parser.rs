@@ -1,51 +1,48 @@
 use koto::{derive::*, prelude::*, runtime::Result};
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum OperatorType {
-    Sine,
-    Square,
-    Saw,
-    Noise,
-    Pulse,
-    Mix,
-    Gain,
-    AR,
-    SVF,
-    Seq,
-}
+type Signal = Box<Expr>;
 
-// TODO: number can also be an operator
 #[derive(Debug, Clone, KotoType, KotoCopy)]
 pub(crate) enum Expr {
-    Operator {
-        kind: OperatorType,
-        input: Box<Expr>,
-        args: Vec<Expr>,
+    Constant(f32),
+    Sine(Signal),
+    Square(Signal),
+    Saw(Signal),
+    Pulse(Signal),
+    Noise,
+    Mix(Signal, Signal),
+    Gain(Signal, Signal),
+    AR {
+        trig: Signal,
+        attack: Signal,
+        release: Signal,
     },
-    List(Vec<f32>),
-    Number(f32),
+    SVF {
+        cutoff: Signal,
+        resonance: Signal,
+        input: Signal,
+    },
+    Seq {
+        seq: Vec<f32>,
+        trig: Signal,
+    },
 }
 
 impl KotoObject for Expr {
+    // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Number(value), KValue::Number(num)) => {
-                Ok(KValue::Number((value + f32::from(num)).into()))
-            }
-            (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Mix,
-                    input: Box::new(self.clone()),
-                    args: vec![Expr::Number(num.into())],
-                }
-                .into(),
+            (Self::Constant(value), KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Constant(value + f32::from(num)).into(),
             )),
-            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Mix,
-                    input: Box::new(self.clone()),
-                    args: vec![obj.cast::<Expr>()?.clone()],
-                }
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Mix(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Mix(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<Expr>()?.clone()),
+                )
                 .into(),
             )),
             _ => panic!("invalid add operation"),
@@ -54,23 +51,17 @@ impl KotoObject for Expr {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Number(value), KValue::Number(num)) => {
-                Ok(KValue::Number((value * f32::from(num)).into()))
-            }
-            (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Gain,
-                    input: Box::new(self.clone()),
-                    args: vec![Expr::Number(num.into())],
-                }
-                .into(),
+            (Self::Constant(value), KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Constant(value * f32::from(num)).into(),
             )),
-            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Gain,
-                    input: Box::new(self.clone()),
-                    args: vec![obj.cast::<Expr>()?.clone()],
-                }
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Gain(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Gain(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<Expr>()?.clone()),
+                )
                 .into(),
             )),
             _ => panic!("invalid multiply operation"),
@@ -79,24 +70,21 @@ impl KotoObject for Expr {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Number(value), KValue::Number(num)) => {
-                Ok(KValue::Number((value - f32::from(num)).into()))
-            }
-            (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Mix,
-                    input: Box::new(self.clone()),
-                    args: vec![Expr::Number((-f32::from(num)).into())],
-                }
+            (Self::Constant(value), KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Constant(value - f32::from(num)).into(),
+            )),
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Mix(
+                    Box::new(self.clone()),
+                    Box::new(Expr::Constant((-num).into())),
+                )
                 .into(),
             )),
-            // TODO: handle case where rhs is an operator
-            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Mix,
-                    input: Box::new(self.clone()),
-                    args: vec![obj.cast::<Expr>()?.clone()],
-                }
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Mix(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<Expr>()?.clone()),
+                )
                 .into(),
             )),
             _ => panic!("invalid subtract operation"),
@@ -105,23 +93,17 @@ impl KotoObject for Expr {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Number(value), KValue::Number(num)) => {
-                Ok(KValue::Number((value / f32::from(num)).into()))
-            }
-            (Self::Operator { .. }, KValue::Number(num)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Gain,
-                    input: Box::new(self.clone()),
-                    args: vec![Expr::Number((1.0 / f32::from(num)).into())],
-                }
-                .into(),
+            (Self::Constant(value), KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Constant(value / f32::from(num)).into(),
             )),
-            (Self::Operator { .. }, KValue::Object(obj)) => Ok(KValue::Object(
-                Expr::Operator {
-                    kind: OperatorType::Gain,
-                    input: Box::new(self.clone()),
-                    args: vec![obj.cast::<Expr>()?.clone()],
-                }
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                Expr::Gain(Box::new(self.clone()), Box::new(Expr::Constant(num.into()))).into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                Expr::Gain(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<Expr>()?.clone()),
+                )
                 .into(),
             )),
             _ => panic!("invalid divide operation"),
@@ -132,5 +114,16 @@ impl KotoObject for Expr {
 impl KotoEntries for Expr {
     fn entries(&self) -> Option<KMap> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_addition() {
+        let expr = Expr::Constant(1.0);
+        let result = expr.add(&KValue::Number(2.0.into())).unwrap();
     }
 }

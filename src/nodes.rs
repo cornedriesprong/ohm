@@ -70,19 +70,19 @@ impl NodeKind {
 
 impl Node for NodeKind {
     #[inline(always)]
-    fn tick(&mut self, input: f32, args: &[f32]) -> f32 {
+    fn tick(&mut self, args: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant(node) => node.tick(input, args),
-            NodeKind::Sine(node) => node.tick(input, args),
-            NodeKind::Square(node) => node.tick(input, args),
-            NodeKind::Saw(node) => node.tick(input, args),
-            NodeKind::Noise(node) => node.tick(input, args),
-            NodeKind::Pulse(node) => node.tick(input, args),
-            NodeKind::Gain(node) => node.tick(input, args),
-            NodeKind::Mix(node) => node.tick(input, args),
-            NodeKind::AR(node) => node.tick(input, args),
-            NodeKind::SVF(node) => node.tick(input, args),
-            NodeKind::Seq(node) => node.tick(input, args),
+            NodeKind::Constant(node) => node.tick(args),
+            NodeKind::Sine(node) => node.tick(args),
+            NodeKind::Square(node) => node.tick(args),
+            NodeKind::Saw(node) => node.tick(args),
+            NodeKind::Noise(node) => node.tick(args),
+            NodeKind::Pulse(node) => node.tick(args),
+            NodeKind::Gain(node) => node.tick(args),
+            NodeKind::Mix(node) => node.tick(args),
+            NodeKind::AR(node) => node.tick(args),
+            NodeKind::SVF(node) => node.tick(args),
+            NodeKind::Seq(node) => node.tick(args),
         }
     }
 }
@@ -125,7 +125,7 @@ impl Debug for NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
-    fn tick(&mut self, input: f32, args: &[f32]) -> f32;
+    fn tick(&mut self, inputs: &[f32]) -> f32;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +141,7 @@ impl Constant {
 
 impl Node for Constant {
     #[inline(always)]
-    fn tick(&mut self, _: f32, _: &[f32]) -> f32 {
+    fn tick(&mut self, _: &[f32]) -> f32 {
         self.value
     }
 }
@@ -159,8 +159,9 @@ impl Sine {
 
 impl Node for Sine {
     #[inline(always)]
-    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
-        let reset_phase = args.first().unwrap_or(&0.0);
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let hz = args.get(0).unwrap_or(&0.0);
+        let reset_phase = args.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -186,9 +187,10 @@ impl Square {
 }
 
 impl Node for Square {
-    #[inline]
-    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
-        let reset_phase = args.first().unwrap_or(&0.0);
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let hz = args.get(0).unwrap_or(&0.0);
+        let reset_phase = args.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -237,6 +239,7 @@ impl Saw {
         }
     }
 
+    #[inline(always)]
     fn next_sample(&mut self) -> f32 {
         let y;
         self.phase += self.inc;
@@ -277,9 +280,10 @@ impl Saw {
 }
 
 impl Node for Saw {
-    #[inline]
-    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
-        let reset_phase = args.first().unwrap_or(&0.0);
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let hz = args.get(0).unwrap_or(&0.0);
+        let reset_phase = args.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -305,8 +309,8 @@ impl Noise {
 }
 
 impl Node for Noise {
-    #[inline]
-    fn tick(&mut self, _: f32, _: &[f32]) -> f32 {
+    #[inline(always)]
+    fn tick(&mut self, _: &[f32]) -> f32 {
         self.rng.lock().unwrap().gen::<f32>() * 2. - 1.
     }
 }
@@ -327,9 +331,10 @@ impl Pulse {
 }
 
 impl Node for Pulse {
-    #[inline]
-    fn tick(&mut self, hz: f32, args: &[f32]) -> f32 {
-        let reset_phase = args.first().unwrap_or(&0.0);
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let hz = args.get(0).unwrap_or(&0.0);
+        let reset_phase = args.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -356,9 +361,10 @@ impl Gain {
 }
 
 impl Node for Gain {
-    #[inline]
-    fn tick(&mut self, a: f32, args: &[f32]) -> f32 {
-        let b = args.first().expect("Mix node requires control input");
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let a = args.get(0).unwrap_or(&0.0);
+        let b = args.get(1).unwrap_or(&a);
         a * b
     }
 }
@@ -373,9 +379,10 @@ impl Mix {
 }
 
 impl Node for Mix {
-    #[inline]
-    fn tick(&mut self, a: f32, args: &[f32]) -> f32 {
-        let b = args.first().expect("Mix node requires control input");
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let a = args.get(0).unwrap_or(&0.0);
+        let b = args.get(1).unwrap_or(&a);
         a + b
     }
 }
@@ -413,12 +420,13 @@ impl AR {
 }
 
 impl Node for AR {
-    #[inline]
-    fn tick(&mut self, trig: f32, args: &[f32]) -> f32 {
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
         let attack = args.get(0).unwrap_or(&1.0);
         let release = args.get(1).unwrap_or(&1.0);
+        let trig = args.get(2).unwrap_or(&1.0);
 
-        if trig > 0.0 {
+        if *trig > 0.0 {
             self.state = EnvelopeState::Attack;
         }
 
@@ -472,13 +480,13 @@ pub struct SVF {
     a3: f32,
     ic1eq: f32,
     ic2eq: f32,
-    sample_rate: f32,
-    pub mode: SVFMode,
+    mode: SVFMode,
+    set: bool,
 }
 
 impl SVF {
     pub fn new() -> SVF {
-        Self {
+        let mut svf = Self {
             g: 0.0,
             k: 0.0,
             a1: 0.0,
@@ -486,9 +494,11 @@ impl SVF {
             a3: 0.0,
             ic1eq: 0.0,
             ic2eq: 0.0,
-            sample_rate: SAMPLE_RATE,
             mode: SVFMode::Lowpass,
-        }
+            set: false,
+        };
+        svf.update_coefficients();
+        svf
     }
 
     #[inline]
@@ -500,11 +510,12 @@ impl SVF {
 }
 
 impl Node for SVF {
-    #[inline]
-    fn tick(&mut self, input: f32, args: &[f32]) -> f32 {
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
         let cutoff = args.get(0).unwrap_or(&1.0);
-        self.g = (std::f32::consts::PI * cutoff / self.sample_rate).tan();
+        self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
         let resonance = args.get(1).unwrap_or(&1.0);
+        let input = args.get(2).unwrap_or(&0.0);
         self.k = 1.0 / resonance;
         self.update_coefficients();
 
@@ -542,9 +553,10 @@ impl Seq {
 }
 
 impl Node for Seq {
-    #[inline]
-    fn tick(&mut self, trig: f32, _: &[f32]) -> f32 {
-        if trig > 0.0 {
+    #[inline(always)]
+    fn tick(&mut self, args: &[f32]) -> f32 {
+        let trig = args.get(0).unwrap_or(&0.0);
+        if *trig > 0.0 {
             self.increment();
         }
 

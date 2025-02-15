@@ -146,12 +146,16 @@ where
 
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
-    koto.prelude().add_fn("sine", add_fn(OperatorType::Sine));
     koto.prelude()
-        .add_fn("square", add_fn(OperatorType::Square));
-    koto.prelude().add_fn("saw", add_fn(OperatorType::Saw));
-    koto.prelude().add_fn("pulse", add_fn(OperatorType::Pulse));
-    koto.prelude().add_fn("noise", add_noise_fn());
+        .add_fn("sine", make_expr_node(|hz| Expr::Sine(Box::new(hz))));
+    koto.prelude()
+        .add_fn("square", make_expr_node(|hz| Expr::Square(Box::new(hz))));
+    koto.prelude()
+        .add_fn("saw", make_expr_node(|hz| Expr::Saw(Box::new(hz))));
+    koto.prelude()
+        .add_fn("pulse", make_expr_node(|hz| Expr::Pulse(Box::new(hz))));
+    koto.prelude()
+        .add_fn("noise", make_expr_node(|_| Expr::Noise));
     koto.prelude().add_fn("ar", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
@@ -163,10 +167,10 @@ fn create_env(koto: &Koto) {
         let trig = expr_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::AR,
-                input: Box::new(trig),
-                args: vec![attack, release],
+            Expr::AR {
+                attack: Box::new(attack),
+                release: Box::new(release),
+                trig: Box::new(trig),
             }
             .into(),
         ))
@@ -182,10 +186,10 @@ fn create_env(koto: &Koto) {
         let input = expr_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::SVF,
+            Expr::SVF {
+                cutoff: Box::new(cutoff),
+                resonance: Box::new(resonance),
                 input: Box::new(input),
-                args: vec![cutoff, resonance],
             }
             .into(),
         ))
@@ -196,75 +200,46 @@ fn create_env(koto: &Koto) {
             return unexpected_args("2 arguments: list, trig", args);
         }
 
-        let list = expr_from_kvalue(&args[0])?;
-        let trig = expr_from_kvalue(&args[1])?;
+        let vec: Vec<_> = if let KValue::List(list) = &args[0] {
+            list.data()
+                .iter()
+                .map(|v| {
+                    if let KValue::Number(n) = v {
+                        Ok((*n).into())
+                    } else {
+                        unexpected_type("number", v)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            unexpected_type("list", &args[0])?
+        };
 
         Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::Seq,
-                input: Box::new(trig),
-                args: vec![list],
+            Expr::Seq {
+                seq: vec,
+                trig: Box::new(expr_from_kvalue(&args[1])?),
             }
             .into(),
         ))
     });
 }
 
-// TODO: define separate function for noise operator, which doesn't take any arguments
-fn add_fn(op_type: OperatorType) -> impl KotoFunction {
+fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
+where
+    F: Fn(Expr) -> Expr + 'static,
+{
     move |ctx| {
-        let args = ctx.args();
-        let (hz, op_args) = match args.len() {
-            0 => (Expr::Number(440.0), vec![]),
-            1 => (expr_from_kvalue(&args[0])?, vec![]),
-            2 => {
-                let input = expr_from_kvalue(&args[0])?;
-                let reset_phase = expr_from_kvalue(&args[1])?;
-                (input, vec![reset_phase])
-            }
-            _ => return unexpected_args("zero, one, or two arguments", &args),
-        };
-
-        Ok(KValue::Object(
-            Expr::Operator {
-                kind: op_type,
-                input: Box::new(hz),
-                args: op_args,
-            }
-            .into(),
-        ))
-    }
-}
-
-fn add_noise_fn() -> impl KotoFunction {
-    move |ctx| match ctx.args() {
-        [] => Ok(KValue::Object(
-            Expr::Operator {
-                kind: OperatorType::Noise,
-                input: Box::new(Expr::Number(0.)), // TODO: fix
-                args: vec![],
-            }
-            .into(),
-        )),
-        unexpected => unexpected_args("no arguments", &unexpected),
+        // For now, we expect exactly one argument.
+        let arg = expr_from_kvalue(&ctx.args()[0])?;
+        Ok(KValue::Object(node_constructor(arg).into()))
     }
 }
 
 fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::runtime::Error> {
     match value {
-        KValue::Number(n) => Ok(Expr::Number(n.into())),
+        KValue::Number(n) => Ok(Expr::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<Expr>() => Ok(obj.cast::<Expr>()?.to_owned()),
-        KValue::List(list) => {
-            let vec: Result<Vec<f32>, _> = list
-                .data()
-                .iter()
-                .map(|v| match v {
-                    KValue::Number(n) => Ok((*n).into()),
-                    _ => unexpected_type("number", v),
-                })
-                .collect();
-            Ok(Expr::List(vec?))
-        }
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
 }
