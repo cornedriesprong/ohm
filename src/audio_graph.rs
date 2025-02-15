@@ -182,6 +182,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_parse_graph_1() {
+        // 440
+        let expr = Expr::Constant(440.0);
+
+        let mut graph = parse_to_audio_graph(expr);
+
+        assert_eq!(graph.graph.node_count(), 1);
+        assert_eq!(graph.graph.edge_count(), 0);
+        assert_eq!(graph.tick(), 440.0);
+    }
+
+    #[test]
+    fn test_parse_graph_2() {
+        // sine(440)
+        let expr = Expr::Sine {
+            freq: Box::new(Expr::Constant(440.0)),
+        };
+
+        let mut graph = parse_to_audio_graph(expr);
+
+        assert_eq!(graph.graph.node_count(), 2);
+        assert_eq!(graph.graph.edge_count(), 1);
+        assert_eq!(graph.tick(), 0.0);
+    }
+
+    #[test]
+    fn test_parse_graph_3() {
+        // sine((sine(0.1) + 2) * 100) * 0.2
+        let expr = Expr::Gain {
+            lhs: Box::new(Expr::Sine {
+                freq: Box::new(Expr::Gain {
+                    lhs: Box::new(Expr::Mix {
+                        lhs: Box::new(Expr::Sine {
+                            freq: Box::new(Expr::Constant(0.1)),
+                        }),
+                        rhs: Box::new(Expr::Constant(2.0)),
+                    }),
+                    rhs: Box::new(Expr::Constant(100.0)),
+                }),
+            }),
+            rhs: Box::new(Expr::Constant(0.2)),
+        };
+
+        let mut graph = parse_to_audio_graph(expr);
+
+        assert_eq!(graph.graph.node_count(), 9);
+        assert_eq!(graph.graph.edge_count(), 8);
+        assert_eq!(graph.tick(), 0.0);
+    }
+
+    #[test]
     fn test_node_comparison() {
         let node1 = NodeKind::Constant(Constant::new(1.0));
         let node2 = NodeKind::Constant(Constant::new(1.0));
