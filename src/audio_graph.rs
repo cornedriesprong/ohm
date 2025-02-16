@@ -149,7 +149,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
                 resonance,
                 input,
             } => add_node(vec![cutoff, resonance, input], NodeKind::svf(), graph),
-            _ => panic!("Invalid expression"),
+            Expr::Seq { seq, trig } => add_node(vec![trig], NodeKind::seq(seq), graph),
         }
     }
 
