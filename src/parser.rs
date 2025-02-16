@@ -19,12 +19,12 @@ pub(crate) enum Expr {
     },
     Noise,
     Mix {
-        a: Signal,
-        b: Signal,
+        lhs: Signal,
+        rhs: Signal,
     },
     Gain {
-        a: Signal,
-        b: Signal,
+        lhs: Signal,
+        rhs: Signal,
     },
     AR {
         trig: Signal,
@@ -51,15 +51,15 @@ impl KotoObject for Expr {
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Mix {
-                    a: Box::new(self.clone()),
-                    b: Box::new(Expr::Constant(num.into())).into(),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(Expr::Constant(num.into())).into(),
                 }
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Mix {
-                    a: Box::new(self.clone()),
-                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<Expr>()?.clone()),
                 }
                 .into(),
             )),
@@ -74,15 +74,15 @@ impl KotoObject for Expr {
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Gain {
-                    a: Box::new(self.clone()),
-                    b: Box::new(Expr::Constant((num).into())),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(Expr::Constant((num).into())),
                 }
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Gain {
-                    a: Box::new(self.clone()),
-                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<Expr>()?.clone()),
                 }
                 .into(),
             )),
@@ -97,15 +97,15 @@ impl KotoObject for Expr {
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Mix {
-                    a: Box::new(self.clone()),
-                    b: Box::new(Expr::Constant((-num).into())),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(Expr::Constant((-num).into())),
                 }
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Mix {
-                    a: Box::new(self.clone()),
-                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<Expr>()?.clone()),
                 }
                 .into(),
             )),
@@ -120,15 +120,15 @@ impl KotoObject for Expr {
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 Expr::Gain {
-                    a: Box::new(self.clone()),
-                    b: Box::new(Expr::Constant(num.into())),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(Expr::Constant(num.into())),
                 }
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 Expr::Gain {
-                    a: Box::new(self.clone()),
-                    b: Box::new(obj.cast::<Expr>()?.clone()),
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<Expr>()?.clone()),
                 }
                 .into(),
             )),

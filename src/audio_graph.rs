@@ -1,6 +1,9 @@
 use petgraph::graph::NodeIndex;
 use petgraph::prelude::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::IntoEdgeReferences;
+use std::collections::HashSet;
+use std::fmt;
 
 use crate::nodes::*;
 use crate::parser::Expr;
@@ -65,17 +68,22 @@ impl AudioGraph {
     }
 
     pub fn reconnect_edges(&mut self, new: &AudioGraph) {
-        self.graph.clear_edges();
+        let old_edges: HashSet<_> = self.graph.edge_indices().collect();
+        let new_edges: HashSet<_> = new.graph.edge_indices().collect();
 
-        // Copy all edges from the new graph configuration
-        for edge_idx in new.graph.edge_indices() {
-            if let Some((source, target)) = new.graph.edge_endpoints(edge_idx) {
-                // Only add edge if both nodes exist in our graph
-                if self.graph.contains_node(source) && self.graph.contains_node(target) {
-                    let edge_weight = new.graph.edge_weight(edge_idx).unwrap();
-                    self.graph.add_edge(source, target, edge_weight.clone());
-                }
+        for edge in old_edges.difference(&new_edges) {
+            self.graph.remove_edge(*edge);
+        }
+
+        for edge in new.graph.edge_references() {
+            let (source, target) = (edge.source(), edge.target());
+            if !self.graph.contains_edge(source, target) {
+                self.graph.add_edge(source, target, edge.weight().clone());
             }
+        }
+
+        for edge in old_edges.difference(&new_edges) {
+            self.graph.remove_edge(*edge);
         }
 
         self.update_processing_order();
@@ -84,6 +92,37 @@ impl AudioGraph {
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
         self.outputs.resize(self.graph.node_count(), 0.0);
+    }
+}
+
+impl fmt::Debug for AudioGraph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // print out the graph in DOT format so we can visualize it with Graphviz
+        writeln!(f, "digraph AudioGraph {{")?;
+        writeln!(f, "  rankdir=LR;")?;
+        writeln!(f, "  node [shape=circle style=filled];\n")?;
+
+        // nodes
+        for (order, &node) in self.sorted_nodes.iter().enumerate() {
+            writeln!(
+                f,
+                "  n{} [label=\"{} ({})\"];",
+                node.index(),
+                node.index(),
+                order
+            )?;
+        }
+
+        // edges
+        for edge in self.graph.edge_references() {
+            writeln!(
+                f,
+                "  n{} -> n{};",
+                edge.source().index(),
+                edge.target().index()
+            )?;
+        }
+        write!(f, "}}")
     }
 }
 
@@ -98,8 +137,8 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
             Expr::Saw { freq } => add_node(vec![freq], NodeKind::saw(), graph),
             Expr::Pulse { freq } => add_node(vec![freq], NodeKind::pulse(), graph),
             Expr::Noise => graph.add_node(NodeKind::noise()),
-            Expr::Gain { a, b } => add_node(vec![a, b], NodeKind::gain(), graph),
-            Expr::Mix { a, b } => add_node(vec![a, b], NodeKind::mix(), graph),
+            Expr::Gain { lhs: a, rhs: b } => add_node(vec![a, b], NodeKind::gain(), graph),
+            Expr::Mix { lhs: a, rhs: b } => add_node(vec![a, b], NodeKind::mix(), graph),
             Expr::AR {
                 attack,
                 release,

@@ -85,10 +85,7 @@ where
                         // apply a diff between the old and new graphs to avoid
                         // discontinuities in the audio
                         let (update, add, remove) = diff_graph(&old, &new);
-                        println!("--------------");
-                        println!("update: {:?}", update);
-                        println!("add: {:?}", add);
-                        println!("remove: {:?}", remove);
+                        old.graph.clear_edges();
 
                         for (id, node) in update {
                             old.replace_node(id, node);
@@ -105,7 +102,6 @@ where
                         old.reconnect_edges(&new);
                     } else {
                         // first time creating the graph, no diff needed
-                        println!("new graph");
                         *guard = Some(new);
                     }
 
