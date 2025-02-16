@@ -1,6 +1,6 @@
 lfo1 = sine(0.1)
-lfo2 = sine(0.12)
-sig = sine((lfo1 * 200) + 100) + sine((lfo2 * 500) + 200) + (noise() * (sine(0.2) * 0.4))
+lfo2 = sine(0.52)
+sig = sine((lfo1 * 2900) + 100) + sine((lfo2 * 500) + 200) + (noise() * (sine(0.2) * 0.4))
 trig = pulse((sine(0.09) * 2) + 5)
 sig * ar(trig, 1, (sine(0.25) * 5000) + 8000)
 
@@ -10,3 +10,4 @@ sig * ar(trig, 1, (sine(0.25) * 5000) + 8000)
 # ar(trig, 10, 10000, sine(sine(0.2) * 1000))
 
 # sine(110) + sine(220) + sine(330) + sine(660) + sine(990)
+# sine(200)

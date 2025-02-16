@@ -7,16 +7,20 @@ use std::sync::{Arc, Mutex};
 
 pub const SAMPLE_RATE: f32 = 44100.;
 
-#[derive(Clone)]
+pub(crate) trait Node: Send + Sync {
+    fn tick(&mut self) -> f32;
+}
+
+// #[derive(Clone)]
 pub(crate) enum NodeKind {
     Constant(Constant),
+    Gain(Gain),
+    Mix(Mix),
     Sine(Sine),
     Square(Square),
     Saw(Saw),
     Noise(Noise),
     Pulse(Pulse),
-    Gain(Gain),
-    Mix(Mix),
     AR(AR),
     SVF(SVF),
     Seq(Seq),
@@ -27,62 +31,66 @@ impl NodeKind {
         NodeKind::Constant(Constant::new(value))
     }
 
-    pub(crate) fn sine() -> Self {
-        NodeKind::Sine(Sine::new())
+    pub(crate) fn gain(lhs: Box<dyn Node>, rhs: Box<dyn Node>) -> Self {
+        NodeKind::Gain(Gain::new(lhs, rhs))
     }
 
-    pub(crate) fn square() -> Self {
-        NodeKind::Square(Square::new())
+    pub(crate) fn mix(lhs: Box<dyn Node>, rhs: Box<dyn Node>) -> Self {
+        NodeKind::Mix(Mix::new(lhs, rhs))
     }
 
-    pub(crate) fn saw() -> Self {
-        NodeKind::Saw(Saw::new())
+    pub(crate) fn sine(freq: Box<dyn Node>) -> Self {
+        NodeKind::Sine(Sine::new(freq))
+    }
+
+    pub(crate) fn square(freq: Box<dyn Node>) -> Self {
+        NodeKind::Square(Square::new(freq))
+    }
+
+    pub(crate) fn saw(freq: Box<dyn Node>) -> Self {
+        NodeKind::Saw(Saw::new(freq))
     }
 
     pub(crate) fn noise() -> Self {
         NodeKind::Noise(Noise::new())
     }
 
-    pub(crate) fn pulse() -> Self {
-        NodeKind::Pulse(Pulse::new())
+    pub(crate) fn pulse(freq: Box<dyn Node>) -> Self {
+        NodeKind::Pulse(Pulse::new(freq))
     }
 
-    pub(crate) fn gain() -> Self {
-        NodeKind::Gain(Gain::new())
+    pub(crate) fn ar(attack: Box<dyn Node>, release: Box<dyn Node>, trig: Box<dyn Node>) -> Self {
+        NodeKind::AR(AR::new(attack, release, trig))
     }
 
-    pub(crate) fn mix() -> Self {
-        NodeKind::Mix(Mix::new())
+    pub(crate) fn svf(
+        cutoff: Box<dyn Node>,
+        resonance: Box<dyn Node>,
+        input: Box<dyn Node>,
+    ) -> Self {
+        NodeKind::SVF(SVF::new(cutoff, resonance, input))
     }
 
-    pub(crate) fn ar() -> Self {
-        NodeKind::AR(AR::new())
-    }
-
-    pub(crate) fn svf() -> Self {
-        NodeKind::SVF(SVF::new())
-    }
-
-    pub(crate) fn seq(values: Vec<f32>) -> Self {
-        NodeKind::Seq(Seq::new(values))
+    pub(crate) fn seq(values: Vec<f32>, trig: Box<dyn Node>) -> Self {
+        NodeKind::Seq(Seq::new(values, trig))
     }
 }
 
 impl Node for NodeKind {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
+    fn tick(&mut self) -> f32 {
         match self {
-            NodeKind::Constant(node) => node.tick(args),
-            NodeKind::Sine(node) => node.tick(args),
-            NodeKind::Square(node) => node.tick(args),
-            NodeKind::Saw(node) => node.tick(args),
-            NodeKind::Noise(node) => node.tick(args),
-            NodeKind::Pulse(node) => node.tick(args),
-            NodeKind::Gain(node) => node.tick(args),
-            NodeKind::Mix(node) => node.tick(args),
-            NodeKind::AR(node) => node.tick(args),
-            NodeKind::SVF(node) => node.tick(args),
-            NodeKind::Seq(node) => node.tick(args),
+            NodeKind::Constant(node) => node.tick(),
+            NodeKind::Sine(node) => node.tick(),
+            NodeKind::Gain(node) => node.tick(),
+            NodeKind::Mix(node) => node.tick(),
+            NodeKind::Square(node) => node.tick(),
+            NodeKind::Saw(node) => node.tick(),
+            NodeKind::Noise(node) => node.tick(),
+            NodeKind::Pulse(node) => node.tick(),
+            NodeKind::AR(node) => node.tick(),
+            NodeKind::SVF(node) => node.tick(),
+            NodeKind::Seq(node) => node.tick(),
         }
     }
 }
@@ -91,14 +99,14 @@ impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (NodeKind::Constant(a), NodeKind::Constant(b)) => a.value == b.value,
+            (NodeKind::Mix(_), NodeKind::Mix(_)) => true,
+            (NodeKind::Gain(_), NodeKind::Gain(_)) => true,
             (NodeKind::Sine(_), NodeKind::Sine(_)) => true,
+            (NodeKind::AR(_), NodeKind::AR(_)) => true,
             (NodeKind::Square(_), NodeKind::Square(_)) => true,
             (NodeKind::Saw(_), NodeKind::Saw(_)) => true,
             (NodeKind::Noise(_), NodeKind::Noise(_)) => true,
             (NodeKind::Pulse(_), NodeKind::Pulse(_)) => true,
-            (NodeKind::Gain(_), NodeKind::Gain(_)) => true,
-            (NodeKind::Mix(_), NodeKind::Mix(_)) => true,
-            (NodeKind::AR(_), NodeKind::AR(_)) => true,
             (NodeKind::SVF(_), NodeKind::SVF(_)) => true,
             (NodeKind::Seq(a), NodeKind::Seq(b)) => a.values == b.values,
             _ => false,
@@ -110,13 +118,13 @@ impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             NodeKind::Constant(c) => write!(f, "Constant({})", c.value),
+            NodeKind::Gain(_) => write!(f, "Gain"),
+            NodeKind::Mix(_) => write!(f, "Mix"),
             NodeKind::Sine(_) => write!(f, "Sine"),
             NodeKind::Square(_) => write!(f, "Square"),
             NodeKind::Saw(_) => write!(f, "Saw"),
             NodeKind::Noise(_) => write!(f, "Noise"),
             NodeKind::Pulse(_) => write!(f, "Pulse"),
-            NodeKind::Gain(_) => write!(f, "Gain"),
-            NodeKind::Mix(_) => write!(f, "Mix"),
             NodeKind::AR(_) => write!(f, "AR"),
             NodeKind::SVF(_) => write!(f, "SVF"),
             NodeKind::Seq(_) => write!(f, "Seq"),
@@ -124,11 +132,43 @@ impl Debug for NodeKind {
     }
 }
 
-pub(crate) trait Node: Send + Sync {
-    fn tick(&mut self, inputs: &[f32]) -> f32;
+// #[derive(Clone)]
+pub(crate) struct Gain {
+    lhs: Box<dyn Node>,
+    rhs: Box<dyn Node>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl Gain {
+    pub(crate) fn new(lhs: Box<dyn Node>, rhs: Box<dyn Node>) -> Self {
+        Self { lhs, rhs }
+    }
+}
+
+impl Node for Gain {
+    #[inline(always)]
+    fn tick(&mut self) -> f32 {
+        self.lhs.tick() * self.rhs.tick()
+    }
+}
+
+pub(crate) struct Mix {
+    lhs: Box<dyn Node>,
+    rhs: Box<dyn Node>,
+}
+
+impl Mix {
+    pub(crate) fn new(lhs: Box<dyn Node>, rhs: Box<dyn Node>) -> Self {
+        Self { lhs, rhs }
+    }
+}
+
+impl Node for Mix {
+    #[inline(always)]
+    fn tick(&mut self) -> f32 {
+        self.lhs.tick() + self.rhs.tick()
+    }
+}
+
 pub(crate) struct Constant {
     pub value: f32,
 }
@@ -141,31 +181,26 @@ impl Constant {
 
 impl Node for Constant {
     #[inline(always)]
-    fn tick(&mut self, _: &[f32]) -> f32 {
+    fn tick(&mut self) -> f32 {
         self.value
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Sine {
+    freq: Box<dyn Node>,
     phase: f32,
 }
 
 impl Sine {
-    pub(crate) fn new() -> Self {
-        Self { phase: 0. }
+    pub(crate) fn new(freq: Box<dyn Node>) -> Self {
+        Self { freq, phase: 0. }
     }
 }
 
 impl Node for Sine {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
+    fn tick(&mut self) -> f32 {
+        let hz = self.freq.tick();
         let y = (2. * PI * self.phase).sin();
         self.phase += hz / SAMPLE_RATE;
         if self.phase >= 1. {
@@ -175,26 +210,21 @@ impl Node for Sine {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct Square {
+    freq: Box<dyn Node>,
     phase: f32,
 }
 
 impl Square {
-    pub(crate) fn new() -> Self {
-        Self { phase: 0. }
+    pub(crate) fn new(freq: Box<dyn Node>) -> Self {
+        Self { freq, phase: 0. }
     }
 }
 
 impl Node for Square {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
+    fn tick(&mut self) -> f32 {
+        let hz = self.freq.tick();
         let inc = 2. * PI * hz / SAMPLE_RATE;
         let y = if self.phase < PI { 1. } else { -1. };
         self.phase += inc;
@@ -207,8 +237,8 @@ impl Node for Square {
     }
 }
 
-#[derive(Clone)]
 pub struct Saw {
+    freq: Box<dyn Node>,
     period: f32,
     amplitude: f32,
     phase: f32,
@@ -223,8 +253,9 @@ pub struct Saw {
 }
 
 impl Saw {
-    pub fn new() -> Self {
+    pub fn new(freq: Box<dyn Node>) -> Self {
         Self {
+            freq,
             period: 0.0,
             amplitude: 1.0,
             phase: 0.0,
@@ -281,13 +312,8 @@ impl Saw {
 
 impl Node for Saw {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
+    fn tick(&mut self) -> f32 {
+        let hz = self.freq.tick();
         self.period = self.sample_rate / hz;
         let sample = self.next_sample();
         self.saw = self.saw * 0.997 + sample;
@@ -295,7 +321,7 @@ impl Node for Saw {
     }
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub(crate) struct Noise {
     rng: Arc<Mutex<SmallRng>>,
 }
@@ -310,20 +336,21 @@ impl Noise {
 
 impl Node for Noise {
     #[inline(always)]
-    fn tick(&mut self, _: &[f32]) -> f32 {
+    fn tick(&mut self) -> f32 {
         self.rng.lock().unwrap().gen::<f32>() * 2. - 1.
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct Pulse {
+    freq: Box<dyn Node>,
     phase: f32,
     prev_phase: f32,
 }
 
 impl Pulse {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(freq: Box<dyn Node>) -> Self {
         Self {
+            freq,
             phase: 0.,
             prev_phase: 0.,
         }
@@ -332,13 +359,8 @@ impl Pulse {
 
 impl Node for Pulse {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
+    fn tick(&mut self) -> f32 {
+        let hz = self.freq.tick();
         self.prev_phase = self.phase;
         self.phase += 2. * PI * hz / SAMPLE_RATE;
 
@@ -351,42 +373,6 @@ impl Node for Pulse {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct Gain {}
-
-impl Gain {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Node for Gain {
-    #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let a = args.get(0).unwrap_or(&0.0);
-        let b = args.get(1).unwrap_or(&a);
-        a * b
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct Mix {}
-
-impl Mix {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Node for Mix {
-    #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let a = args.get(0).unwrap_or(&0.0);
-        let b = args.get(1).unwrap_or(&a);
-        a + b
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum EnvelopeState {
     Attack,
@@ -394,16 +380,21 @@ pub enum EnvelopeState {
     Off,
 }
 
-#[derive(Clone)]
 pub(crate) struct AR {
+    attack: Box<dyn Node>,
+    release: Box<dyn Node>,
+    trig: Box<dyn Node>,
     state: EnvelopeState,
     value: f32,
     time: f32,
 }
 
 impl AR {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(attack: Box<dyn Node>, release: Box<dyn Node>, trig: Box<dyn Node>) -> Self {
         Self {
+            attack,
+            release,
+            trig,
             value: 0.0,
             state: EnvelopeState::Off,
             time: 0.0,
@@ -421,22 +412,22 @@ impl AR {
 
 impl Node for AR {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let attack = args.get(0).unwrap_or(&1.0);
-        let release = args.get(1).unwrap_or(&1.0);
-        let trig = args.get(2).unwrap_or(&1.0);
+    fn tick(&mut self) -> f32 {
+        let attack = self.attack.tick();
+        let release = self.release.tick();
+        let trig = self.trig.tick();
 
-        if *trig > 0.0 {
+        if trig > 0.0 {
             self.state = EnvelopeState::Attack;
         }
 
         use EnvelopeState as E;
         match self.state {
             E::Attack => {
-                if *attack == 0.0 {
+                if attack == 0.0 {
                     self.value = 1.0;
                 } else {
-                    self.value = self.get_curve(*attack);
+                    self.value = self.get_curve(attack);
                 }
 
                 if self.value >= 1.0 {
@@ -446,7 +437,7 @@ impl Node for AR {
                 }
             }
             E::Release => {
-                self.value = self.get_curve_rev(*release);
+                self.value = self.get_curve_rev(release);
                 if self.value <= 0.0 {
                     self.value = 0.0;
                     self.time = 0.0;
@@ -471,8 +462,10 @@ pub enum SVFMode {
 }
 
 /// Cytomic (Andrew Simper) state-variable filter
-#[derive(Clone)]
 pub struct SVF {
+    cutoff: Box<dyn Node>,
+    resonance: Box<dyn Node>,
+    input: Box<dyn Node>,
     g: f32,
     k: f32,
     a1: f32,
@@ -485,8 +478,11 @@ pub struct SVF {
 }
 
 impl SVF {
-    pub fn new() -> SVF {
+    pub fn new(cutoff: Box<dyn Node>, resonance: Box<dyn Node>, input: Box<dyn Node>) -> SVF {
         let mut svf = Self {
+            cutoff,
+            resonance,
+            input,
             g: 0.0,
             k: 0.0,
             a1: 0.0,
@@ -511,11 +507,11 @@ impl SVF {
 
 impl Node for SVF {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let cutoff = args.get(0).unwrap_or(&1.0);
+    fn tick(&mut self) -> f32 {
+        let cutoff = self.cutoff.tick();
         self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
-        let resonance = args.get(1).unwrap_or(&1.0);
-        let input = args.get(2).unwrap_or(&0.0);
+        let resonance = self.resonance.tick();
+        let input = self.input.tick();
         self.k = 1.0 / resonance;
         self.update_coefficients();
 
@@ -533,15 +529,19 @@ impl Node for SVF {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct Seq {
     values: Vec<f32>,
+    trig: Box<dyn Node>,
     step: usize,
 }
 
 impl Seq {
-    pub(crate) fn new(values: Vec<f32>) -> Self {
-        Self { values, step: 0 }
+    pub(crate) fn new(values: Vec<f32>, trig: Box<dyn Node>) -> Self {
+        Self {
+            values,
+            trig,
+            step: 0,
+        }
     }
 
     fn increment(&mut self) {
@@ -554,9 +554,9 @@ impl Seq {
 
 impl Node for Seq {
     #[inline(always)]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let trig = args.get(0).unwrap_or(&0.0);
-        if *trig > 0.0 {
+    fn tick(&mut self) -> f32 {
+        let trig = self.trig.tick();
+        if trig > 0.0 {
             self.increment();
         }
 

@@ -5,6 +5,14 @@ type Signal = Box<Expr>;
 #[derive(Debug, Clone, KotoType, KotoCopy)]
 pub(crate) enum Expr {
     Constant(f32),
+    Mix {
+        a: Signal,
+        b: Signal,
+    },
+    Gain {
+        a: Signal,
+        b: Signal,
+    },
     Sine {
         freq: Signal,
     },
@@ -18,14 +26,6 @@ pub(crate) enum Expr {
         freq: Signal,
     },
     Noise,
-    Mix {
-        a: Signal,
-        b: Signal,
-    },
-    Gain {
-        a: Signal,
-        b: Signal,
-    },
     AR {
         trig: Signal,
         attack: Signal,

@@ -1,3 +1,4 @@
+use crate::nodes::Node;
 use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -52,15 +53,15 @@ where
     let mut koto = Koto::default();
     create_env(&koto);
 
-    let audio_graph: Arc<Mutex<Option<AudioGraph>>> = Arc::new(Mutex::new(None));
-    let audio_graph_clone = audio_graph.clone();
+    let root: Arc<Mutex<Option<Box<dyn Node>>>> = Arc::new(Mutex::new(None));
+    let root_clone = root.clone();
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            if let Some(graph) = audio_graph_clone.lock().unwrap().as_mut() {
+            if let Some(root) = root_clone.lock().unwrap().as_mut() {
                 for frame in data.chunks_mut(2) {
-                    let s = graph.tick();
+                    let s = root.tick();
                     for sample in frame.iter_mut() {
                         *sample = s;
                     }
@@ -78,36 +79,9 @@ where
         match koto.compile_and_run(&src)? {
             KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
                 Ok(expr) => {
-                    let new = parse_to_audio_graph(expr.to_owned());
-                    let mut guard = audio_graph.lock().unwrap();
-
-                    if let Some(old) = guard.as_mut() {
-                        // apply a diff between the old and new graphs to avoid
-                        // discontinuities in the audio
-                        let (update, add, remove) = diff_graph(&old, &new);
-                        println!("--------------");
-                        println!("update: {:?}", update);
-                        println!("add: {:?}", add);
-                        println!("remove: {:?}", remove);
-
-                        for (id, node) in update {
-                            old.replace_node(id, node);
-                        }
-
-                        for (_, node) in add {
-                            old.add_node(node);
-                        }
-
-                        for id in remove {
-                            old.remove_node(id);
-                        }
-
-                        old.reconnect_edges(&new);
-                    } else {
-                        // first time creating the graph, no diff needed
-                        println!("new graph");
-                        *guard = Some(new);
-                    }
+                    let new_root = parse_to_audio_graph(expr.to_owned());
+                    let mut guard = root.lock().unwrap();
+                    *guard = Some(new_root);
 
                     Ok(())
                 }
