@@ -5,10 +5,11 @@ use petgraph::visit::IntoEdgeReferences;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::nodes::*;
+use crate::nodes::{Node, NodeKind};
 use crate::parser::Expr;
 
-type GraphType = StableDiGraph<Box<NodeKind>, ()>;
+type BoxedNode = Box<NodeKind>;
+type GraphType = StableDiGraph<BoxedNode, ()>;
 
 pub(crate) struct AudioGraph {
     pub(crate) graph: GraphType,
@@ -219,6 +220,7 @@ pub(crate) fn diff_graph<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nodes::{Constant, Gain, Mix, Noise, Saw, Seq, Sine, Square, AR, SVF};
 
     #[test]
     fn test_parse_graph_1() {
