@@ -1,7 +1,4 @@
-use petgraph::graph::NodeIndex;
-use petgraph::prelude::StableDiGraph;
-use petgraph::visit::EdgeRef;
-use petgraph::visit::IntoEdgeReferences;
+use petgraph::{graph::NodeIndex, prelude::DiGraph, visit::EdgeRef};
 use std::collections::HashSet;
 use std::fmt;
 
@@ -9,10 +6,10 @@ use crate::nodes::{Node, NodeKind};
 use crate::parser::Expr;
 
 type BoxedNode = Box<NodeKind>;
-type GraphType = StableDiGraph<BoxedNode, ()>;
+type Graph = DiGraph<BoxedNode, ()>;
 
 pub(crate) struct AudioGraph {
-    pub(crate) graph: GraphType,
+    pub(crate) graph: Graph,
     sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<f32>,
     outputs: Vec<f32>,
@@ -21,7 +18,7 @@ pub(crate) struct AudioGraph {
 impl AudioGraph {
     pub(crate) fn new() -> Self {
         Self {
-            graph: StableDiGraph::new(),
+            graph: DiGraph::new(),
             sorted_nodes: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -54,13 +51,11 @@ impl AudioGraph {
         for &node_index in &self.sorted_nodes {
             self.inputs.clear();
 
-            // TODO: make sure we don't allocate, maybe resize inputs vec on graph update
-            self.inputs.extend(
-                self.graph
-                    .edges_directed(node_index, petgraph::Direction::Incoming)
-                    .filter(|edge| matches!(edge.weight(), ()))
-                    .map(|edge| self.outputs[edge.source().index()]),
-            );
+            self.inputs = self
+                .graph
+                .edges_directed(node_index, petgraph::Direction::Incoming)
+                .map(|edge| self.outputs[edge.source().index()])
+                .collect();
 
             self.outputs[node_index.index()] = self.graph[node_index].tick(&self.inputs);
         }
@@ -92,6 +87,7 @@ impl AudioGraph {
 
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
+        self.inputs.resize(self.graph.node_count(), 0.0);
         self.outputs.resize(self.graph.node_count(), 0.0);
     }
 }
