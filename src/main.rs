@@ -79,13 +79,14 @@ where
             KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
                 Ok(expr) => {
                     let new = parse_to_audio_graph(expr.to_owned());
+                    let new_debug = format!("{:?}", new);
                     let mut guard = audio_graph.lock().unwrap();
 
                     if let Some(old) = guard.as_mut() {
                         // apply a diff between the old and new graphs to avoid
                         // discontinuities in the audio
                         let (update, add, remove) = diff_graph(&old, &new);
-                        old.graph.clear_edges();
+                        old.clear_edges();
 
                         for (id, node) in update {
                             old.replace_node(id, node);
@@ -100,6 +101,9 @@ where
                         }
 
                         old.reconnect_edges(&new);
+
+                        // assert that the rebuilt graph is identical to the new graph
+                        assert_eq!(new_debug, format!("{:?}", old));
                     } else {
                         // first time creating the graph, no diff needed
                         *guard = Some(new);

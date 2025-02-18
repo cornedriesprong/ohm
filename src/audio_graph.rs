@@ -9,7 +9,7 @@ type BoxedNode = Box<NodeKind>;
 type Graph = DiGraph<BoxedNode, ()>;
 
 pub(crate) struct AudioGraph {
-    pub(crate) graph: Graph,
+    graph: Graph,
     sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<f32>,
     outputs: Vec<f32>,
@@ -51,11 +51,15 @@ impl AudioGraph {
         for &node_index in &self.sorted_nodes {
             self.inputs.clear();
 
-            self.inputs = self
-                .graph
-                .edges_directed(node_index, petgraph::Direction::Incoming)
-                .map(|edge| self.outputs[edge.source().index()])
-                .collect();
+            // assert that the inputs vector is large enough to hold all inputs
+            // so we don't need to allocate
+            assert!(self.inputs.capacity() >= self.graph.node_count());
+
+            self.inputs.extend(
+                self.graph
+                    .edges_directed(node_index, petgraph::Direction::Incoming)
+                    .map(|edge| self.outputs[edge.source().index()]),
+            );
 
             self.outputs[node_index.index()] = self.graph[node_index].tick(&self.inputs);
         }
@@ -63,7 +67,11 @@ impl AudioGraph {
         self.outputs[self.sorted_nodes.last().unwrap().index()]
     }
 
-    pub fn reconnect_edges(&mut self, new: &AudioGraph) {
+    pub(crate) fn clear_edges(&mut self) {
+        self.graph.clear_edges();
+    }
+
+    pub(crate) fn reconnect_edges(&mut self, new: &AudioGraph) {
         let old_edges: HashSet<_> = self.graph.edge_indices().collect();
         let new_edges: HashSet<_> = new.graph.edge_indices().collect();
 
