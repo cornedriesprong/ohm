@@ -1,3 +1,4 @@
+use crossbeam::channel::{Receiver, Sender};
 use petgraph::{graph::NodeIndex, prelude::DiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::HashSet;
@@ -8,6 +9,111 @@ use crate::parser::Expr;
 
 type BoxedNode = Box<NodeKind>;
 type Graph = DiGraph<BoxedNode, ()>;
+
+enum Message {
+    AddNode(NodeKind),
+    RemoveNode { at: NodeIndex },
+    ReplaceNode { at: NodeIndex, with: NodeKind },
+    ClearEdges,
+    ReconnectEdges(AudioGraph),
+}
+
+pub(crate) struct GraphPlayer {
+    graph: AudioGraph,
+    channel: (Sender<Message>, Receiver<Message>),
+}
+
+impl GraphPlayer {
+    pub(crate) fn new(graph: AudioGraph) -> Self {
+        Self {
+            graph,
+            channel: crossbeam::channel::unbounded(),
+        }
+    }
+
+    #[inline]
+    #[nonblocking]
+    pub(crate) fn tick(&mut self) -> f32 {
+        self.fetch_updates();
+
+        self.graph.tick()
+    }
+
+    pub(crate) fn replace_graph(&self, new: AudioGraph) {
+        println!("Replacing graph");
+        let mut update = Vec::new();
+        let mut add = Vec::new();
+        let mut remove = Vec::new();
+        let old = &self.graph;
+
+        for old_idx in old.graph.node_indices() {
+            let old_node = &old.graph[old_idx];
+
+            // check if node is in both the old and the new graph
+            let matching_node = new.graph.node_indices().find(|&idx| idx == old_idx);
+
+            match matching_node {
+                Some(new_idx) => {
+                    // ...if it is, then compare the nodes to see if it needs updating
+                    if **old_node != *new.graph[new_idx] {
+                        update.push((old_idx, *new.graph[new_idx].clone()));
+                    }
+                }
+                // ...if not, we can remove it
+                None => remove.push(old_idx),
+            }
+        }
+
+        for new_idx in new.graph.node_indices() {
+            // nodes that are in the new graph but not in the old one need to be added
+            if !old.graph.node_indices().any(|idx| idx == new_idx) {
+                add.push((new_idx, *new.graph[new_idx].clone()));
+            }
+        }
+
+        self.channel.0.send(Message::ClearEdges).unwrap();
+
+        for (id, node) in update {
+            self.channel
+                .0
+                .send(Message::ReplaceNode { at: id, with: node })
+                .unwrap();
+        }
+
+        for (_, node) in add {
+            self.channel.0.send(Message::AddNode(node)).unwrap();
+        }
+
+        for id in remove {
+            self.channel.0.send(Message::RemoveNode { at: id }).unwrap();
+        }
+
+        self.channel.0.send(Message::ReconnectEdges(new)).unwrap();
+    }
+
+    fn fetch_updates(&mut self) {
+        // fetch updates to graph from channel
+        for tx in self.channel.1.try_iter() {
+            match tx {
+                Message::AddNode(node) => {
+                    self.graph.add_node(node);
+                }
+                Message::RemoveNode { at } => {
+                    self.graph.remove_node(at);
+                }
+                Message::ReplaceNode { at, with } => {
+                    self.graph.replace_node(at, with);
+                }
+                Message::ClearEdges => {
+                    self.graph.clear_edges();
+                }
+                Message::ReconnectEdges(new) => {
+                    self.graph.reconnect_edges(&new);
+                }
+            }
+        }
+    }
+}
 
 pub(crate) struct AudioGraph {
     graph: Graph,
@@ -39,11 +145,6 @@ impl AudioGraph {
 
     pub(crate) fn replace_node(&mut self, at: NodeIndex, new: NodeKind) {
         self.graph[at] = Box::new(new);
-        self.update_processing_order();
-    }
-
-    pub(crate) fn connect_node(&mut self, from: NodeIndex, to: NodeIndex) {
-        self.graph.add_edge(from.into(), to.into(), ());
         self.update_processing_order();
     }
 
@@ -92,6 +193,11 @@ impl AudioGraph {
             self.graph.remove_edge(*edge);
         }
 
+        self.update_processing_order();
+    }
+
+    fn connect_node(&mut self, from: NodeIndex, to: NodeIndex) {
+        self.graph.add_edge(from.into(), to.into(), ());
         self.update_processing_order();
     }
 
@@ -181,46 +287,6 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
     add_expr_to_graph(expr, &mut graph);
 
     graph
-}
-
-pub(crate) fn diff_graph<'a>(
-    old: &'a AudioGraph,
-    new: &'a AudioGraph,
-) -> (
-    Vec<(NodeIndex, NodeKind)>,
-    Vec<(NodeIndex, NodeKind)>,
-    Vec<NodeIndex>,
-) {
-    let mut to_update = Vec::new();
-    let mut to_add = Vec::new();
-    let mut to_remove = Vec::new();
-
-    for old_idx in old.graph.node_indices() {
-        let old_node = &old.graph[old_idx];
-
-        // check if node is in both the old and the new graph
-        let matching_node = new.graph.node_indices().find(|&idx| idx == old_idx);
-
-        match matching_node {
-            Some(new_idx) => {
-                // ...if it is, then compare the nodes to see if it needs updating
-                if **old_node != *new.graph[new_idx] {
-                    to_update.push((old_idx, *new.graph[new_idx].clone()));
-                }
-            }
-            // ...if not, we can remove it
-            None => to_remove.push(old_idx),
-        }
-    }
-
-    for new_idx in new.graph.node_indices() {
-        // nodes that are in the new graph but not in the old graph need to be added
-        if !old.graph.node_indices().any(|idx| idx == new_idx) {
-            to_add.push((new_idx, *new.graph[new_idx].clone()));
-        }
-    }
-
-    (to_update, to_add, to_remove)
 }
 
 #[cfg(test)]
