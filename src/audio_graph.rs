@@ -46,7 +46,7 @@ impl AudioGraph {
         self.update_processing_order();
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn tick(&mut self) -> f32 {
         for &node_index in &self.sorted_nodes {
             self.inputs.clear();
@@ -216,7 +216,7 @@ pub(crate) fn diff_graph<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nodes::{Constant, Gain, Mix, Noise, Saw, Seq, Sine, Square, AR, SVF};
+    use assert_no_alloc::*;
 
     #[test]
     fn test_parse_graph_1() {
@@ -271,9 +271,9 @@ mod tests {
 
     #[test]
     fn test_node_comparison() {
-        let node1 = NodeKind::Constant(Constant::new(1.0));
-        let node2 = NodeKind::Constant(Constant::new(1.0));
-        let node3 = NodeKind::Constant(Constant::new(2.0));
+        let node1 = NodeKind::constant(1.0);
+        let node2 = NodeKind::constant(1.0);
+        let node3 = NodeKind::constant(2.0);
 
         assert_eq!(node1, node2);
         assert_ne!(node1, node3);
@@ -284,12 +284,12 @@ mod tests {
         let mut old = AudioGraph::new();
         let mut new = AudioGraph::new();
 
-        let const_idx1 = old.add_node(NodeKind::Constant(Constant::new(1.0)));
-        let sine_idx1 = old.add_node(NodeKind::Sine(Sine::new()));
+        let const_idx1 = old.add_node(NodeKind::constant(1.0));
+        let sine_idx1 = old.add_node(NodeKind::sine());
         old.connect_node(const_idx1, sine_idx1);
 
-        let const_idx2 = new.add_node(NodeKind::Constant(Constant::new(2.0))); // Same
-        let sine_idx2 = new.add_node(NodeKind::Sine(Sine::new()));
+        let const_idx2 = new.add_node(NodeKind::constant(2.0)); // Same
+        let sine_idx2 = new.add_node(NodeKind::sine());
         new.connect_node(const_idx2, sine_idx2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
@@ -305,26 +305,23 @@ mod tests {
 
     #[test]
     fn test_node_tick() {
-        let mut node = NodeKind::Constant(Constant::new(42.0));
+        let mut node = NodeKind::constant(42.0);
         assert_eq!(node.tick(&[]), 42.0);
     }
 
     fn create_complex_graph() -> AudioGraph {
         let mut graph = AudioGraph::new();
 
-        // Create a synth voice with envelope
-        let freq = graph.add_node(NodeKind::Constant(Constant::new(440.0)));
-        let amp = graph.add_node(NodeKind::Constant(Constant::new(0.5)));
-        let osc = graph.add_node(NodeKind::Sine(Sine::new()));
-        let env = graph.add_node(NodeKind::AR(AR::new()));
-        let gain = graph.add_node(NodeKind::Gain(Gain::new()));
+        let freq = graph.add_node(NodeKind::constant(440.0));
+        let amp = graph.add_node(NodeKind::constant(0.5));
+        let osc = graph.add_node(NodeKind::sine());
+        let env = graph.add_node(NodeKind::ar());
+        let gain = graph.add_node(NodeKind::gain());
 
-        // Create a filter
-        let cutoff = graph.add_node(NodeKind::Constant(Constant::new(1000.0)));
-        let resonance = graph.add_node(NodeKind::Constant(Constant::new(0.7)));
-        let filter = graph.add_node(NodeKind::SVF(SVF::new()));
+        let cutoff = graph.add_node(NodeKind::constant(1000.0));
+        let resonance = graph.add_node(NodeKind::constant(0.7));
+        let filter = graph.add_node(NodeKind::svf());
 
-        // Connect everything
         graph.connect_node(freq, osc);
         graph.connect_node(amp, gain);
         graph.connect_node(osc, gain);
@@ -341,12 +338,12 @@ mod tests {
         let mut old = AudioGraph::new();
         let mut new = AudioGraph::new();
 
-        let const_idx1 = old.add_node(NodeKind::Constant(Constant::new(1.0)));
-        let sine_idx1 = old.add_node(NodeKind::Sine(Sine::new()));
+        let const_idx1 = old.add_node(NodeKind::constant(1.0));
+        let sine_idx1 = old.add_node(NodeKind::sine());
         old.connect_node(const_idx1, sine_idx1);
 
-        let const_idx2 = new.add_node(NodeKind::Constant(Constant::new(2.0)));
-        let sine_idx2 = new.add_node(NodeKind::Sine(Sine::new()));
+        let const_idx2 = new.add_node(NodeKind::constant(2.0));
+        let sine_idx2 = new.add_node(NodeKind::sine());
         new.connect_node(const_idx2, sine_idx2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
@@ -366,8 +363,8 @@ mod tests {
         old.connect_node(freq1, osc1);
 
         // Create new graph with Square
-        let freq2 = new.add_node(NodeKind::Constant(Constant::new(440.0)));
-        let osc2 = new.add_node(NodeKind::Square(Square::new()));
+        let freq2 = new.add_node(NodeKind::constant(440.0));
+        let osc2 = new.add_node(NodeKind::square());
         new.connect_node(freq2, osc2);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
@@ -382,15 +379,15 @@ mod tests {
         let mut new = AudioGraph::new();
 
         // Original simple oscillator
-        let freq1 = old.add_node(NodeKind::Constant(Constant::new(440.0)));
-        let osc1 = old.add_node(NodeKind::Sine(Sine::new()));
+        let freq1 = old.add_node(NodeKind::constant(440.0));
+        let osc1 = old.add_node(NodeKind::sine());
         old.connect_node(freq1, osc1);
 
         // New graph with added filter
-        let freq2 = new.add_node(NodeKind::Constant(Constant::new(440.0)));
-        let osc2 = new.add_node(NodeKind::Sine(Sine::new()));
-        let cutoff = new.add_node(NodeKind::Constant(Constant::new(1000.0)));
-        let filter = new.add_node(NodeKind::SVF(SVF::new()));
+        let freq2 = new.add_node(NodeKind::constant(440.0));
+        let osc2 = new.add_node(NodeKind::sine());
+        let cutoff = new.add_node(NodeKind::constant(1000.0));
+        let filter = new.add_node(NodeKind::svf());
         new.connect_node(freq2, osc2);
         new.connect_node(osc2, filter);
         new.connect_node(cutoff, filter);
@@ -408,18 +405,18 @@ mod tests {
 
         // Modify new graph
         // 1. Change frequency
-        let new_freq = new.add_node(NodeKind::Constant(Constant::new(880.0)));
+        let new_freq = new.add_node(NodeKind::constant(880.0));
 
         // 2. Add sequence modulation
-        let seq = new.add_node(NodeKind::Seq(Seq::new([100.0, 200.0].to_vec())));
-        let seq_amp = new.add_node(NodeKind::Constant(Constant::new(0.3)));
+        let seq = new.add_node(NodeKind::seq([100.0, 200.0].to_vec()));
+        let seq_amp = new.add_node(NodeKind::constant(0.3));
 
         // 3. Change oscillator type
-        let new_osc = new.add_node(NodeKind::Saw(Saw::new()));
+        let new_osc = new.add_node(NodeKind::saw());
 
         // 4. Add noise mix
-        let noise = new.add_node(NodeKind::Noise(Noise::new()));
-        let mix = new.add_node(NodeKind::Mix(Mix::new()));
+        let noise = new.add_node(NodeKind::noise());
+        let mix = new.add_node(NodeKind::mix());
 
         // Connect new components
         new.connect_node(new_freq, new_osc);
@@ -462,8 +459,8 @@ mod tests {
         let mut new = AudioGraph::new();
 
         // Create simplified version with just oscillator
-        let freq = new.add_node(NodeKind::Constant(Constant::new(440.0)));
-        let osc = new.add_node(NodeKind::Sine(Sine::new()));
+        let freq = new.add_node(NodeKind::constant(440.0));
+        let osc = new.add_node(NodeKind::sine());
         new.connect_node(freq, osc);
 
         let (updates, additions, removals) = diff_graph(&old, &new);
