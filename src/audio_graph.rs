@@ -20,15 +20,18 @@ enum Message {
 
 pub(crate) struct GraphPlayer {
     graph: AudioGraph,
-    channel: (Sender<Message>, Receiver<Message>),
+    sender: Sender<Message>,
+    receiver: Receiver<Message>,
 }
 
 impl GraphPlayer {
     pub(crate) fn new(graph: AudioGraph) -> Self {
-        Self {
+        let (sender, receiver) = crossbeam::channel::bounded(1024);
+        return Self {
             graph,
-            channel: crossbeam::channel::unbounded(),
-        }
+            sender,
+            receiver,
+        };
     }
 
     #[inline]
@@ -40,7 +43,6 @@ impl GraphPlayer {
     }
 
     pub(crate) fn replace_graph(&self, new: AudioGraph) {
-        println!("Replacing graph");
         let mut update = Vec::new();
         let mut add = Vec::new();
         let mut remove = Vec::new();
@@ -71,29 +73,28 @@ impl GraphPlayer {
             }
         }
 
-        self.channel.0.send(Message::ClearEdges).unwrap();
+        self.sender.send(Message::ClearEdges).unwrap();
 
         for (id, node) in update {
-            self.channel
-                .0
+            self.sender
                 .send(Message::ReplaceNode { at: id, with: node })
                 .unwrap();
         }
 
         for (_, node) in add {
-            self.channel.0.send(Message::AddNode(node)).unwrap();
+            self.sender.send(Message::AddNode(node)).unwrap();
         }
 
         for id in remove {
-            self.channel.0.send(Message::RemoveNode { at: id }).unwrap();
+            self.sender.send(Message::RemoveNode { at: id }).unwrap();
         }
 
-        self.channel.0.send(Message::ReconnectEdges(new)).unwrap();
+        self.sender.send(Message::ReconnectEdges(new)).unwrap();
     }
 
     fn fetch_updates(&mut self) {
-        // fetch updates to graph from channel
-        for tx in self.channel.1.try_iter() {
+        // fetch pending graph updates from channel
+        for tx in self.receiver.try_iter() {
             match tx {
                 Message::AddNode(node) => {
                     self.graph.add_node(node);
