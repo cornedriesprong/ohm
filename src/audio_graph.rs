@@ -1,4 +1,5 @@
 use petgraph::{graph::NodeIndex, prelude::DiGraph, visit::EdgeRef};
+use rtsan_standalone::nonblocking;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -47,6 +48,7 @@ impl AudioGraph {
     }
 
     #[inline]
+    #[nonblocking]
     pub(crate) fn tick(&mut self) -> f32 {
         for &node_index in &self.sorted_nodes {
             self.inputs.clear();
@@ -224,7 +226,6 @@ pub(crate) fn diff_graph<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_no_alloc::*;
 
     #[test]
     fn test_parse_graph_1() {
