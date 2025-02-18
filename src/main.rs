@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod consts;
+mod dsp;
 mod nodes;
 mod utils;
 
@@ -213,6 +215,66 @@ fn create_env(koto: &Koto) {
             Expr::Seq {
                 seq: vec,
                 trig: Box::new(expr_from_kvalue(&args[1])?),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("pipe", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 2 {
+            return unexpected_args("2 arguments: delay (in samples), input", args);
+        }
+
+        let delay = expr_from_kvalue(&args[0])?;
+        let input = expr_from_kvalue(&args[1])?;
+
+        Ok(KValue::Object(
+            Expr::Pipe {
+                delay: Box::new(delay),
+                input: Box::new(input),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("pluck", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 4 {
+            return unexpected_args("4 arguments: frequency, tone, damping, trig", args);
+        }
+
+        let freq = expr_from_kvalue(&args[0])?;
+        let tone = expr_from_kvalue(&args[1])?;
+        let damping = expr_from_kvalue(&args[2])?;
+        let trig = expr_from_kvalue(&args[3])?;
+
+        Ok(KValue::Object(
+            Expr::Pluck {
+                freq: Box::new(freq),
+                tone: Box::new(tone),
+                damping: Box::new(damping),
+                trig: Box::new(trig),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("reverb", move |ctx| {
+        let args = ctx.args();
+        let input = expr_from_kvalue(&args[0])?;
+
+        Ok(KValue::Object(
+            Expr::Reverb {
+                input: Box::new(input),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("delay", move |ctx| {
+        let args = ctx.args();
+        let input = expr_from_kvalue(&args[0])?;
+
+        Ok(KValue::Object(
+            Expr::Delay {
+                input: Box::new(input),
             }
             .into(),
         ))

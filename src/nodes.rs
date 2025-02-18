@@ -1,4 +1,7 @@
-use crate::utils::lerp;
+use crate::consts::SAMPLE_RATE;
+use crate::dsp::delay::Delay;
+use crate::dsp::reverb::Reverb;
+use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
@@ -6,85 +9,109 @@ use rtsan_standalone::nonblocking;
 use std::f32::consts::{FRAC_PI_4, PI};
 use std::sync::{Arc, Mutex};
 
-pub const SAMPLE_RATE: f32 = 44100.;
+const BUFFER_SIZE: usize = 8192;
 
 #[derive(Clone)]
 pub(crate) enum NodeKind {
-    Constant(Constant),
-    Sine(Sine),
-    Square(Square),
-    Saw(Saw),
-    Noise(Noise),
-    Pulse(Pulse),
-    Gain(Gain),
-    Mix(Mix),
-    AR(AR),
-    SVF(SVF),
-    Seq(Seq),
+    Constant(ConstantNode),
+    Sine(SineNode),
+    Square(SquareNode),
+    Saw(SawNode),
+    Noise(NoiseNode),
+    Pulse(PulseNode),
+    Gain(GainNode),
+    Mix(MixNode),
+    AR(ARNode),
+    SVF(SVFNode),
+    Seq(SeqNode),
+    Pipe(PipeNode),
+    Pluck(PluckNode),
+    Reverb(ReverbNode),
+    Delay(DelayNode),
 }
 
 impl NodeKind {
     pub(crate) fn constant(value: f32) -> Self {
-        NodeKind::Constant(Constant::new(value))
+        NodeKind::Constant(ConstantNode::new(value))
     }
 
     pub(crate) fn sine() -> Self {
-        NodeKind::Sine(Sine::new())
+        NodeKind::Sine(SineNode::new())
     }
 
     pub(crate) fn square() -> Self {
-        NodeKind::Square(Square::new())
+        NodeKind::Square(SquareNode::new())
     }
 
     pub(crate) fn saw() -> Self {
-        NodeKind::Saw(Saw::new())
+        NodeKind::Saw(SawNode::new())
     }
 
     pub(crate) fn noise() -> Self {
-        NodeKind::Noise(Noise::new())
+        NodeKind::Noise(NoiseNode::new())
     }
 
     pub(crate) fn pulse() -> Self {
-        NodeKind::Pulse(Pulse::new())
+        NodeKind::Pulse(PulseNode::new())
     }
 
     pub(crate) fn gain() -> Self {
-        NodeKind::Gain(Gain::new())
+        NodeKind::Gain(GainNode::new())
     }
 
     pub(crate) fn mix() -> Self {
-        NodeKind::Mix(Mix::new())
+        NodeKind::Mix(MixNode::new())
     }
 
     pub(crate) fn ar() -> Self {
-        NodeKind::AR(AR::new())
+        NodeKind::AR(ARNode::new())
     }
 
     pub(crate) fn svf() -> Self {
-        NodeKind::SVF(SVF::new())
+        NodeKind::SVF(SVFNode::new())
     }
 
     pub(crate) fn seq(values: Vec<f32>) -> Self {
-        NodeKind::Seq(Seq::new(values))
+        NodeKind::Seq(SeqNode::new(values))
+    }
+
+    pub(crate) fn pipe() -> Self {
+        NodeKind::Pipe(PipeNode::new())
+    }
+
+    pub(crate) fn pluck() -> Self {
+        NodeKind::Pluck(PluckNode::new())
+    }
+
+    pub(crate) fn reverb() -> Self {
+        NodeKind::Reverb(ReverbNode::new())
+    }
+
+    pub(crate) fn delay() -> Self {
+        NodeKind::Delay(DelayNode::new())
     }
 }
 
 impl Node for NodeKind {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant(node) => node.tick(args),
-            NodeKind::Sine(node) => node.tick(args),
-            NodeKind::Square(node) => node.tick(args),
-            NodeKind::Saw(node) => node.tick(args),
-            NodeKind::Noise(node) => node.tick(args),
-            NodeKind::Pulse(node) => node.tick(args),
-            NodeKind::Gain(node) => node.tick(args),
-            NodeKind::Mix(node) => node.tick(args),
-            NodeKind::AR(node) => node.tick(args),
-            NodeKind::SVF(node) => node.tick(args),
-            NodeKind::Seq(node) => node.tick(args),
+            NodeKind::Constant(node) => node.tick(inputs),
+            NodeKind::Sine(node) => node.tick(inputs),
+            NodeKind::Square(node) => node.tick(inputs),
+            NodeKind::Saw(node) => node.tick(inputs),
+            NodeKind::Noise(node) => node.tick(inputs),
+            NodeKind::Pulse(node) => node.tick(inputs),
+            NodeKind::Gain(node) => node.tick(inputs),
+            NodeKind::Mix(node) => node.tick(inputs),
+            NodeKind::AR(node) => node.tick(inputs),
+            NodeKind::SVF(node) => node.tick(inputs),
+            NodeKind::Seq(node) => node.tick(inputs),
+            NodeKind::Pipe(node) => node.tick(inputs),
+            NodeKind::Pluck(node) => node.tick(inputs),
+            NodeKind::Reverb(node) => node.tick(inputs),
+            NodeKind::Delay(node) => node.tick(inputs),
         }
     }
 }
@@ -103,6 +130,10 @@ impl PartialEq for NodeKind {
             (NodeKind::AR(_), NodeKind::AR(_)) => true,
             (NodeKind::SVF(_), NodeKind::SVF(_)) => true,
             (NodeKind::Seq(a), NodeKind::Seq(b)) => a.values == b.values,
+            (NodeKind::Pipe(a), NodeKind::Pipe(b)) => a.buffer == b.buffer,
+            (NodeKind::Pluck(_), NodeKind::Pluck(_)) => true,
+            (NodeKind::Reverb(_), NodeKind::Reverb(_)) => true,
+            (NodeKind::Delay(_), NodeKind::Delay(_)) => true,
             _ => false,
         }
     }
@@ -122,6 +153,10 @@ impl Debug for NodeKind {
             NodeKind::AR(_) => write!(f, "AR"),
             NodeKind::SVF(_) => write!(f, "SVF"),
             NodeKind::Seq(_) => write!(f, "Seq"),
+            NodeKind::Pipe(_) => write!(f, "Delay"),
+            NodeKind::Pluck(_) => write!(f, "Pluck"),
+            NodeKind::Reverb(_) => write!(f, "Pluck"),
+            NodeKind::Delay(_) => write!(f, "Delay"),
         }
     }
 }
@@ -131,17 +166,17 @@ pub(crate) trait Node: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Constant {
+pub(crate) struct ConstantNode {
     pub value: f32,
 }
 
-impl Constant {
+impl ConstantNode {
     pub(crate) fn new(value: f32) -> Self {
         Self { value }
     }
 }
 
-impl Node for Constant {
+impl Node for ConstantNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, _: &[f32]) -> f32 {
@@ -150,22 +185,22 @@ impl Node for Constant {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Sine {
+pub(crate) struct SineNode {
     phase: f32,
 }
 
-impl Sine {
+impl SineNode {
     pub(crate) fn new() -> Self {
         Self { phase: 0. }
     }
 }
 
-impl Node for Sine {
+impl Node for SineNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let hz = inputs.get(0).unwrap_or(&0.0);
+        let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -180,22 +215,22 @@ impl Node for Sine {
 }
 
 #[derive(Clone)]
-pub(crate) struct Square {
+pub(crate) struct SquareNode {
     phase: f32,
 }
 
-impl Square {
+impl SquareNode {
     pub(crate) fn new() -> Self {
         Self { phase: 0. }
     }
 }
 
-impl Node for Square {
+impl Node for SquareNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let hz = inputs.get(0).unwrap_or(&0.0);
+        let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -213,7 +248,7 @@ impl Node for Square {
 }
 
 #[derive(Clone)]
-pub struct Saw {
+pub struct SawNode {
     period: f32,
     amplitude: f32,
     phase: f32,
@@ -227,7 +262,7 @@ pub struct Saw {
     sample_rate: f32,
 }
 
-impl Saw {
+impl SawNode {
     pub fn new() -> Self {
         Self {
             period: 0.0,
@@ -285,12 +320,12 @@ impl Saw {
     }
 }
 
-impl Node for Saw {
+impl Node for SawNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let hz = inputs.get(0).unwrap_or(&0.0);
+        let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -303,11 +338,11 @@ impl Node for Saw {
 }
 
 #[derive(Clone)]
-pub(crate) struct Noise {
+pub(crate) struct NoiseNode {
     rng: Arc<Mutex<SmallRng>>,
 }
 
-impl Noise {
+impl NoiseNode {
     pub(crate) fn new() -> Self {
         Self {
             rng: Arc::new(Mutex::new(SmallRng::from_entropy())),
@@ -315,7 +350,7 @@ impl Noise {
     }
 }
 
-impl Node for Noise {
+impl Node for NoiseNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, _: &[f32]) -> f32 {
@@ -324,12 +359,12 @@ impl Node for Noise {
 }
 
 #[derive(Clone)]
-pub(crate) struct Pulse {
+pub(crate) struct PulseNode {
     phase: f32,
     prev_phase: f32,
 }
 
-impl Pulse {
+impl PulseNode {
     pub(crate) fn new() -> Self {
         Self {
             phase: 0.,
@@ -338,12 +373,12 @@ impl Pulse {
     }
 }
 
-impl Node for Pulse {
+impl Node for PulseNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let hz = args.get(0).unwrap_or(&0.0);
-        let reset_phase = args.get(1).unwrap_or(&0.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let hz = inputs.get(0).unwrap_or(&0.0);
+        let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
@@ -361,39 +396,39 @@ impl Node for Pulse {
 }
 
 #[derive(Clone)]
-pub(crate) struct Gain {}
+pub(crate) struct GainNode {}
 
-impl Gain {
+impl GainNode {
     pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
-impl Node for Gain {
+impl Node for GainNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let a = args.get(0).unwrap_or(&0.0);
-        let b = args.get(1).unwrap_or(&a);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let a = inputs.get(0).unwrap_or(&0.0);
+        let b = inputs.get(1).unwrap_or(&a);
         a * b
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct Mix {}
+pub(crate) struct MixNode {}
 
-impl Mix {
+impl MixNode {
     pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
-impl Node for Mix {
+impl Node for MixNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let a = args.get(0).unwrap_or(&0.0);
-        let b = args.get(1).unwrap_or(&a);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let a = inputs.get(0).unwrap_or(&0.0);
+        let b = inputs.get(1).unwrap_or(&a);
         a + b
     }
 }
@@ -406,13 +441,13 @@ pub enum EnvelopeState {
 }
 
 #[derive(Clone)]
-pub(crate) struct AR {
+pub(crate) struct ARNode {
     state: EnvelopeState,
     value: f32,
     time: f32,
 }
 
-impl AR {
+impl ARNode {
     pub(crate) fn new() -> Self {
         Self {
             value: 0.0,
@@ -430,13 +465,13 @@ impl AR {
     }
 }
 
-impl Node for AR {
+impl Node for ARNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let attack = args.get(0).unwrap_or(&1.0);
-        let release = args.get(1).unwrap_or(&1.0);
-        let trig = args.get(2).unwrap_or(&1.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let attack = inputs.get(0).unwrap_or(&1.0);
+        let release = inputs.get(1).unwrap_or(&1.0);
+        let trig = inputs.get(2).unwrap_or(&1.0);
 
         if *trig > 0.0 {
             self.state = EnvelopeState::Attack;
@@ -484,7 +519,7 @@ pub enum SVFMode {
 
 /// Cytomic (Andrew Simper) state-variable filter
 #[derive(Clone)]
-pub struct SVF {
+pub struct SVFNode {
     g: f32,
     k: f32,
     a1: f32,
@@ -496,8 +531,8 @@ pub struct SVF {
     set: bool,
 }
 
-impl SVF {
-    pub fn new() -> SVF {
+impl SVFNode {
+    pub fn new() -> SVFNode {
         let mut svf = Self {
             g: 0.0,
             k: 0.0,
@@ -522,14 +557,14 @@ impl SVF {
     }
 }
 
-impl Node for SVF {
+impl Node for SVFNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let cutoff = args.get(0).unwrap_or(&1.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let cutoff = inputs.get(0).unwrap_or(&1.0);
         self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
-        let resonance = args.get(1).unwrap_or(&1.0);
-        let input = args.get(2).unwrap_or(&0.0);
+        let resonance = inputs.get(1).unwrap_or(&1.0);
+        let input = inputs.get(2).unwrap_or(&0.0);
         self.k = 1.0 / resonance;
         self.update_coefficients();
 
@@ -548,12 +583,12 @@ impl Node for SVF {
 }
 
 #[derive(Clone)]
-pub(crate) struct Seq {
+pub(crate) struct SeqNode {
     values: Vec<f32>,
     step: usize,
 }
 
-impl Seq {
+impl SeqNode {
     pub(crate) fn new(values: Vec<f32>) -> Self {
         Self { values, step: 0 }
     }
@@ -566,15 +601,201 @@ impl Seq {
     }
 }
 
-impl Node for Seq {
+impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, args: &[f32]) -> f32 {
-        let trig = args.get(0).unwrap_or(&0.0);
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let trig = inputs.get(0).unwrap_or(&0.0);
         if *trig > 0.0 {
             self.increment();
         }
 
         self.values[self.step]
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct PipeNode {
+    buffer: [f32; BUFFER_SIZE],
+    read_pos: usize,
+}
+
+impl PipeNode {
+    pub const BUFFER_SIZE: usize = 1024;
+    pub(crate) fn new() -> Self {
+        Self {
+            buffer: [0.0; BUFFER_SIZE],
+            read_pos: 0,
+        }
+    }
+}
+
+impl Node for PipeNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let delay = inputs.get(0).unwrap_or(&0.0);
+        let input = inputs.get(1).unwrap_or(&0.0);
+        self.buffer[self.read_pos] = *input;
+        self.read_pos = (self.read_pos + 1) % BUFFER_SIZE;
+        *self
+            .buffer
+            .get((self.read_pos + *delay as usize) % BUFFER_SIZE)
+            .unwrap_or(&0.0)
+    }
+}
+
+// this is the number of samples we need to represent a full period
+// of the lowest possible MIDI pitch's frequency (A0 / 27.50 Hz)
+enum Mode {
+    String,
+    Drum,
+}
+
+#[derive(Clone)]
+pub struct PluckNode {
+    // mode: Mode,
+    // tone: f32,
+    // damping: f32,
+    buffer: [f32; BUFFER_SIZE],
+    period: f32,
+    read_pos: usize,
+    pitch_track: f32,
+    is_stopped: bool,
+}
+
+impl PluckNode {
+    fn new() -> Self {
+        Self {
+            // mode: Mode::String,
+            buffer: [0.0; BUFFER_SIZE],
+            period: 1.0,
+            read_pos: 0,
+            pitch_track: 0.0,
+            is_stopped: true,
+        }
+    }
+
+    fn play(&mut self, freq: f32, tone: f32) {
+        self.is_stopped = false;
+        self.period = freq_to_period(SAMPLE_RATE, freq);
+        self.read_pos = 0;
+
+        self.pitch_track = (5.0 as f32).max(self.period / 7.0);
+        assert!(self.period < BUFFER_SIZE as f32);
+
+        for i in 0..self.period as usize {
+            if i > self.period as usize {
+                self.buffer[i] = 0.0;
+            }
+            // generate one period of a sine wave
+            // let sine = ((i as f32 / self.period) * (PI * 2.0)).sin();
+            let tri = Self::generate_triangle_wave(i as i32, self.period);
+
+            let noise = if rand::thread_rng().gen::<bool>() {
+                1.0
+            } else {
+                -1.0
+            };
+            let y = (tri * tone) + (noise * (1.0 - tone));
+            self.buffer[i] = y;
+        }
+    }
+
+    fn generate_triangle_wave(sample: i32, period: f32) -> f32 {
+        let phase = sample as f32 / period;
+        if phase < 0.25 {
+            4.0 * phase
+        } else if phase < 0.75 {
+            2.0 - 4.0 * phase
+        } else {
+            -4.0 + 4.0 * phase
+        }
+    }
+}
+
+impl Node for PluckNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let freq = inputs.get(0).unwrap_or(&440.0);
+        let tone = inputs.get(1).unwrap_or(&0.5);
+        let damping = inputs.get(2).unwrap_or(&0.5);
+        let trig = inputs.get(3).unwrap_or(&0.0);
+
+        if *trig > 0.0 {
+            self.play(*freq, *tone);
+        }
+
+        // if !self.is_active() {
+        //     return 0.0;
+        // }
+        // increment read position
+        // TODO: is it a problem that we're rounding here?
+        // should we interpolate between buffer values?
+        self.read_pos = (self.read_pos + 1) % self.period as usize;
+
+        // smooth signal using simple averaging
+        // try more advanced filter
+        let mut sum = 0.0;
+        // let window = 10.0;
+        let mut window = damping.powf(2.0);
+        window = (2.0 as f32).max(window * self.pitch_track);
+        for i in 0..window as usize {
+            let idx = (self.read_pos + i) % self.period as usize;
+            sum += self.buffer[idx];
+        }
+        self.buffer[self.read_pos] = sum * (1.0 / window);
+
+        if self.is_stopped {
+            // fade out note
+            self.buffer[self.read_pos] *= 0.9;
+        }
+
+        self.buffer[self.read_pos]
+    }
+}
+
+#[derive(Clone)]
+pub struct ReverbNode {
+    reverb: Reverb,
+}
+
+impl ReverbNode {
+    fn new() -> Self {
+        Self {
+            reverb: Reverb::new(),
+        }
+    }
+}
+
+impl Node for ReverbNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let input = inputs.get(0).unwrap_or(&0.0);
+        self.reverb.process(*input)
+    }
+}
+
+#[derive(Clone)]
+pub struct DelayNode {
+    delay: Delay,
+}
+
+impl DelayNode {
+    fn new() -> Self {
+        Self {
+            delay: Delay::new(15000.0, 0.5),
+        }
+    }
+}
+
+impl Node for DelayNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let input = inputs.get(0).unwrap_or(&0.0);
+        self.delay.process(*input)
     }
 }

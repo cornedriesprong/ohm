@@ -1,10 +1,11 @@
 use koto::{derive::*, prelude::*, runtime::Result};
 
+type Constant = f32;
 type Signal = Box<Expr>;
 
 #[derive(Debug, Clone, KotoType, KotoCopy)]
 pub(crate) enum Expr {
-    Constant(f32),
+    Constant(Constant),
     Sine {
         freq: Signal,
     },
@@ -39,6 +40,22 @@ pub(crate) enum Expr {
     Seq {
         seq: Vec<f32>,
         trig: Signal,
+    },
+    Pipe {
+        delay: Signal,
+        input: Signal,
+    },
+    Pluck {
+        freq: Signal,
+        tone: Signal,
+        damping: Signal,
+        trig: Signal,
+    },
+    Reverb {
+        input: Signal,
+    },
+    Delay {
+        input: Signal,
     },
 }
 
