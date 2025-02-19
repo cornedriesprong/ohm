@@ -203,7 +203,7 @@ pub(crate) fn mix(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
     }
 }
 
-pub(crate) fn ar(trig: NodeKind, attack: NodeKind, release: NodeKind) -> NodeKind {
+pub(crate) fn ar(attack: NodeKind, release: NodeKind, trig: NodeKind) -> NodeKind {
     NodeKind::AR {
         trig: Box::new(trig),
         attack: Box::new(attack),
