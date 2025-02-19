@@ -38,7 +38,7 @@ pub(crate) enum Expr {
         input: Signal,
     },
     Seq {
-        seq: Vec<f32>,
+        values: Vec<f32>,
         trig: Signal,
     },
     Pipe {

@@ -11,7 +11,67 @@ use std::sync::{Arc, Mutex};
 
 const BUFFER_SIZE: usize = 8192;
 
-#[derive(Clone)]
+pub(crate) fn constant(value: f32) -> NodeKind {
+    NodeKind::Constant(ConstantNode::new(value))
+}
+
+pub(crate) fn sine() -> NodeKind {
+    NodeKind::Sine(SineNode::new())
+}
+
+pub(crate) fn square() -> NodeKind {
+    NodeKind::Square(SquareNode::new())
+}
+
+pub(crate) fn saw() -> NodeKind {
+    NodeKind::Saw(SawNode::new())
+}
+
+pub(crate) fn noise() -> NodeKind {
+    NodeKind::Noise(NoiseNode::new())
+}
+
+pub(crate) fn pulse() -> NodeKind {
+    NodeKind::Pulse(PulseNode::new())
+}
+
+pub(crate) fn gain() -> NodeKind {
+    NodeKind::Gain(GainNode::new())
+}
+
+pub(crate) fn mix() -> NodeKind {
+    NodeKind::Mix(MixNode::new())
+}
+
+pub(crate) fn ar() -> NodeKind {
+    NodeKind::AR(ARNode::new())
+}
+
+pub(crate) fn svf() -> NodeKind {
+    NodeKind::SVF(SVFNode::new())
+}
+
+pub(crate) fn seq(values: Vec<f32>) -> NodeKind {
+    NodeKind::Seq(SeqNode::new(values))
+}
+
+pub(crate) fn pipe() -> NodeKind {
+    NodeKind::Pipe(PipeNode::new())
+}
+
+pub(crate) fn pluck() -> NodeKind {
+    NodeKind::Pluck(PluckNode::new())
+}
+
+pub(crate) fn reverb() -> NodeKind {
+    NodeKind::Reverb(ReverbNode::new())
+}
+
+pub(crate) fn delay() -> NodeKind {
+    NodeKind::Delay(DelayNode::new())
+}
+
+#[derive(Clone, strum::AsRefStr)]
 pub(crate) enum NodeKind {
     Constant(ConstantNode),
     Sine(SineNode),
@@ -28,68 +88,6 @@ pub(crate) enum NodeKind {
     Pluck(PluckNode),
     Reverb(ReverbNode),
     Delay(DelayNode),
-}
-
-impl NodeKind {
-    pub(crate) fn constant(value: f32) -> Self {
-        NodeKind::Constant(ConstantNode::new(value))
-    }
-
-    pub(crate) fn sine() -> Self {
-        NodeKind::Sine(SineNode::new())
-    }
-
-    pub(crate) fn square() -> Self {
-        NodeKind::Square(SquareNode::new())
-    }
-
-    pub(crate) fn saw() -> Self {
-        NodeKind::Saw(SawNode::new())
-    }
-
-    pub(crate) fn noise() -> Self {
-        NodeKind::Noise(NoiseNode::new())
-    }
-
-    pub(crate) fn pulse() -> Self {
-        NodeKind::Pulse(PulseNode::new())
-    }
-
-    pub(crate) fn gain() -> Self {
-        NodeKind::Gain(GainNode::new())
-    }
-
-    pub(crate) fn mix() -> Self {
-        NodeKind::Mix(MixNode::new())
-    }
-
-    pub(crate) fn ar() -> Self {
-        NodeKind::AR(ARNode::new())
-    }
-
-    pub(crate) fn svf() -> Self {
-        NodeKind::SVF(SVFNode::new())
-    }
-
-    pub(crate) fn seq(values: Vec<f32>) -> Self {
-        NodeKind::Seq(SeqNode::new(values))
-    }
-
-    pub(crate) fn pipe() -> Self {
-        NodeKind::Pipe(PipeNode::new())
-    }
-
-    pub(crate) fn pluck() -> Self {
-        NodeKind::Pluck(PluckNode::new())
-    }
-
-    pub(crate) fn reverb() -> Self {
-        NodeKind::Reverb(ReverbNode::new())
-    }
-
-    pub(crate) fn delay() -> Self {
-        NodeKind::Delay(DelayNode::new())
-    }
 }
 
 impl Node for NodeKind {
@@ -119,22 +117,10 @@ impl Node for NodeKind {
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (NodeKind::Constant(a), NodeKind::Constant(b)) => a.value == b.value,
-            (NodeKind::Sine(_), NodeKind::Sine(_)) => true,
-            (NodeKind::Square(_), NodeKind::Square(_)) => true,
-            (NodeKind::Saw(_), NodeKind::Saw(_)) => true,
-            (NodeKind::Noise(_), NodeKind::Noise(_)) => true,
-            (NodeKind::Pulse(_), NodeKind::Pulse(_)) => true,
-            (NodeKind::Gain(_), NodeKind::Gain(_)) => true,
-            (NodeKind::Mix(_), NodeKind::Mix(_)) => true,
-            (NodeKind::AR(_), NodeKind::AR(_)) => true,
-            (NodeKind::SVF(_), NodeKind::SVF(_)) => true,
-            (NodeKind::Seq(a), NodeKind::Seq(b)) => a.values == b.values,
-            (NodeKind::Pipe(a), NodeKind::Pipe(b)) => a.buffer == b.buffer,
-            (NodeKind::Pluck(_), NodeKind::Pluck(_)) => true,
-            (NodeKind::Reverb(_), NodeKind::Reverb(_)) => true,
-            (NodeKind::Delay(_), NodeKind::Delay(_)) => true,
-            _ => false,
+            (Self::Constant(a), Self::Constant(b)) => a.value == b.value,
+            (Self::Seq(a), Self::Seq(b)) => a.values == b.values,
+            (Self::Pipe(a), Self::Pipe(b)) => a.buffer == b.buffer,
+            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
 }
@@ -142,21 +128,8 @@ impl PartialEq for NodeKind {
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            NodeKind::Constant(c) => write!(f, "Constant({})", c.value),
-            NodeKind::Sine(_) => write!(f, "Sine"),
-            NodeKind::Square(_) => write!(f, "Square"),
-            NodeKind::Saw(_) => write!(f, "Saw"),
-            NodeKind::Noise(_) => write!(f, "Noise"),
-            NodeKind::Pulse(_) => write!(f, "Pulse"),
-            NodeKind::Gain(_) => write!(f, "Gain"),
-            NodeKind::Mix(_) => write!(f, "Mix"),
-            NodeKind::AR(_) => write!(f, "AR"),
-            NodeKind::SVF(_) => write!(f, "SVF"),
-            NodeKind::Seq(_) => write!(f, "Seq"),
-            NodeKind::Pipe(_) => write!(f, "Delay"),
-            NodeKind::Pluck(_) => write!(f, "Pluck"),
-            NodeKind::Reverb(_) => write!(f, "Pluck"),
-            NodeKind::Delay(_) => write!(f, "Delay"),
+            NodeKind::Constant(c) => write!(f, "{}({})", self.as_ref(), c.value),
+            _ => write!(f, "{}", self.as_ref()),
         }
     }
 }

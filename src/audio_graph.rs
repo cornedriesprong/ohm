@@ -1,14 +1,18 @@
 use crossbeam::channel::{Receiver, Sender};
-use petgraph::{graph::NodeIndex, prelude::DiGraph, visit::EdgeRef};
+use petgraph::{
+    graph::NodeIndex,
+    prelude::StableDiGraph,
+    visit::{EdgeRef, IntoEdgeReferences},
+};
 use rtsan_standalone::nonblocking;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::nodes::{Node, NodeKind};
+use crate::nodes::{Node, *};
 use crate::parser::Expr;
 
 type BoxedNode = Box<NodeKind>;
-type Graph = DiGraph<BoxedNode, ()>;
+type Graph = StableDiGraph<BoxedNode, ()>;
 
 enum Message {
     AddNode(NodeKind),
@@ -116,6 +120,7 @@ impl GraphPlayer {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct AudioGraph {
     graph: Graph,
     sorted_nodes: Vec<NodeIndex>,
@@ -126,7 +131,7 @@ pub(crate) struct AudioGraph {
 impl AudioGraph {
     pub(crate) fn new() -> Self {
         Self {
-            graph: DiGraph::new(),
+            graph: Graph::new(),
             sorted_nodes: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -245,34 +250,34 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 
     fn add_expr_to_graph(expr: Expr, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            Expr::Constant(n) => graph.add_node(NodeKind::constant(n)),
-            Expr::Sine { freq } => add_node(vec![freq], NodeKind::sine(), graph),
-            Expr::Square { freq } => add_node(vec![freq], NodeKind::square(), graph),
-            Expr::Saw { freq } => add_node(vec![freq], NodeKind::saw(), graph),
-            Expr::Pulse { freq } => add_node(vec![freq], NodeKind::pulse(), graph),
-            Expr::Noise => graph.add_node(NodeKind::noise()),
-            Expr::Gain { lhs: a, rhs: b } => add_node(vec![a, b], NodeKind::gain(), graph),
-            Expr::Mix { lhs: a, rhs: b } => add_node(vec![a, b], NodeKind::mix(), graph),
+            Expr::Constant(n) => graph.add_node(constant(n)),
+            Expr::Sine { freq } => add_node(vec![freq], sine(), graph),
+            Expr::Square { freq } => add_node(vec![freq], square(), graph),
+            Expr::Saw { freq } => add_node(vec![freq], saw(), graph),
+            Expr::Pulse { freq } => add_node(vec![freq], pulse(), graph),
+            Expr::Noise => graph.add_node(noise()),
+            Expr::Gain { lhs: a, rhs: b } => add_node(vec![a, b], gain(), graph),
+            Expr::Mix { lhs: a, rhs: b } => add_node(vec![a, b], mix(), graph),
             Expr::AR {
                 attack,
                 release,
                 trig,
-            } => add_node(vec![attack, release, trig], NodeKind::ar(), graph),
+            } => add_node(vec![attack, release, trig], ar(), graph),
             Expr::SVF {
                 cutoff,
                 resonance,
                 input,
-            } => add_node(vec![cutoff, resonance, input], NodeKind::svf(), graph),
-            Expr::Seq { seq, trig } => add_node(vec![trig], NodeKind::seq(seq), graph),
-            Expr::Pipe { delay, input } => add_node(vec![delay, input], NodeKind::pipe(), graph),
+            } => add_node(vec![cutoff, resonance, input], svf(), graph),
+            Expr::Seq { values, trig } => add_node(vec![trig], seq(values), graph),
+            Expr::Pipe { delay, input } => add_node(vec![delay, input], pipe(), graph),
             Expr::Pluck {
                 freq,
                 tone,
                 damping,
                 trig,
-            } => add_node(vec![freq, tone, damping, trig], NodeKind::pluck(), graph),
-            Expr::Reverb { input } => add_node(vec![input], NodeKind::reverb(), graph),
-            Expr::Delay { input } => add_node(vec![input], NodeKind::delay(), graph),
+            } => add_node(vec![freq, tone, damping, trig], pluck(), graph),
+            Expr::Reverb { input } => add_node(vec![input], reverb(), graph),
+            Expr::Delay { input } => add_node(vec![input], delay(), graph),
         }
     }
 
@@ -331,34 +336,28 @@ mod tests {
 
     #[test]
     fn test_parse_graph_3() {
-        // sine((sine(0.1) + 2) * 100) * 0.2
-        let expr = Expr::Gain {
-            lhs: Box::new(Expr::Sine {
-                freq: Box::new(Expr::Gain {
-                    lhs: Box::new(Expr::Mix {
-                        lhs: Box::new(Expr::Sine {
-                            freq: Box::new(Expr::Constant(0.1)),
-                        }),
-                        rhs: Box::new(Expr::Constant(2.0)),
-                    }),
-                    rhs: Box::new(Expr::Constant(100.0)),
+        // sine(sine(0.1) * 100)
+        let expr = Box::new(Expr::Sine {
+            freq: Box::new(Expr::Gain {
+                lhs: Box::new(Expr::Sine {
+                    freq: Box::new(Expr::Constant(0.1)),
                 }),
+                rhs: Box::new(Expr::Constant(100.0)),
             }),
-            rhs: Box::new(Expr::Constant(0.2)),
-        };
+        });
 
-        let mut graph = parse_to_audio_graph(expr);
+        let mut graph = parse_to_audio_graph(*expr);
 
-        assert_eq!(graph.graph.node_count(), 9);
-        assert_eq!(graph.graph.edge_count(), 8);
+        assert_eq!(graph.graph.node_count(), 5);
+        assert_eq!(graph.graph.edge_count(), 4);
         assert_eq!(graph.tick(), 0.0);
     }
 
     #[test]
     fn test_node_comparison() {
-        let node1 = NodeKind::constant(1.0);
-        let node2 = NodeKind::constant(1.0);
-        let node3 = NodeKind::constant(2.0);
+        let node1 = constant(1.0);
+        let node2 = constant(1.0);
+        let node3 = constant(2.0);
 
         assert_eq!(node1, node2);
         assert_ne!(node1, node3);
@@ -367,45 +366,42 @@ mod tests {
     #[test]
     fn test_graph_diff() {
         let mut old = AudioGraph::new();
-        let mut new = AudioGraph::new();
 
-        let const_idx1 = old.add_node(NodeKind::constant(1.0));
-        let sine_idx1 = old.add_node(NodeKind::sine());
+        let const_idx1 = old.add_node(constant(1.0));
+        let sine_idx1 = old.add_node(sine());
         old.connect_node(const_idx1, sine_idx1);
+        let mut graph_player = GraphPlayer::new(old);
 
-        let const_idx2 = new.add_node(NodeKind::constant(2.0)); // Same
-        let sine_idx2 = new.add_node(NodeKind::sine());
+        let mut new = AudioGraph::new();
+        let const_idx2 = new.add_node(constant(2.0)); // Same
+        let sine_idx2 = new.add_node(sine());
         new.connect_node(const_idx2, sine_idx2);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
+        graph_player.replace_graph(new.clone());
+        // we need to tick the player for the changes to propagate
+        graph_player.tick();
 
-        println!("updates {:?}", updates);
-        println!("additions {:?}", additions);
-        println!("removals {:?}", removals);
-
-        assert_eq!(updates.len(), 1, "Should have one update");
-        assert!(additions.is_empty(), "Should have no additions");
-        assert!(removals.is_empty(), "Should have no removals");
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 
     #[test]
     fn test_node_tick() {
-        let mut node = NodeKind::constant(42.0);
+        let mut node = constant(42.0);
         assert_eq!(node.tick(&[]), 42.0);
     }
 
     fn create_complex_graph() -> AudioGraph {
         let mut graph = AudioGraph::new();
 
-        let freq = graph.add_node(NodeKind::constant(440.0));
-        let amp = graph.add_node(NodeKind::constant(0.5));
-        let osc = graph.add_node(NodeKind::sine());
-        let env = graph.add_node(NodeKind::ar());
-        let gain = graph.add_node(NodeKind::gain());
+        let freq = graph.add_node(constant(440.0));
+        let amp = graph.add_node(constant(0.5));
+        let osc = graph.add_node(sine());
+        let env = graph.add_node(ar());
+        let gain = graph.add_node(gain());
 
-        let cutoff = graph.add_node(NodeKind::constant(1000.0));
-        let resonance = graph.add_node(NodeKind::constant(0.7));
-        let filter = graph.add_node(NodeKind::svf());
+        let cutoff = graph.add_node(constant(1000.0));
+        let resonance = graph.add_node(constant(0.7));
+        let filter = graph.add_node(svf());
 
         graph.connect_node(freq, osc);
         graph.connect_node(amp, gain);
@@ -421,152 +417,130 @@ mod tests {
     #[test]
     fn test_simple_update() {
         let mut old = AudioGraph::new();
-        let mut new = AudioGraph::new();
-
-        let const_idx1 = old.add_node(NodeKind::constant(1.0));
-        let sine_idx1 = old.add_node(NodeKind::sine());
+        let const_idx1 = old.add_node(constant(1.0));
+        let sine_idx1 = old.add_node(sine());
         old.connect_node(const_idx1, sine_idx1);
+        let mut graph_player = GraphPlayer::new(old);
 
-        let const_idx2 = new.add_node(NodeKind::constant(2.0));
-        let sine_idx2 = new.add_node(NodeKind::sine());
+        let mut new = AudioGraph::new();
+        let const_idx2 = new.add_node(constant(2.0));
+        let sine_idx2 = new.add_node(sine());
         new.connect_node(const_idx2, sine_idx2);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
-        assert_eq!(updates.len(), 1, "Should have one update");
-        assert!(additions.is_empty(), "Should have no additions");
-        assert!(removals.is_empty(), "Should have no removals");
+        graph_player.replace_graph(new.clone());
+        // we need to tick the player for the changes to propagate
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 
     #[test]
     fn test_change_oscillator_type() {
         let mut old = AudioGraph::new();
-        let mut new = AudioGraph::new();
 
-        // Create original graph with Sine
-        let freq1 = old.add_node(NodeKind::constant(440.0));
-        let osc1 = old.add_node(NodeKind::sine());
+        // create original graph with Sine
+        let freq1 = old.add_node(constant(440.0));
+        let osc1 = old.add_node(sine());
         old.connect_node(freq1, osc1);
+        let mut graph_player = GraphPlayer::new(old);
 
-        // Create new graph with Square
-        let freq2 = new.add_node(NodeKind::constant(440.0));
-        let osc2 = new.add_node(NodeKind::square());
+        // create new graph with Square
+        let mut new = AudioGraph::new();
+        let freq2 = new.add_node(constant(440.0));
+        let osc2 = new.add_node(square());
         new.connect_node(freq2, osc2);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
-        assert_eq!(updates.len(), 1, "Should update oscillator type");
-        assert_eq!(additions.len(), 0);
-        assert_eq!(removals.len(), 0);
+        graph_player.replace_graph(new.clone());
+        // we need to tick the player for the changes to propagate
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 
     #[test]
     fn test_add_filter() {
         let mut old = AudioGraph::new();
-        let mut new = AudioGraph::new();
 
-        // Original simple oscillator
-        let freq1 = old.add_node(NodeKind::constant(440.0));
-        let osc1 = old.add_node(NodeKind::sine());
+        // original simple oscillator
+        let freq1 = old.add_node(constant(440.0));
+        let osc1 = old.add_node(sine());
         old.connect_node(freq1, osc1);
+        let mut graph_player = GraphPlayer::new(old);
 
-        // New graph with added filter
-        let freq2 = new.add_node(NodeKind::constant(440.0));
-        let osc2 = new.add_node(NodeKind::sine());
-        let cutoff = new.add_node(NodeKind::constant(1000.0));
-        let filter = new.add_node(NodeKind::svf());
+        // new graph with added filter
+        let mut new = AudioGraph::new();
+        let freq2 = new.add_node(constant(440.0));
+        let osc2 = new.add_node(sine());
+        let cutoff = new.add_node(constant(1000.0));
+        let filter = new.add_node(svf());
         new.connect_node(freq2, osc2);
         new.connect_node(osc2, filter);
         new.connect_node(cutoff, filter);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
-        assert!(updates.is_empty(), "No updates expected");
-        assert_eq!(additions.len(), 2, "Should add filter and cutoff nodes");
-        assert!(removals.is_empty());
+        graph_player.replace_graph(new.clone());
+        // we need to tick the player for the changes to propagate
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 
     #[test]
     fn test_complex_modifications() {
-        let mut old = create_complex_graph();
+        let old = create_complex_graph();
+        let mut graph_player = GraphPlayer::new(old);
+
         let mut new = create_complex_graph();
 
-        // Modify new graph
-        // 1. Change frequency
-        let new_freq = new.add_node(NodeKind::constant(880.0));
+        let new_freq = new.add_node(constant(880.0));
 
-        // 2. Add sequence modulation
-        let seq = new.add_node(NodeKind::seq([100.0, 200.0].to_vec()));
-        let seq_amp = new.add_node(NodeKind::constant(0.3));
+        let seq = new.add_node(seq([100.0, 200.0].to_vec()));
+        let seq_amp = new.add_node(constant(0.3));
 
-        // 3. Change oscillator type
-        let new_osc = new.add_node(NodeKind::saw());
+        let new_osc = new.add_node(saw());
 
-        // 4. Add noise mix
-        let noise = new.add_node(NodeKind::noise());
-        let mix = new.add_node(NodeKind::mix());
+        let noise = new.add_node(noise());
+        let mix = new.add_node(mix());
 
-        // Connect new components
         new.connect_node(new_freq, new_osc);
         new.connect_node(seq_amp, seq);
         new.connect_node(seq, mix);
         new.connect_node(noise, mix);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
+        graph_player.replace_graph(new.clone());
+        graph_player.tick();
 
-        // Verify changes
-        // assert!(!updates.is_empty(), "Should have updates");
-        assert!(!additions.is_empty(), "Should have additions");
-        // assert!(!removals.is_empty(), "Should have removals");
-
-        // Apply changes
-        old.graph.clear_edges();
-
-        for (id, node) in updates {
-            old.replace_node(id, node);
-        }
-
-        for (_, node) in additions {
-            old.add_node(node);
-        }
-
-        for id in removals {
-            old.remove_node(id);
-        }
-
-        old.reconnect_edges(&new);
-
-        // Verify final state
-        assert_eq!(old.graph.node_count(), new.graph.node_count());
-        assert_eq!(old.graph.edge_count(), new.graph.edge_count());
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 
     #[test]
     fn test_remove_components() {
-        let mut old = create_complex_graph();
-        let mut new = AudioGraph::new();
+        let old = create_complex_graph();
+        let mut graph_player = GraphPlayer::new(old);
 
-        // Create simplified version with just oscillator
-        let freq = new.add_node(NodeKind::constant(440.0));
-        let osc = new.add_node(NodeKind::sine());
+        let mut new = AudioGraph::new();
+        let freq = new.add_node(constant(440.0));
+        let osc = new.add_node(sine());
         new.connect_node(freq, osc);
 
-        let (updates, additions, removals) = diff_graph(&old, &new);
+        graph_player.replace_graph(new.clone());
+        graph_player.tick();
 
-        assert_eq!(updates.len(), 1, "Update constant");
-        assert!(additions.is_empty(), "No additions expected");
-        assert!(!removals.is_empty(), "Should remove multiple nodes");
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
 
-        // Apply changes
-        old.graph.clear_edges();
+        let mut new = AudioGraph::new();
+        let freq = new.add_node(constant(440.0));
+        let osc = new.add_node(sine());
+        new.connect_node(freq, osc);
 
-        for id in removals {
-            old.remove_node(id);
-        }
+        graph_player.replace_graph(new.clone());
+        graph_player.tick();
 
-        old.reconnect_edges(&new);
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
 
-        assert_eq!(
-            old.graph.node_count(),
-            2,
-            "Should only have freq and osc nodes"
-        );
+        let new = create_complex_graph();
+        graph_player.replace_graph(new.clone());
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
     }
 }

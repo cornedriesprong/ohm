@@ -12,6 +12,7 @@ notify = "8.0.0"
 petgraph = "0.6.5"
 rand = { version = "0.8.5", features = ["small_rng"] }
 rtsan-standalone = "0.1.0"
+strum = { version = "0.27.1", features = ["derive"] }
 
 [features]
 rtsan = ["rtsan-standalone/enable"]

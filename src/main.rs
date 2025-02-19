@@ -196,7 +196,7 @@ fn create_env(koto: &Koto) {
             return unexpected_args("2 arguments: list, trig", args);
         }
 
-        let vec: Vec<_> = if let KValue::List(list) = &args[0] {
+        let values: Vec<_> = if let KValue::List(list) = &args[0] {
             list.data()
                 .iter()
                 .map(|v| {
@@ -213,7 +213,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             Expr::Seq {
-                seq: vec,
+                values,
                 trig: Box::new(expr_from_kvalue(&args[1])?),
             }
             .into(),
