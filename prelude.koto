@@ -1,0 +1,16 @@
+A4_FREQ = 440
+A4_MIDI = 69
+
+C_MAJ = [0, 2, 4, 5, 7, 9, 11]
+C_MIN = [0, 2, 3, 5, 7, 8, 10]
+
+ptof = |p| 
+  A4_FREQ * 2.pow (p - A4_MIDI) / 12.0
+
+ftop = |f| 
+  ((f / A4_FREQ).log2() * 12 + A4_MIDI).round()
+
+assert_eq(ptof(A4_MIDI), A4_FREQ)
+assert_eq(ftop(A4_FREQ), A4_MIDI)
+
+sine(200)
