@@ -28,13 +28,15 @@ pub(crate) struct GraphPlayer {
 }
 
 impl GraphPlayer {
-    pub(crate) fn new(graph: AudioGraph) -> Self {
+    pub(crate) fn new(mut graph: AudioGraph) -> Self {
         let (sender, receiver) = crossbeam::channel::bounded(1024);
-        return Self {
+        graph.update_processing_order();
+
+        Self {
             graph,
             sender,
             receiver,
-        };
+        }
     }
 
     #[inline]
@@ -97,7 +99,9 @@ impl GraphPlayer {
 
     fn fetch_updates(&mut self) {
         // fetch pending graph updates from channel
+        let mut did_update = false;
         for tx in self.receiver.try_iter() {
+            did_update = true;
             match tx {
                 Message::AddNode(node) => {
                     self.graph.add_node(node);
@@ -115,6 +119,10 @@ impl GraphPlayer {
                     self.graph.reconnect_edges(&new);
                 }
             }
+        }
+
+        if did_update {
+            self.graph.update_processing_order();
         }
     }
 }
@@ -139,18 +147,15 @@ impl AudioGraph {
 
     pub(crate) fn add_node(&mut self, node: NodeKind) -> NodeIndex {
         let index = self.graph.add_node(Box::new(node));
-        self.update_processing_order();
         index
     }
 
     pub(crate) fn remove_node(&mut self, node: NodeIndex) {
         self.graph.remove_node(node);
-        self.update_processing_order();
     }
 
     pub(crate) fn replace_node(&mut self, at: NodeIndex, new: NodeKind) {
         self.graph[at] = Box::new(new);
-        self.update_processing_order();
     }
 
     #[inline]
@@ -172,7 +177,7 @@ impl AudioGraph {
             self.outputs[node_index.index()] = self.graph[node_index].tick(&self.inputs);
         }
 
-        self.outputs[self.sorted_nodes.last().unwrap().index()]
+        self.outputs[self.sorted_nodes.len() - 1]
     }
 
     pub(crate) fn clear_edges(&mut self) {
@@ -197,13 +202,10 @@ impl AudioGraph {
         for edge in old_edges.difference(&new_edges) {
             self.graph.remove_edge(*edge);
         }
-
-        self.update_processing_order();
     }
 
     fn connect_node(&mut self, from: NodeIndex, to: NodeIndex) {
         self.graph.add_edge(from.into(), to.into(), ());
-        self.update_processing_order();
     }
 
     fn update_processing_order(&mut self) {
@@ -431,6 +433,49 @@ mod tests {
         graph_player.tick();
 
         assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
+    }
+
+    #[test]
+    fn test_complex_modifications2() {
+        let trig = pulse(constant(7.2));
+        let sq = seq(vec![200.0, 300.0, 400.0], trig.clone());
+        let lfo = mix(sine(constant(0.4)), constant(1.0));
+        let graph = parse_to_audio_graph(gain(
+            saw(sq),
+            ar(constant(1.0), gain(lfo, constant(10000.0)), trig),
+        ));
+        assert_eq!(graph.graph.node_count(), 10);
+        assert_eq!(graph.graph.edge_count(), 9);
+        let mut graph_player = GraphPlayer::new(graph);
+        graph_player.tick();
+
+        // remove AR release modulation
+        let t2 = pulse(constant(7.2));
+        let sq = seq(vec![200.0, 300.0, 400.0], t2.clone());
+        let lfo = mix(sine(constant(0.4)), constant(1.0));
+        let graph = parse_to_audio_graph(gain(
+            saw(sq),
+            ar(constant(1.0), gain(lfo, constant(10000.0)), t2),
+        ));
+
+        graph_player.replace_graph(graph.clone());
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", graph));
+
+        // put AR release modulation back
+        let trig = pulse(constant(7.2));
+        let sq = seq(vec![200.0, 300.0, 400.0], trig.clone());
+        let lfo = mix(sine(constant(0.4)), constant(1.0));
+        let graph = parse_to_audio_graph(gain(
+            saw(sq),
+            ar(constant(1.0), gain(lfo, constant(10000.0)), trig),
+        ));
+
+        graph_player.replace_graph(graph.clone());
+        graph_player.tick();
+
+        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", graph));
     }
 
     #[test]

@@ -288,9 +288,22 @@ impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Constant(a), Self::Constant(b)) => a.value == b.value,
+            (Self::Sine { .. }, Self::Sine { .. }) => true,
+            (Self::Square { .. }, Self::Square { .. }) => true,
+            (Self::Saw { .. }, Self::Saw { .. }) => true,
+            (Self::Pulse { .. }, Self::Pulse { .. }) => true,
+            (Self::Noise(_), Self::Noise(_)) => true,
+            (Self::Gain { .. }, Self::Gain { .. }) => true,
+            (Self::Mix { .. }, Self::Mix { .. }) => true,
+            (Self::AR { .. }, Self::AR { .. }) => true,
+            (Self::SVF { .. }, Self::SVF { .. }) => true,
             (Self::Seq { node: n1, .. }, Self::Seq { node: n2, .. }) => n1.values == n2.values,
             (Self::Pipe { node: n1, .. }, Self::Pipe { node: n2, .. }) => n1.buffer == n2.buffer,
-            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
+            (Self::Pluck { node: n1, .. }, Self::Pluck { node: n2, .. }) => n1.buffer == n2.buffer,
+            (Self::Reverb { .. }, Self::Reverb { .. }) => true,
+            (Self::Delay { .. }, Self::Delay { .. }) => true,
+            _ => false,
+            // _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
 }
@@ -342,14 +355,14 @@ impl Node for SineNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let hz = inputs.get(0).unwrap_or(&0.0);
+        let freq = inputs.get(0).expect("sine: missing freq input");
         let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
 
         let y = (2. * PI * self.phase).sin();
-        self.phase += hz / SAMPLE_RATE;
+        self.phase += freq / SAMPLE_RATE;
         if self.phase >= 1. {
             self.phase -= 1.;
         }
@@ -372,13 +385,13 @@ impl Node for SquareNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let hz = inputs.get(0).unwrap_or(&0.0);
+        let freq = inputs.get(0).expect("square: missing freq input");
         let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
 
-        let inc = 2. * PI * hz / SAMPLE_RATE;
+        let inc = 2. * PI * freq / SAMPLE_RATE;
         let y = if self.phase < PI { 1. } else { -1. };
         self.phase += inc;
 
@@ -467,13 +480,13 @@ impl Node for SawNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let hz = inputs.get(0).unwrap_or(&0.0);
+        let freq = inputs.get(0).expect("saw: missing freq input");
         let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
 
-        self.period = self.sample_rate / hz;
+        self.period = self.sample_rate / freq;
         let sample = self.next_sample();
         self.saw = self.saw * 0.997 + sample;
         self.saw
@@ -520,14 +533,14 @@ impl Node for PulseNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let hz = inputs.get(0).unwrap_or(&0.0);
+        let freq = inputs.get(0).expect("pulse: missing freq input");
         let reset_phase = inputs.get(1).unwrap_or(&0.0);
         if *reset_phase > 0.0 {
             self.phase = 0.0;
         }
 
         self.prev_phase = self.phase;
-        self.phase += 2. * PI * hz / SAMPLE_RATE;
+        self.phase += 2. * PI * freq / SAMPLE_RATE;
 
         if self.phase >= 2. * PI {
             self.phase -= 2. * PI;
@@ -551,9 +564,9 @@ impl Node for GainNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let a = inputs.get(0).unwrap_or(&0.0);
-        let b = inputs.get(1).unwrap_or(&a);
-        a * b
+        let lhs = inputs.get(0).expect("gain: missing lhs input");
+        let rhs = inputs.get(1).expect("gain: missing rhs input");
+        lhs * rhs
     }
 }
 
@@ -570,9 +583,9 @@ impl Node for MixNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let a = inputs.get(0).unwrap_or(&0.0);
-        let b = inputs.get(1).unwrap_or(&a);
-        a + b
+        let lhs = inputs.get(0).expect("mix: missing lhs input");
+        let rhs = inputs.get(1).expect("mix: missing rhs input");
+        lhs + rhs
     }
 }
 
@@ -612,9 +625,9 @@ impl Node for ARNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let attack = inputs.get(0).unwrap_or(&1.0);
-        let release = inputs.get(1).unwrap_or(&1.0);
-        let trig = inputs.get(2).unwrap_or(&1.0);
+        let attack = inputs.get(0).expect("missing attack input");
+        let release = inputs.get(1).expect("missing release input");
+        let trig = inputs.get(2).expect("missing trigger input");
 
         if *trig > 0.0 {
             self.state = EnvelopeState::Attack;
@@ -704,10 +717,10 @@ impl Node for SVFNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let cutoff = inputs.get(0).unwrap_or(&1.0);
+        let cutoff = inputs.get(0).expect("svf: missing cutoff input");
         self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
-        let resonance = inputs.get(1).unwrap_or(&1.0);
-        let input = inputs.get(2).unwrap_or(&0.0);
+        let resonance = inputs.get(1).expect("svf: missing resonance input");
+        let input = inputs.get(2).expect("svf: missing input");
         self.k = 1.0 / resonance;
         self.update_coefficients();
 
@@ -748,7 +761,7 @@ impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let trig = inputs.get(0).unwrap_or(&0.0);
+        let trig = inputs.get(0).expect("seq: missing trigger input");
         if *trig > 0.0 {
             self.increment();
         }
@@ -776,8 +789,8 @@ impl Node for PipeNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let delay = inputs.get(0).unwrap_or(&0.0);
-        let input = inputs.get(1).unwrap_or(&0.0);
+        let delay = inputs.get(0).expect("pipe: missing delay input");
+        let input = inputs.get(1).expect("pipe: missing input");
         self.buffer[self.read_pos] = *input;
         self.read_pos = (self.read_pos + 1) % BUFFER_SIZE;
         *self
@@ -860,10 +873,10 @@ impl Node for PluckNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).unwrap_or(&440.0);
-        let tone = inputs.get(1).unwrap_or(&0.5);
-        let damping = inputs.get(2).unwrap_or(&0.5);
-        let trig = inputs.get(3).unwrap_or(&0.0);
+        let freq = inputs.get(0).expect("pluck: missing freq input");
+        let tone = inputs.get(1).expect("pluck: missing tone input");
+        let damping = inputs.get(2).expect("pluck: missing damping input");
+        let trig = inputs.get(3).expect("pluck: missing trigger input");
 
         if *trig > 0.0 {
             self.play(*freq, *tone);
@@ -915,7 +928,7 @@ impl Node for ReverbNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let input = inputs.get(0).unwrap_or(&0.0);
+        let input = inputs.get(0).expect("reverb: missing input");
         self.reverb.process(*input)
     }
 }
@@ -937,7 +950,7 @@ impl Node for DelayNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let input = inputs.get(0).unwrap_or(&0.0);
+        let input = inputs.get(0).expect("delay: missing input");
         self.delay.process(*input)
     }
 }
