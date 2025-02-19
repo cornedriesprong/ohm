@@ -107,7 +107,6 @@ where
     for res in rx {
         match res {
             Ok(Event { kind, .. }) if kind.is_modify() => {
-                println!("updating audio graph");
                 let now = Instant::now();
                 if now.duration_since(last_update) >= debounce_duration {
                     if let Err(e) = update_audio_graph(Path::new(filename)) {
@@ -179,7 +178,6 @@ fn create_env(koto: &Koto) {
             unexpected_type("list", &args[0])?
         };
         let trig = expr_from_kvalue(&args[1])?;
-        println!("values: {:?}", values);
 
         Ok(KValue::Object(seq(values, trig).into()))
     });
