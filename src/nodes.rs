@@ -1,13 +1,193 @@
+use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
 use crate::dsp::reverb::Reverb;
 use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
+use koto::{derive::*, prelude::*, runtime::Result};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rtsan_standalone::nonblocking;
 use std::f32::consts::{FRAC_PI_4, PI};
 use std::sync::{Arc, Mutex};
+use strum::AsRefStr;
+
+#[derive(Clone, KotoType, KotoCopy, AsRefStr)]
+pub(crate) enum NodeKind {
+    Constant(ConstantNode),
+    Sine {
+        freq: BoxedNode,
+        node: SineNode,
+    },
+    Square {
+        freq: BoxedNode,
+        node: SquareNode,
+    },
+    Saw {
+        freq: BoxedNode,
+        node: SawNode,
+    },
+    Pulse {
+        freq: BoxedNode,
+        node: PulseNode,
+    },
+    Noise(NoiseNode),
+    Mix {
+        lhs: BoxedNode,
+        rhs: BoxedNode,
+        node: MixNode,
+    },
+    Gain {
+        lhs: BoxedNode,
+        rhs: BoxedNode,
+        node: GainNode,
+    },
+    AR {
+        trig: BoxedNode,
+        attack: BoxedNode,
+        release: BoxedNode,
+        node: ARNode,
+    },
+    SVF {
+        cutoff: BoxedNode,
+        resonance: BoxedNode,
+        input: BoxedNode,
+        node: SVFNode,
+    },
+    Seq {
+        trig: BoxedNode,
+        node: SeqNode,
+    },
+    Pipe {
+        delay: BoxedNode,
+        input: BoxedNode,
+        node: PipeNode,
+    },
+    Pluck {
+        freq: BoxedNode,
+        tone: BoxedNode,
+        damping: BoxedNode,
+        trig: BoxedNode,
+        node: PluckNode,
+    },
+    Reverb {
+        input: BoxedNode,
+        node: ReverbNode,
+    },
+    Delay {
+        input: BoxedNode,
+        node: DelayNode,
+    },
+}
+
+impl KotoObject for NodeKind {
+    // TODO: test these
+    fn add(&self, rhs: &KValue) -> Result<KValue> {
+        match (self, rhs) {
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+            )),
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Mix {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
+                    node: MixNode::new(),
+                }
+                .into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                NodeKind::Mix {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
+                    node: MixNode::new(),
+                }
+                .into(),
+            )),
+            _ => panic!("invalid add operation"),
+        }
+    }
+
+    fn multiply(&self, rhs: &KValue) -> Result<KValue> {
+        match (self, rhs) {
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+            )),
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Gain {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
+                    node: GainNode::new(),
+                }
+                .into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                NodeKind::Gain {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
+                    node: GainNode::new(),
+                }
+                .into(),
+            )),
+            _ => panic!("invalid multiply operation"),
+        }
+    }
+
+    fn subtract(&self, rhs: &KValue) -> Result<KValue> {
+        match (self, rhs) {
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+            )),
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Mix {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
+                    node: MixNode::new(),
+                }
+                .into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                NodeKind::Mix {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
+                    node: MixNode::new(),
+                }
+                .into(),
+            )),
+            _ => panic!("invalid subtract operation"),
+        }
+    }
+
+    fn divide(&self, rhs: &KValue) -> Result<KValue> {
+        match (self, rhs) {
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+            )),
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                NodeKind::Gain {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
+                    node: GainNode::new(),
+                }
+                .into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                NodeKind::Gain {
+                    lhs: Box::new(self.clone()),
+                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
+                    node: GainNode::new(),
+                }
+                .into(),
+            )),
+            _ => panic!("invalid divide operation"),
+        }
+    }
+}
+
+impl KotoEntries for NodeKind {
+    fn entries(&self) -> Option<KMap> {
+        None
+    }
+}
 
 const BUFFER_SIZE: usize = 8192;
 
@@ -15,79 +195,109 @@ pub(crate) fn constant(value: f32) -> NodeKind {
     NodeKind::Constant(ConstantNode::new(value))
 }
 
-pub(crate) fn sine() -> NodeKind {
-    NodeKind::Sine(SineNode::new())
+pub(crate) fn sine(freq: NodeKind) -> NodeKind {
+    NodeKind::Sine {
+        freq: Box::new(freq),
+        node: SineNode::new(),
+    }
 }
 
-pub(crate) fn square() -> NodeKind {
-    NodeKind::Square(SquareNode::new())
+pub(crate) fn square(freq: NodeKind) -> NodeKind {
+    NodeKind::Square {
+        freq: Box::new(freq),
+        node: SquareNode::new(),
+    }
 }
 
-pub(crate) fn saw() -> NodeKind {
-    NodeKind::Saw(SawNode::new())
+pub(crate) fn saw(freq: NodeKind) -> NodeKind {
+    NodeKind::Saw {
+        freq: Box::new(freq),
+        node: SawNode::new(),
+    }
 }
 
 pub(crate) fn noise() -> NodeKind {
     NodeKind::Noise(NoiseNode::new())
 }
 
-pub(crate) fn pulse() -> NodeKind {
-    NodeKind::Pulse(PulseNode::new())
+pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
+    NodeKind::Pulse {
+        freq: Box::new(freq),
+        node: PulseNode::new(),
+    }
 }
 
-pub(crate) fn gain() -> NodeKind {
-    NodeKind::Gain(GainNode::new())
+pub(crate) fn gain(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
+    NodeKind::Gain {
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        node: GainNode::new(),
+    }
 }
 
-pub(crate) fn mix() -> NodeKind {
-    NodeKind::Mix(MixNode::new())
+pub(crate) fn mix(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
+    NodeKind::Mix {
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        node: MixNode::new(),
+    }
 }
 
-pub(crate) fn ar() -> NodeKind {
-    NodeKind::AR(ARNode::new())
+pub(crate) fn ar(trig: NodeKind, attack: NodeKind, release: NodeKind) -> NodeKind {
+    NodeKind::AR {
+        trig: Box::new(trig),
+        attack: Box::new(attack),
+        release: Box::new(release),
+        node: ARNode::new(),
+    }
 }
 
-pub(crate) fn svf() -> NodeKind {
-    NodeKind::SVF(SVFNode::new())
+pub(crate) fn svf(cutoff: NodeKind, resonance: NodeKind, input: NodeKind) -> NodeKind {
+    NodeKind::SVF {
+        cutoff: Box::new(cutoff),
+        resonance: Box::new(resonance),
+        input: Box::new(input),
+        node: SVFNode::new(),
+    }
 }
 
-pub(crate) fn seq(values: Vec<f32>) -> NodeKind {
-    NodeKind::Seq(SeqNode::new(values))
+pub(crate) fn seq(values: Vec<f32>, trig: NodeKind) -> NodeKind {
+    NodeKind::Seq {
+        trig: Box::new(trig),
+        node: SeqNode::new(values),
+    }
 }
 
-pub(crate) fn pipe() -> NodeKind {
-    NodeKind::Pipe(PipeNode::new())
+pub(crate) fn pipe(delay: NodeKind, input: NodeKind) -> NodeKind {
+    NodeKind::Pipe {
+        delay: Box::new(delay),
+        input: Box::new(input),
+        node: PipeNode::new(),
+    }
 }
 
-pub(crate) fn pluck() -> NodeKind {
-    NodeKind::Pluck(PluckNode::new())
+pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: NodeKind) -> NodeKind {
+    NodeKind::Pluck {
+        freq: Box::new(freq),
+        tone: Box::new(tone),
+        damping: Box::new(damping),
+        trig: Box::new(trig),
+        node: PluckNode::new(),
+    }
 }
 
-pub(crate) fn reverb() -> NodeKind {
-    NodeKind::Reverb(ReverbNode::new())
+pub(crate) fn reverb(input: NodeKind) -> NodeKind {
+    NodeKind::Reverb {
+        input: Box::new(input),
+        node: ReverbNode::new(),
+    }
 }
 
-pub(crate) fn delay() -> NodeKind {
-    NodeKind::Delay(DelayNode::new())
-}
-
-#[derive(Clone, strum::AsRefStr)]
-pub(crate) enum NodeKind {
-    Constant(ConstantNode),
-    Sine(SineNode),
-    Square(SquareNode),
-    Saw(SawNode),
-    Noise(NoiseNode),
-    Pulse(PulseNode),
-    Gain(GainNode),
-    Mix(MixNode),
-    AR(ARNode),
-    SVF(SVFNode),
-    Seq(SeqNode),
-    Pipe(PipeNode),
-    Pluck(PluckNode),
-    Reverb(ReverbNode),
-    Delay(DelayNode),
+pub(crate) fn delay(input: NodeKind) -> NodeKind {
+    NodeKind::Delay {
+        input: Box::new(input),
+        node: DelayNode::new(),
+    }
 }
 
 impl Node for NodeKind {
@@ -96,20 +306,20 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
             NodeKind::Constant(node) => node.tick(inputs),
-            NodeKind::Sine(node) => node.tick(inputs),
-            NodeKind::Square(node) => node.tick(inputs),
-            NodeKind::Saw(node) => node.tick(inputs),
+            NodeKind::Sine { node, .. } => node.tick(inputs),
+            NodeKind::Square { node, .. } => node.tick(inputs),
+            NodeKind::Saw { node, .. } => node.tick(inputs),
             NodeKind::Noise(node) => node.tick(inputs),
-            NodeKind::Pulse(node) => node.tick(inputs),
-            NodeKind::Gain(node) => node.tick(inputs),
-            NodeKind::Mix(node) => node.tick(inputs),
-            NodeKind::AR(node) => node.tick(inputs),
-            NodeKind::SVF(node) => node.tick(inputs),
-            NodeKind::Seq(node) => node.tick(inputs),
-            NodeKind::Pipe(node) => node.tick(inputs),
-            NodeKind::Pluck(node) => node.tick(inputs),
-            NodeKind::Reverb(node) => node.tick(inputs),
-            NodeKind::Delay(node) => node.tick(inputs),
+            NodeKind::Pulse { node, .. } => node.tick(inputs),
+            NodeKind::Gain { node, .. } => node.tick(inputs),
+            NodeKind::Mix { node, .. } => node.tick(inputs),
+            NodeKind::AR { node, .. } => node.tick(inputs),
+            NodeKind::SVF { node, .. } => node.tick(inputs),
+            NodeKind::Seq { node, .. } => node.tick(inputs),
+            NodeKind::Pipe { node, .. } => node.tick(inputs),
+            NodeKind::Pluck { node, .. } => node.tick(inputs),
+            NodeKind::Reverb { node, .. } => node.tick(inputs),
+            NodeKind::Delay { node, .. } => node.tick(inputs),
         }
     }
 }
@@ -118,8 +328,8 @@ impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Constant(a), Self::Constant(b)) => a.value == b.value,
-            (Self::Seq(a), Self::Seq(b)) => a.values == b.values,
-            (Self::Pipe(a), Self::Pipe(b)) => a.buffer == b.buffer,
+            (Self::Seq { node: n1, .. }, Self::Seq { node: n2, .. }) => n1.values == n2.values,
+            (Self::Pipe { node: n1, .. }, Self::Pipe { node: n2, .. }) => n1.buffer == n2.buffer,
             _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
@@ -638,7 +848,7 @@ pub struct PluckNode {
 }
 
 impl PluckNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             // mode: Mode::String,
             buffer: [0.0; BUFFER_SIZE],
@@ -735,7 +945,7 @@ pub struct ReverbNode {
 }
 
 impl ReverbNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             reverb: Reverb::new(),
         }
@@ -757,7 +967,7 @@ pub struct DelayNode {
 }
 
 impl DelayNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             delay: Delay::new(15000.0, 0.5),
         }

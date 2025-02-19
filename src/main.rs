@@ -4,6 +4,7 @@ use cpal::{
     FromSample, SizedSample,
 };
 use koto::prelude::*;
+use nodes::*;
 use notify::{Event, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -19,9 +20,6 @@ mod utils;
 
 mod audio_graph;
 use audio_graph::*;
-
-mod parser;
-use parser::*;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -78,7 +76,7 @@ where
     let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         match koto.compile_and_run(&src)? {
-            KValue::Object(obj) if obj.is_a::<Expr>() => match obj.cast::<Expr>() {
+            KValue::Object(obj) if obj.is_a::<NodeKind>() => match obj.cast::<NodeKind>() {
                 Ok(expr) => {
                     let new = parse_to_audio_graph(expr.to_owned());
 
@@ -109,6 +107,7 @@ where
     for res in rx {
         match res {
             Ok(Event { kind, .. }) if kind.is_modify() => {
+                println!("updating audio graph");
                 let now = Instant::now();
                 if now.duration_since(last_update) >= debounce_duration {
                     if let Err(e) = update_audio_graph(Path::new(filename)) {
@@ -126,32 +125,15 @@ where
 
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
-    koto.prelude().add_fn(
-        "sine",
-        make_expr_node(|args| Expr::Sine {
-            freq: Box::new(args[0].clone()),
-        }),
-    );
-    koto.prelude().add_fn(
-        "square",
-        make_expr_node(|args| Expr::Square {
-            freq: Box::new(args[0].clone()),
-        }),
-    );
-    koto.prelude().add_fn(
-        "saw",
-        make_expr_node(|args| Expr::Saw {
-            freq: Box::new(args[0].clone()),
-        }),
-    );
-    koto.prelude().add_fn(
-        "pulse",
-        make_expr_node(|args| Expr::Pulse {
-            freq: Box::new(args[0].clone()),
-        }),
-    );
     koto.prelude()
-        .add_fn("noise", make_expr_node(|_| Expr::Noise));
+        .add_fn("sine", make_expr_node(|args| sine(args[0].clone())));
+    koto.prelude()
+        .add_fn("square", make_expr_node(|args| square(args[0].clone())));
+    koto.prelude()
+        .add_fn("saw", make_expr_node(|args| saw(args[0].clone())));
+    koto.prelude()
+        .add_fn("pulse", make_expr_node(|args| pulse(args[0].clone())));
+    koto.prelude().add_fn("noise", make_expr_node(|_| noise()));
     koto.prelude().add_fn("ar", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
@@ -162,14 +144,7 @@ fn create_env(koto: &Koto) {
         let release = expr_from_kvalue(&args[1])?;
         let trig = expr_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(
-            Expr::AR {
-                attack: Box::new(attack),
-                release: Box::new(release),
-                trig: Box::new(trig),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(ar(attack, release, trig).into()))
     });
     koto.prelude().add_fn("svf", move |ctx| {
         let args = ctx.args();
@@ -181,14 +156,7 @@ fn create_env(koto: &Koto) {
         let resonance = expr_from_kvalue(&args[1])?;
         let input = expr_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(
-            Expr::SVF {
-                cutoff: Box::new(cutoff),
-                resonance: Box::new(resonance),
-                input: Box::new(input),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(svf(cutoff, resonance, input).into()))
     });
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
@@ -210,14 +178,10 @@ fn create_env(koto: &Koto) {
         } else {
             unexpected_type("list", &args[0])?
         };
+        let trig = expr_from_kvalue(&args[1])?;
+        println!("values: {:?}", values);
 
-        Ok(KValue::Object(
-            Expr::Seq {
-                values,
-                trig: Box::new(expr_from_kvalue(&args[1])?),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(seq(values, trig).into()))
     });
     koto.prelude().add_fn("pipe", move |ctx| {
         let args = ctx.args();
@@ -228,13 +192,7 @@ fn create_env(koto: &Koto) {
         let delay = expr_from_kvalue(&args[0])?;
         let input = expr_from_kvalue(&args[1])?;
 
-        Ok(KValue::Object(
-            Expr::Pipe {
-                delay: Box::new(delay),
-                input: Box::new(input),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(pipe(delay, input).into()))
     });
     koto.prelude().add_fn("pluck", move |ctx| {
         let args = ctx.args();
@@ -247,53 +205,35 @@ fn create_env(koto: &Koto) {
         let damping = expr_from_kvalue(&args[2])?;
         let trig = expr_from_kvalue(&args[3])?;
 
-        Ok(KValue::Object(
-            Expr::Pluck {
-                freq: Box::new(freq),
-                tone: Box::new(tone),
-                damping: Box::new(damping),
-                trig: Box::new(trig),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(pluck(freq, tone, damping, trig).into()))
     });
     koto.prelude().add_fn("reverb", move |ctx| {
         let args = ctx.args();
         let input = expr_from_kvalue(&args[0])?;
 
-        Ok(KValue::Object(
-            Expr::Reverb {
-                input: Box::new(input),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(reverb(input).into()))
     });
     koto.prelude().add_fn("delay", move |ctx| {
         let args = ctx.args();
         let input = expr_from_kvalue(&args[0])?;
 
-        Ok(KValue::Object(
-            Expr::Delay {
-                input: Box::new(input),
-            }
-            .into(),
-        ))
+        Ok(KValue::Object(delay(input).into()))
     });
 }
 
 fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
 where
-    F: Fn(Vec<Expr>) -> Expr + 'static,
+    F: Fn(Vec<NodeKind>) -> NodeKind + 'static,
 {
     move |ctx| {
-        let args: Result<Vec<Expr>, _> = ctx.args().iter().map(expr_from_kvalue).collect();
+        let args: Result<Vec<NodeKind>, _> = ctx.args().iter().map(expr_from_kvalue).collect();
         Ok(KValue::Object(node_constructor(args?).into()))
     }
 }
-fn expr_from_kvalue(value: &KValue) -> Result<Expr, koto::runtime::Error> {
+fn expr_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
     match value {
-        KValue::Number(n) => Ok(Expr::Constant(n.into())),
-        KValue::Object(obj) if obj.is_a::<Expr>() => Ok(obj.cast::<Expr>()?.to_owned()),
+        KValue::Number(n) => Ok(constant(n.into())),
+        KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
 }

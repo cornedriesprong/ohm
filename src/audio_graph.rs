@@ -8,10 +8,9 @@ use rtsan_standalone::nonblocking;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::nodes::{Node, *};
-use crate::parser::Expr;
+use crate::nodes::{Node, NodeKind};
 
-type BoxedNode = Box<NodeKind>;
+pub(crate) type BoxedNode = Box<NodeKind>;
 type Graph = StableDiGraph<BoxedNode, ()>;
 
 enum Message {
@@ -245,49 +244,51 @@ impl fmt::Debug for AudioGraph {
     }
 }
 
-pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
+pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     let mut graph = AudioGraph::new();
 
-    fn add_expr_to_graph(expr: Expr, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            Expr::Constant(n) => graph.add_node(constant(n)),
-            Expr::Sine { freq } => add_node(vec![freq], sine(), graph),
-            Expr::Square { freq } => add_node(vec![freq], square(), graph),
-            Expr::Saw { freq } => add_node(vec![freq], saw(), graph),
-            Expr::Pulse { freq } => add_node(vec![freq], pulse(), graph),
-            Expr::Noise => graph.add_node(noise()),
-            Expr::Gain { lhs: a, rhs: b } => add_node(vec![a, b], gain(), graph),
-            Expr::Mix { lhs: a, rhs: b } => add_node(vec![a, b], mix(), graph),
-            Expr::AR {
+            NodeKind::Constant(_) | NodeKind::Noise(_) => add_node(vec![], expr, graph),
+            NodeKind::Sine { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Square { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Gain { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
+            NodeKind::Mix { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
+            NodeKind::AR {
                 attack,
                 release,
                 trig,
-            } => add_node(vec![attack, release, trig], ar(), graph),
-            Expr::SVF {
+                ..
+            } => add_node(vec![attack, release, trig], &expr, graph),
+            NodeKind::SVF {
                 cutoff,
                 resonance,
                 input,
-            } => add_node(vec![cutoff, resonance, input], svf(), graph),
-            Expr::Seq { values, trig } => add_node(vec![trig], seq(values), graph),
-            Expr::Pipe { delay, input } => add_node(vec![delay, input], pipe(), graph),
-            Expr::Pluck {
+                ..
+            } => add_node(vec![cutoff, resonance, input], &expr, graph),
+            NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
+            NodeKind::Pipe { delay, input, .. } => add_node(vec![delay, input], expr, graph),
+            NodeKind::Pluck {
                 freq,
                 tone,
                 damping,
                 trig,
-            } => add_node(vec![freq, tone, damping, trig], pluck(), graph),
-            Expr::Reverb { input } => add_node(vec![input], reverb(), graph),
-            Expr::Delay { input } => add_node(vec![input], delay(), graph),
+                ..
+            } => add_node(vec![freq, tone, damping, trig], expr, graph),
+            NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
+            NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
         }
     }
 
-    fn add_node(inputs: Vec<Box<Expr>>, kind: NodeKind, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_node(inputs: Vec<&NodeKind>, kind: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         let mut input_indices: Vec<_> = inputs
             .into_iter()
-            .map(|input| add_expr_to_graph(*input, graph))
+            .map(|input| add_expr_to_graph(&*input, graph))
             .collect();
 
-        let node_idx = graph.add_node(kind);
+        let node_idx = graph.add_node(kind.clone());
 
         // inputs need to be connected in reverse order
         input_indices.reverse();
@@ -299,7 +300,7 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
         node_idx
     }
 
-    add_expr_to_graph(expr, &mut graph);
+    add_expr_to_graph(&expr, &mut graph);
 
     graph
 }
@@ -307,11 +308,12 @@ pub(crate) fn parse_to_audio_graph(expr: Expr) -> AudioGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nodes::*;
 
     #[test]
     fn test_parse_graph_1() {
         // 440
-        let expr = Expr::Constant(440.0);
+        let expr = constant(440.0);
 
         let mut graph = parse_to_audio_graph(expr);
 
@@ -323,10 +325,7 @@ mod tests {
     #[test]
     fn test_parse_graph_2() {
         // sine(440)
-        let expr = Expr::Sine {
-            freq: Box::new(Expr::Constant(440.0)),
-        };
-
+        let expr = sine(constant(440.0));
         let mut graph = parse_to_audio_graph(expr);
 
         assert_eq!(graph.graph.node_count(), 2);
@@ -337,16 +336,8 @@ mod tests {
     #[test]
     fn test_parse_graph_3() {
         // sine(sine(0.1) * 100)
-        let expr = Box::new(Expr::Sine {
-            freq: Box::new(Expr::Gain {
-                lhs: Box::new(Expr::Sine {
-                    freq: Box::new(Expr::Constant(0.1)),
-                }),
-                rhs: Box::new(Expr::Constant(100.0)),
-            }),
-        });
-
-        let mut graph = parse_to_audio_graph(*expr);
+        let expr = sine(gain(sine(constant(0.1)), constant(100.0)));
+        let mut graph = parse_to_audio_graph(expr);
 
         assert_eq!(graph.graph.node_count(), 5);
         assert_eq!(graph.graph.edge_count(), 4);
@@ -364,68 +355,28 @@ mod tests {
     }
 
     #[test]
-    fn test_graph_diff() {
-        let mut old = AudioGraph::new();
-
-        let const_idx1 = old.add_node(constant(1.0));
-        let sine_idx1 = old.add_node(sine());
-        old.connect_node(const_idx1, sine_idx1);
-        let mut graph_player = GraphPlayer::new(old);
-
-        let mut new = AudioGraph::new();
-        let const_idx2 = new.add_node(constant(2.0)); // Same
-        let sine_idx2 = new.add_node(sine());
-        new.connect_node(const_idx2, sine_idx2);
-
-        graph_player.replace_graph(new.clone());
-        // we need to tick the player for the changes to propagate
-        graph_player.tick();
-
-        assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
-    }
-
-    #[test]
     fn test_node_tick() {
         let mut node = constant(42.0);
         assert_eq!(node.tick(&[]), 42.0);
     }
 
     fn create_complex_graph() -> AudioGraph {
-        let mut graph = AudioGraph::new();
-
-        let freq = graph.add_node(constant(440.0));
-        let amp = graph.add_node(constant(0.5));
-        let osc = graph.add_node(sine());
-        let env = graph.add_node(ar());
-        let gain = graph.add_node(gain());
-
-        let cutoff = graph.add_node(constant(1000.0));
-        let resonance = graph.add_node(constant(0.7));
-        let filter = graph.add_node(svf());
-
-        graph.connect_node(freq, osc);
-        graph.connect_node(amp, gain);
-        graph.connect_node(osc, gain);
-        graph.connect_node(env, gain);
-        graph.connect_node(gain, filter);
-        graph.connect_node(cutoff, filter);
-        graph.connect_node(resonance, filter);
-
-        graph
+        let expr = svf(
+            constant(1000.0),
+            constant(0.7),
+            gain(constant(0.5), sine(constant(440.0))),
+        );
+        parse_to_audio_graph(expr)
     }
 
     #[test]
     fn test_simple_update() {
-        let mut old = AudioGraph::new();
-        let const_idx1 = old.add_node(constant(1.0));
-        let sine_idx1 = old.add_node(sine());
-        old.connect_node(const_idx1, sine_idx1);
+        let expr1 = sine(constant(1.0));
+        let old = parse_to_audio_graph(expr1);
         let mut graph_player = GraphPlayer::new(old);
 
-        let mut new = AudioGraph::new();
-        let const_idx2 = new.add_node(constant(2.0));
-        let sine_idx2 = new.add_node(sine());
-        new.connect_node(const_idx2, sine_idx2);
+        let expr2 = sine(constant(2.0));
+        let new = parse_to_audio_graph(expr2);
 
         graph_player.replace_graph(new.clone());
         // we need to tick the player for the changes to propagate
@@ -436,19 +387,12 @@ mod tests {
 
     #[test]
     fn test_change_oscillator_type() {
-        let mut old = AudioGraph::new();
-
-        // create original graph with Sine
-        let freq1 = old.add_node(constant(440.0));
-        let osc1 = old.add_node(sine());
-        old.connect_node(freq1, osc1);
+        let expr1 = sine(constant(440.0));
+        let old = parse_to_audio_graph(expr1);
         let mut graph_player = GraphPlayer::new(old);
 
-        // create new graph with Square
-        let mut new = AudioGraph::new();
-        let freq2 = new.add_node(constant(440.0));
-        let osc2 = new.add_node(square());
-        new.connect_node(freq2, osc2);
+        let expr2 = square(constant(440.0));
+        let new = parse_to_audio_graph(expr2);
 
         graph_player.replace_graph(new.clone());
         // we need to tick the player for the changes to propagate
@@ -459,23 +403,14 @@ mod tests {
 
     #[test]
     fn test_add_filter() {
-        let mut old = AudioGraph::new();
-
         // original simple oscillator
-        let freq1 = old.add_node(constant(440.0));
-        let osc1 = old.add_node(sine());
-        old.connect_node(freq1, osc1);
+        let expr1 = sine(constant(440.0));
+        let old = parse_to_audio_graph(expr1);
         let mut graph_player = GraphPlayer::new(old);
 
         // new graph with added filter
-        let mut new = AudioGraph::new();
-        let freq2 = new.add_node(constant(440.0));
-        let osc2 = new.add_node(sine());
-        let cutoff = new.add_node(constant(1000.0));
-        let filter = new.add_node(svf());
-        new.connect_node(freq2, osc2);
-        new.connect_node(osc2, filter);
-        new.connect_node(cutoff, filter);
+        let expr2 = svf(constant(440.0), constant(0.717), sine(constant(440.0)));
+        let new = parse_to_audio_graph(expr2);
 
         graph_player.replace_graph(new.clone());
         // we need to tick the player for the changes to propagate
@@ -489,22 +424,8 @@ mod tests {
         let old = create_complex_graph();
         let mut graph_player = GraphPlayer::new(old);
 
-        let mut new = create_complex_graph();
-
-        let new_freq = new.add_node(constant(880.0));
-
-        let seq = new.add_node(seq([100.0, 200.0].to_vec()));
-        let seq_amp = new.add_node(constant(0.3));
-
-        let new_osc = new.add_node(saw());
-
-        let noise = new.add_node(noise());
-        let mix = new.add_node(mix());
-
-        new.connect_node(new_freq, new_osc);
-        new.connect_node(seq_amp, seq);
-        new.connect_node(seq, mix);
-        new.connect_node(noise, mix);
+        let expr2 = svf(constant(440.0), constant(0.717), sine(constant(440.0)));
+        let new = parse_to_audio_graph(expr2);
 
         graph_player.replace_graph(new.clone());
         graph_player.tick();
@@ -517,10 +438,8 @@ mod tests {
         let old = create_complex_graph();
         let mut graph_player = GraphPlayer::new(old);
 
-        let mut new = AudioGraph::new();
-        let freq = new.add_node(constant(440.0));
-        let osc = new.add_node(sine());
-        new.connect_node(freq, osc);
+        let expr1 = sine(constant(440.0));
+        let new = parse_to_audio_graph(expr1);
 
         graph_player.replace_graph(new.clone());
         graph_player.tick();
@@ -528,9 +447,7 @@ mod tests {
         assert_eq!(format!("{:?}", graph_player.graph), format!("{:?}", new));
 
         let mut new = AudioGraph::new();
-        let freq = new.add_node(constant(440.0));
-        let osc = new.add_node(sine());
-        new.connect_node(freq, osc);
+        new.add_node(sine(constant(440.0)));
 
         graph_player.replace_graph(new.clone());
         graph_player.tick();
