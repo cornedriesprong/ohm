@@ -84,24 +84,14 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
-            )),
+            (Self::Constant(node), KValue::Number(num)) => {
+                Ok(KValue::Object(constant(node.value + f32::from(num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Mix {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
-                    node: MixNode::new(),
-                }
-                .into(),
+                mix(self.clone(), constant((num).into())).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Mix {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
-                    node: MixNode::new(),
-                }
-                .into(),
+                mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
             )),
             _ => panic!("invalid add operation"),
         }
@@ -109,24 +99,14 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
-            )),
+            (Self::Constant(node), KValue::Number(num)) => {
+                Ok(KValue::Object(constant(node.value * f32::from(num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Gain {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
-                    node: GainNode::new(),
-                }
-                .into(),
+                gain(self.clone(), constant(num.into())).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Gain {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
-                    node: GainNode::new(),
-                }
-                .into(),
+                gain(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
             )),
             _ => panic!("invalid multiply operation"),
         }
@@ -135,23 +115,13 @@ impl KotoObject for NodeKind {
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+                constant(node.value - f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Mix {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
-                    node: MixNode::new(),
-                }
-                .into(),
+                mix(self.clone(), constant((-num).into())).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Mix {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
-                    node: MixNode::new(),
-                }
-                .into(),
+                mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
             )),
             _ => panic!("invalid subtract operation"),
         }
@@ -160,23 +130,13 @@ impl KotoObject for NodeKind {
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Constant(ConstantNode::new(node.value + f32::from(num))).into(),
+                constant(node.value / f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Gain {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(NodeKind::Constant(ConstantNode::new(num.into()))).into(),
-                    node: GainNode::new(),
-                }
-                .into(),
+                gain(self.clone(), constant(num.into())).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Gain {
-                    lhs: Box::new(self.clone()),
-                    rhs: Box::new(obj.cast::<NodeKind>()?.clone()),
-                    node: GainNode::new(),
-                }
-                .into(),
+                gain(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
             )),
             _ => panic!("invalid divide operation"),
         }
@@ -354,7 +314,7 @@ pub(crate) struct ConstantNode {
 }
 
 impl ConstantNode {
-    pub(crate) fn new(value: f32) -> Self {
+    fn new(value: f32) -> Self {
         Self { value }
     }
 }
@@ -373,7 +333,7 @@ pub(crate) struct SineNode {
 }
 
 impl SineNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self { phase: 0. }
     }
 }
@@ -403,7 +363,7 @@ pub(crate) struct SquareNode {
 }
 
 impl SquareNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self { phase: 0. }
     }
 }
@@ -446,7 +406,7 @@ pub struct SawNode {
 }
 
 impl SawNode {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             period: 0.0,
             amplitude: 1.0,
@@ -526,7 +486,7 @@ pub(crate) struct NoiseNode {
 }
 
 impl NoiseNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             rng: Arc::new(Mutex::new(SmallRng::from_entropy())),
         }
@@ -548,7 +508,7 @@ pub(crate) struct PulseNode {
 }
 
 impl PulseNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             phase: 0.,
             prev_phase: 0.,
@@ -582,7 +542,7 @@ impl Node for PulseNode {
 pub(crate) struct GainNode {}
 
 impl GainNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {}
     }
 }
@@ -601,7 +561,7 @@ impl Node for GainNode {
 pub(crate) struct MixNode {}
 
 impl MixNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {}
     }
 }
@@ -631,7 +591,7 @@ pub(crate) struct ARNode {
 }
 
 impl ARNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             value: 0.0,
             state: EnvelopeState::Off,
@@ -715,7 +675,7 @@ pub struct SVFNode {
 }
 
 impl SVFNode {
-    pub fn new() -> SVFNode {
+    fn new() -> SVFNode {
         let mut svf = Self {
             g: 0.0,
             k: 0.0,
@@ -772,7 +732,7 @@ pub(crate) struct SeqNode {
 }
 
 impl SeqNode {
-    pub(crate) fn new(values: Vec<f32>) -> Self {
+    fn new(values: Vec<f32>) -> Self {
         Self { values, step: 0 }
     }
 
@@ -804,8 +764,7 @@ pub(crate) struct PipeNode {
 }
 
 impl PipeNode {
-    pub const BUFFER_SIZE: usize = 1024;
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             buffer: [0.0; BUFFER_SIZE],
             read_pos: 0,
@@ -848,7 +807,7 @@ pub struct PluckNode {
 }
 
 impl PluckNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             // mode: Mode::String,
             buffer: [0.0; BUFFER_SIZE],
@@ -945,7 +904,7 @@ pub struct ReverbNode {
 }
 
 impl ReverbNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             reverb: Reverb::new(),
         }
@@ -967,7 +926,7 @@ pub struct DelayNode {
 }
 
 impl DelayNode {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             delay: Delay::new(15000.0, 0.5),
         }
