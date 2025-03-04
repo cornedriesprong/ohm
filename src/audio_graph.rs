@@ -47,7 +47,7 @@ impl GraphPlayer {
         self.graph.tick()
     }
 
-    pub(crate) fn replace_graph(&self, new: AudioGraph) {
+    pub(crate) fn replace_graph(&self, new_graph: AudioGraph) {
         let mut update = Vec::new();
         let mut add = Vec::new();
         let mut remove = Vec::new();
@@ -57,13 +57,13 @@ impl GraphPlayer {
             let old_node = &old.graph[old_idx];
 
             // check if node is in both the old and the new graph
-            let matching_node = new.graph.node_indices().find(|&idx| idx == old_idx);
+            let matching_node = new_graph.graph.node_indices().find(|&idx| idx == old_idx);
 
             match matching_node {
                 Some(new_idx) => {
                     // ...if it is, then compare the nodes to see if it needs updating
-                    if **old_node != *new.graph[new_idx] {
-                        update.push((old_idx, *new.graph[new_idx].clone()));
+                    if old_node.id() != new_graph.graph[new_idx].id() {
+                        update.push((old_idx, new_graph.graph[new_idx].clone()));
                     }
                 }
                 // ...if not, we can remove it
@@ -71,10 +71,10 @@ impl GraphPlayer {
             }
         }
 
-        for new_idx in new.graph.node_indices() {
+        for new_idx in new_graph.graph.node_indices() {
             // nodes that are in the new graph but not in the old one need to be added
             if !old.graph.node_indices().any(|idx| idx == new_idx) {
-                add.push((new_idx, *new.graph[new_idx].clone()));
+                add.push((new_idx, new_graph.graph[new_idx].clone()));
             }
         }
 
@@ -195,7 +195,7 @@ impl AudioGraph {
         for edge in new.graph.edge_references() {
             let (source, target) = (edge.source(), edge.target());
             if !self.graph.contains_edge(source, target) {
-                self.graph.add_edge(source, target, edge.weight().clone());
+                self.graph.add_edge(source, target, ());
             }
         }
 
@@ -226,9 +226,9 @@ impl fmt::Debug for AudioGraph {
         for (order, &node) in self.sorted_nodes.iter().enumerate() {
             writeln!(
                 f,
-                "  n{} [label=\"{} ({})\"];",
+                "  n{} [label=\"{:?} ({})\"];",
                 node.index(),
-                node.index(),
+                self.graph[node],
                 order
             )?;
         }
@@ -251,10 +251,11 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
 
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            NodeKind::Constant(_) | NodeKind::Noise(_) => add_node(vec![], expr, graph),
+            NodeKind::Constant(_) => add_node(vec![], expr, graph),
             NodeKind::Sine { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Square { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Gain { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
