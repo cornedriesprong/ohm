@@ -47,7 +47,7 @@ impl GraphPlayer {
         self.graph.tick()
     }
 
-    pub(crate) fn replace_graph(&self, new_graph: AudioGraph) {
+    pub(crate) fn replace_graph(&self, new: AudioGraph) {
         let mut update = Vec::new();
         let mut add = Vec::new();
         let mut remove = Vec::new();
@@ -57,13 +57,13 @@ impl GraphPlayer {
             let old_node = &old.graph[old_idx];
 
             // check if node is in both the old and the new graph
-            let matching_node = new_graph.graph.node_indices().find(|&idx| idx == old_idx);
+            let matching_node = new.graph.node_indices().find(|&idx| idx == old_idx);
 
             match matching_node {
                 Some(new_idx) => {
                     // ...if it is, then compare the nodes to see if it needs updating
-                    if old_node.id() != new_graph.graph[new_idx].id() {
-                        update.push((old_idx, new_graph.graph[new_idx].clone()));
+                    if *old_node != new.graph[new_idx] {
+                        update.push((old_idx, new.graph[new_idx].clone()));
                     }
                 }
                 // ...if not, we can remove it
@@ -71,10 +71,10 @@ impl GraphPlayer {
             }
         }
 
-        for new_idx in new_graph.graph.node_indices() {
+        for new_idx in new.graph.node_indices() {
             // nodes that are in the new graph but not in the old one need to be added
             if !old.graph.node_indices().any(|idx| idx == new_idx) {
-                add.push((new_idx, new_graph.graph[new_idx].clone()));
+                add.push((new_idx, new.graph[new_idx].clone()));
             }
         }
 
@@ -82,12 +82,15 @@ impl GraphPlayer {
 
         for (id, node) in update {
             self.sender
-                .send(Message::ReplaceNode { at: id, with: node })
+                .send(Message::ReplaceNode {
+                    at: id,
+                    with: *node,
+                })
                 .unwrap();
         }
 
         for (_, node) in add {
-            self.sender.send(Message::AddNode(node)).unwrap();
+            self.sender.send(Message::AddNode(*node)).unwrap();
         }
 
         for id in remove {
