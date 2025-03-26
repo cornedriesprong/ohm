@@ -52,7 +52,7 @@ where
     let mut koto = Koto::default();
     create_env(&koto);
 
-    let graph: Arc<Mutex<Option<GraphPlayer>>> = Arc::new(Mutex::new(None));
+    let graph: Arc<Mutex<Option<AudioGraph>>> = Arc::new(Mutex::new(None));
     let graph_clone = Arc::clone(&graph);
 
     let stream = device.build_output_stream(
@@ -79,13 +79,8 @@ where
             KValue::Object(obj) if obj.is_a::<NodeKind>() => match obj.cast::<NodeKind>() {
                 Ok(expr) => {
                     let new = parse_to_audio_graph(expr.to_owned());
-
                     let mut guard = graph.lock().unwrap();
-                    if let Some(graph) = guard.as_mut() {
-                        graph.replace_graph(new);
-                    } else {
-                        *guard = Some(GraphPlayer::new(new));
-                    }
+                    *guard = Some(new);
 
                     Ok(())
                 }
