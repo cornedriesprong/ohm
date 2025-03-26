@@ -14,9 +14,9 @@ or, when leaving out the optional parentheses and using Koto's [function piping]
 (sine 400) * 200 + 400 -> sine
 ```
 
-There is no distinction between audio and control signals, everything signal can modulate any other signal. Audio graphs constructed in Ohm have single-sample feedback, which allows for creating things like filters and delay-based effects (chorus, flanger, etc.).
+There is no distinction between audio- and control signals, everything is a signal that can modulate any other signal. Audio graphs constructed in Ohm have single-sample feedback, which allows for creating things like filters and delay-based effects (chorus, flanger, etc.).
 
-Note that re-evaluating the code causes discontinuities in the audio output, since the new graph is reconstructed in place of the old one. I envision a future version of Ohm.
+Note that re-evaluating the code causes discontinuities in the audio output, since the new graph is reconstructed in place of the old one.
 
 ## Usage
 
@@ -27,6 +27,8 @@ cargo run --release -- examples/sine.koto
 ```
 
 Ohm will parse the code in the file and, if it's valid, will start playing back the audio. It will listen for any changes in the file and reconstruct the graph on save.
+
+WARNING: Ohm currently doesn't have a built-in limiter, and it's trivial to create a signal that will clip the output. Watch your ears and your speakers!
 
 ## Functions
 
@@ -45,6 +47,7 @@ Ohm currently contains the following synthesis functions and effects:
 - `reverb(frequency, tone, damping, trig)` a FDN reverb.
 - `reverb(input)` a feedback-delay-network reverb effect.
 - `delay(input)` a delay effect.
+- basic arithmetic operators `+`, `-`, `*` and `/` can be applied to any signal.
 
 ## Similar projects
 - [Faust](https://faust.grame.fr/)
