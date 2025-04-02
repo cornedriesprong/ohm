@@ -1,6 +1,6 @@
 # Ohm
 
-Ohm is a live-coding language/DSL for audio synthesis and processing. It is based on the [Koto](https://koto.dev/) scripting language, which is embedded into a realtime audio synthesis engine written in Rust, and can be used to define audio graphs and hear their output in realtime. Ohm is inspired by and similar to projects like [Faust](https://faust.grame.fr/) (except interpreted, instead of compiled), Max's [Gen~](https://docs.cycling74.com/legacy/max8/vignettes/gen_overview) (except primarily text-based, instead of graphical). These graphs can be updated and rendered in realtime, allowing for fast iteration and experimentation.
+Ohm is a live coding language/DSL for audio synthesis and processing. It is based on the [Koto](https://koto.dev/) scripting language, which is embedded into a realtime audio synthesis engine written in Rust, and can be used to define audio graphs and play back their output. Audio graphs can be updated and re-rendered in real-time, allowing for fast iteration and experimentation. Ohm is inspired by and similar to projects like [Faust](https://faust.grame.fr/) (but interpreted, instead of compiled) or Max's [Gen~](https://docs.cycling74.com/legacy/max8/vignettes/gen_overview) (but primarily text-based, instead of graphical). 
 
 The Koto language has an elegant and minimal syntax. For instance, a simple 2-operator FM synthesizer can we defined in Ohm as:
 
@@ -8,13 +8,15 @@ The Koto language has an elegant and minimal syntax. For instance, a simple 2-op
 sine(sine(400) * 200 + 400)
 ```
 
-...or, when leaving out the optional parentheses and using Koto's [function piping](https://koto.dev/docs/0.15/language/#function-piping) operator:
+...or, when leaving out the optional parentheses and using Koto's [function piping](https://koto.dev/docs/0.15/language/#function-piping) operator (`->`):
 
 ```
 (sine 400) * 200 + 400 -> sine
 ```
 
-There is no distinction between audio- and control signals; everything is a signal and can modulate any other signal. Ohm functions operate on a per-sample level, which allows for creating DSP structures that require single-sample feedback loops, like filters and delay-based effects (chorus, flanger, etc.).
+See the `examples` directory for more examples.
+
+There is no distinction between audio- and control signals; any can modulate any other signal. Ohm functions operate on a per-sample level, which allows for creating DSP structures that require single-sample feedback loops, like filters and delay-based effects (chorus, flanger, etc.).
 
 WARNING: Ohm currently doesn't have a built-in limiter, and it's trivial to generate a signal that will massively clip the output. So watch your output levels!
 
@@ -32,7 +34,7 @@ Note that re-evaluating the code currently causes discontinuities in the audio o
 
 ## Functions
 
-Ohm currently contains the following synthesis functions and effects:
+Ohm currently contains the following high-level synthesis functions and effects:
 
 - `sine(freq)` a sine wave
 - `square(freq)` a square wave
@@ -40,13 +42,15 @@ Ohm currently contains the following synthesis functions and effects:
 - `pulse(freq)` a pulse wave with a single-sample impulse, primarily useful for triggering `ar`, `env` or `pluck` functions
 - `noise()` white noise, also useful as a randomization source
 - `ar(attack, release, trig)` a simple attack-release envelope, which can be triggered by a pulse function
-- `svf(cutoff, resonance, input)` a state-variable lowpass filter
-- `seq(list, trig)` a sequencer that outputs the next value in the list each time it receives a trigger
+- `svf(mode ("lp" | "hp" | "bp"), cutoff, resonance, input)` a state-variable filter with lowpass (lp), highpass (hp) and bandpass (bp) modes.
+- `seq(list, trig)` a sequencer that outputs the next value in the list every time it receives a trigger
 - `pipe(delay, input)` delays a signal by *n* samples
 - `pluck(frequency, tone, damping, trig)` a Karplus-Strong pluck string synthesis voice
 - `reverb(frequency, tone, damping, trig)` a FDN-reverb effect
 - `delay(input)` an echo/delay effect
 - basic arithmetic operators `+`, `-`, `*` and `/` can be applied to any signal
+
+Of course, there is nothing stopping you from defining your own functions in Koto, and using them in your audio graph.
 
 ## Similar projects
 - [Faust](https://faust.grame.fr/)
