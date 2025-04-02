@@ -1,0 +1,6 @@
+# 2-operator FM patch
+carrier_freq = 200
+mod_ratio = 1.5
+mod_index = 3
+mod_freq = carrier_freq * mod_ratio
+(sine carrier_freq) * (mod_freq + carrier_freq) * mod_index -> sine

@@ -1,0 +1,6 @@
+hihat = |trig|
+  env = ar(10, 2000, trig)
+  noise() * env -> svf "hp", 5000, 0.5
+
+trig = pulse(1)
+hihat trig

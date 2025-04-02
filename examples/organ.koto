@@ -1,0 +1,5 @@
+freqs = [200, 400, 800, 1600, 3200]
+amps = [0.5, 0.4, 0.3, 0.2, 0.1]
+
+out = freqs.zip(amps).fold 0, |acc, (freq, amp)|
+  (sine(freq) * amp) + acc

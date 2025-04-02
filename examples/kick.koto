@@ -1,0 +1,7 @@
+kick = |trig|
+  env = ar(10, 4000, trig)
+  pitch = 200
+  sine(env * pitch) * env
+
+trig = pulse(1)
+kick trig
