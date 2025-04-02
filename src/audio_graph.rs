@@ -120,11 +120,12 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 ..
             } => add_node(vec![attack, release, trig], &expr, graph),
             NodeKind::SVF {
+                mode,
                 cutoff,
                 resonance,
                 input,
                 ..
-            } => add_node(vec![cutoff, resonance, input], &expr, graph),
+            } => add_node(vec![mode, cutoff, resonance, input], &expr, graph),
             NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
             NodeKind::Pipe { delay, input, .. } => add_node(vec![delay, input], expr, graph),
             NodeKind::Pluck {

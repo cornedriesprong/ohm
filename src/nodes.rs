@@ -49,6 +49,7 @@ pub(crate) enum NodeKind {
         node: ARNode,
     },
     SVF {
+        mode: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
         input: BoxedNode,
@@ -212,8 +213,14 @@ pub(crate) fn ar(attack: NodeKind, release: NodeKind, trig: NodeKind) -> NodeKin
     }
 }
 
-pub(crate) fn svf(cutoff: NodeKind, resonance: NodeKind, input: NodeKind) -> NodeKind {
+pub(crate) fn svf(
+    mode: NodeKind,
+    cutoff: NodeKind,
+    resonance: NodeKind,
+    input: NodeKind,
+) -> NodeKind {
     NodeKind::SVF {
+        mode: Box::new(mode),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
         input: Box::new(input),
@@ -717,10 +724,11 @@ impl Node for SVFNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let cutoff = inputs.get(0).expect("svf: missing cutoff input");
+        let mode = *inputs.get(0).expect("svf: missing mode") as i32;
+        let cutoff = inputs.get(1).expect("svf: missing cutoff input");
         self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
-        let resonance = inputs.get(1).expect("svf: missing resonance input");
-        let input = inputs.get(2).expect("svf: missing input");
+        let resonance = inputs.get(2).expect("svf: missing resonance input");
+        let input = inputs.get(3).expect("svf: missing input");
         self.k = 1.0 / resonance;
         self.update_coefficients();
 
@@ -730,10 +738,11 @@ impl Node for SVFNode {
         self.ic1eq = 2.0 * v1 - self.ic1eq;
         self.ic2eq = 2.0 * v2 - self.ic2eq;
 
-        match self.mode {
-            SVFMode::Lowpass => v2,
-            SVFMode::Highpass => input - self.ic2eq - self.a2 * self.ic1eq,
-            SVFMode::Bandpass => self.k * v1,
+        match mode {
+            0 => v2,                                        // lowpass
+            1 => input - self.ic2eq - self.a2 * self.ic1eq, // highpass
+            2 => self.k * v1,                               // bandpass
+            _ => panic!("invalid mode"),
         }
     }
 }

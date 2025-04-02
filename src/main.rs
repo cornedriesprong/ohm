@@ -142,15 +142,19 @@ fn create_env(koto: &Koto) {
     });
     koto.prelude().add_fn("svf", move |ctx| {
         let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+        if args.len() != 4 {
+            return unexpected_args(
+                "4 arguments: mode (lp, hp, bp), cutoff, resonance, input",
+                args,
+            );
         }
 
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
+        let mode = expr_from_kvalue(&args[0])?;
+        let cutoff = expr_from_kvalue(&args[1])?;
+        let resonance = expr_from_kvalue(&args[2])?;
+        let input = expr_from_kvalue(&args[3])?;
 
-        Ok(KValue::Object(svf(cutoff, resonance, input).into()))
+        Ok(KValue::Object(svf(mode, cutoff, resonance, input).into()))
     });
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
@@ -223,10 +227,21 @@ where
         Ok(KValue::Object(node_constructor(args?).into()))
     }
 }
+
 fn expr_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(constant(n.into())),
+        KValue::Str(n) => Ok(constant(string_to_float(n)?)),
         KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
+    }
+}
+
+fn string_to_float(s: &str) -> Result<f32, koto::runtime::Error> {
+    match s {
+        "lp" => Ok(0.),
+        "hp" => Ok(1.),
+        "bp" => Ok(2.),
+        _ => Ok(0.),
     }
 }
