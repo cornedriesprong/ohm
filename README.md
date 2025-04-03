@@ -46,7 +46,7 @@ Ohm currently contains the following high-level synthesis functions and effects:
 - `seq(list, trig)` a sequencer that outputs the next value in the list every time it receives a trigger
 - `pipe(delay, input)` delays a signal by *n* samples
 - `pluck(frequency, tone, damping, trig)` a Karplus-Strong pluck string synthesis voice
-- `reverb(frequency, tone, damping, trig)` a FDN-reverb effect
+- `reverb(input)` a FDN-reverb effect
 - `delay(input)` an echo/delay effect
 - basic arithmetic operators `+`, `-`, `*` and `/` can be applied to any signal
 
