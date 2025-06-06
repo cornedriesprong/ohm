@@ -73,7 +73,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "shlex",
  "syn",
 ]
@@ -156,9 +156,9 @@ dependencies = [
 
 [[package]]
 name = "circular-buffer"
-version = "0.1.9"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67261db007b5f4cf8cba393c1a5c511a5cc072339ce16e12aeba1d7b9b77946"
+checksum = "23bdce1da528cadbac4654b5632bfcd8c6c63e25b1d42cea919a95958790b51d"
 
 [[package]]
 name = "clang-sys"
@@ -310,12 +310,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "downcast-rs"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "dunce"
@@ -510,7 +504,7 @@ dependencies = [
  "combine",
  "jni-sys",
  "log",
- "thiserror",
+ "thiserror 1.0.69",
  "walkdir",
  "windows-sys 0.45.0",
 ]
@@ -542,37 +536,35 @@ dependencies = [
 
 [[package]]
 name = "koto"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a5fe66b5e579d6ecac023e247082b6231c4107a64a9bcb6adfdcc79e8449963"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "koto_bytecode",
  "koto_parser",
  "koto_runtime",
- "thiserror",
+ "koto_serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "koto_bytecode"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2b1fa20fff1df1e884be4905c303b71ddadca4ce7e90484d3a15d1416bcd894"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "circular-buffer",
  "derive-name",
  "dunce",
  "koto_memory",
  "koto_parser",
- "rustc-hash",
+ "rustc-hash 2.1.1",
  "smallvec",
- "thiserror",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "koto_derive"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b52735b94ae7fd64ff6b6e275b1f6ce2ee91cd200276998238fe2a8b9c24a74f"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -581,9 +573,8 @@ dependencies = [
 
 [[package]]
 name = "koto_lexer"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9341bc62b4ef16b92c5ffceabc110da4727a73086d576cc01c249c37855927f8"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -592,32 +583,28 @@ dependencies = [
 
 [[package]]
 name = "koto_memory"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31a28e9ea7a03d55ed5e85f6bce5750217e29118f884b62e5056bb8300dff04a"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 
 [[package]]
 name = "koto_parser"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4655c4a34f6fa77b82628a55b08768db6b037191236adeb5814906cf79530c6"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "derive-name",
  "koto_lexer",
  "koto_memory",
  "smallvec",
- "thiserror",
+ "thiserror 2.0.12",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "koto_runtime"
-version = "0.15.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88873c10c0b9101a92db8b9e827d00d485f108c3426bb13de2f7ac0fa3896b74"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
 dependencies = [
  "chrono",
- "downcast-rs",
  "indexmap",
  "instant",
  "koto_bytecode",
@@ -625,11 +612,22 @@ dependencies = [
  "koto_lexer",
  "koto_memory",
  "koto_parser",
- "rustc-hash",
+ "paste",
+ "rustc-hash 2.1.1",
  "saturating_cast",
  "smallvec",
- "thiserror",
+ "thiserror 2.0.12",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "koto_serde"
+version = "0.16.0"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#bdd036f11b60cd648aceb59b053fa37b6d824e15"
+dependencies = [
+ "koto_runtime",
+ "serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -735,7 +733,7 @@ dependencies = [
  "log",
  "ndk-sys",
  "num_enum",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -883,6 +881,12 @@ name = "once_cell"
 version = "1.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
+
+[[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "petgraph"
@@ -1041,6 +1045,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+
+[[package]]
 name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1079,6 +1089,26 @@ name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
+
+[[package]]
+name = "serde"
+version = "1.0.219"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.219"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "shlex"
@@ -1145,7 +1175,16 @@ version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
+dependencies = [
+ "thiserror-impl 2.0.12",
 ]
 
 [[package]]
@@ -1153,6 +1192,17 @@ name = "thiserror-impl"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
 dependencies = [
  "proc-macro2",
  "quote",
