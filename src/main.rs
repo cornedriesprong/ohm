@@ -78,9 +78,19 @@ where
         match koto.compile_and_run(&src)? {
             KValue::Object(obj) if obj.is_a::<NodeKind>() => match obj.cast::<NodeKind>() {
                 Ok(expr) => {
-                    let new = parse_to_audio_graph(expr.to_owned());
+                    let new_graph = parse_to_audio_graph(expr.to_owned());
                     let mut guard = graph.lock().unwrap();
-                    *guard = Some(new);
+                    
+                    match guard.as_mut() {
+                        Some(existing_graph) => {
+                            // Apply diff to preserve state
+                            existing_graph.apply_diff(new_graph);
+                        }
+                        None => {
+                            // First time - just set the graph
+                            *guard = Some(new_graph);
+                        }
+                    }
 
                     Ok(())
                 }

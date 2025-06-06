@@ -8,7 +8,9 @@ use fmt::{Debug, Formatter};
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rtsan_standalone::nonblocking;
+use seahash::SeaHasher;
 use std::f32::consts::{FRAC_PI_4, PI};
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use strum::AsRefStr;
 
@@ -315,6 +317,149 @@ impl PartialEq for NodeKind {
     }
 }
 
+impl NodeKind {
+    pub(crate) fn compute_hash(&self) -> u64 {
+        let mut hasher = SeaHasher::new();
+        self.hash_structure(&mut hasher);
+        hasher.finish()
+    }
+
+    fn hash_structure(&self, hasher: &mut SeaHasher) {
+        match self {
+            NodeKind::Constant(node) => {
+                0u8.hash(hasher);
+                node.value.to_bits().hash(hasher);
+            }
+            NodeKind::Sine { freq, .. } => {
+                1u8.hash(hasher);
+                freq.hash_structure(hasher);
+            }
+            NodeKind::Square { freq, .. } => {
+                2u8.hash(hasher);
+                freq.hash_structure(hasher);
+            }
+            NodeKind::Saw { freq, .. } => {
+                3u8.hash(hasher);
+                freq.hash_structure(hasher);
+            }
+            NodeKind::Pulse { freq, .. } => {
+                4u8.hash(hasher);
+                freq.hash_structure(hasher);
+            }
+            NodeKind::Noise(_) => {
+                5u8.hash(hasher);
+            }
+            NodeKind::Mix { lhs, rhs, .. } => {
+                6u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            NodeKind::Gain { lhs, rhs, .. } => {
+                7u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            NodeKind::AR { attack, release, trig, .. } => {
+                8u8.hash(hasher);
+                attack.hash_structure(hasher);
+                release.hash_structure(hasher);
+                trig.hash_structure(hasher);
+            }
+            NodeKind::SVF { mode, cutoff, resonance, input, .. } => {
+                9u8.hash(hasher);
+                mode.hash_structure(hasher);
+                cutoff.hash_structure(hasher);
+                resonance.hash_structure(hasher);
+                input.hash_structure(hasher);
+            }
+            NodeKind::Seq { trig, node } => {
+                10u8.hash(hasher);
+                trig.hash_structure(hasher);
+                for val in &node.values {
+                    val.to_bits().hash(hasher);
+                }
+            }
+            NodeKind::Pipe { delay, input, .. } => {
+                11u8.hash(hasher);
+                delay.hash_structure(hasher);
+                input.hash_structure(hasher);
+            }
+            NodeKind::Pluck { freq, tone, damping, trig, .. } => {
+                12u8.hash(hasher);
+                freq.hash_structure(hasher);
+                tone.hash_structure(hasher);
+                damping.hash_structure(hasher);
+                trig.hash_structure(hasher);
+            }
+            NodeKind::Reverb { input, .. } => {
+                13u8.hash(hasher);
+                input.hash_structure(hasher);
+            }
+            NodeKind::Delay { input, .. } => {
+                14u8.hash(hasher);
+                input.hash_structure(hasher);
+            }
+        }
+    }
+
+    pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
+        match (self, other) {
+            (NodeKind::Sine { node: new, .. }, NodeKind::Sine { node: old, .. }) => {
+                new.phase = old.phase;
+            }
+            (NodeKind::Square { node: new, .. }, NodeKind::Square { node: old, .. }) => {
+                new.phase = old.phase;
+            }
+            (NodeKind::Saw { node: new, .. }, NodeKind::Saw { node: old, .. }) => {
+                new.period = old.period;
+                new.amplitude = old.amplitude;
+                new.phase = old.phase;
+                new.phase_max = old.phase_max;
+                new.inc = old.inc;
+                new.sin0 = old.sin0;
+                new.sin1 = old.sin1;
+                new.dsin = old.dsin;
+                new.dc = old.dc;
+                new.saw = old.saw;
+            }
+            (NodeKind::Pulse { node: new, .. }, NodeKind::Pulse { node: old, .. }) => {
+                new.phase = old.phase;
+                new.prev_phase = old.prev_phase;
+            }
+            (NodeKind::AR { node: new, .. }, NodeKind::AR { node: old, .. }) => {
+                new.state = old.state;
+                new.value = old.value;
+                new.time = old.time;
+            }
+            (NodeKind::SVF { node: new, .. }, NodeKind::SVF { node: old, .. }) => {
+                new.ic1eq = old.ic1eq;
+                new.ic2eq = old.ic2eq;
+            }
+            (NodeKind::Seq { node: new, .. }, NodeKind::Seq { node: old, .. }) => {
+                new.step = old.step;
+            }
+            (NodeKind::Pipe { node: new, .. }, NodeKind::Pipe { node: old, .. }) => {
+                new.buffer = old.buffer;
+                new.read_pos = old.read_pos;
+            }
+            (NodeKind::Pluck { node: new, .. }, NodeKind::Pluck { node: old, .. }) => {
+                new.buffer = old.buffer;
+                new.period = old.period;
+                new.read_pos = old.read_pos;
+                new.pitch_track = old.pitch_track;
+                new.is_stopped = old.is_stopped;
+            }
+            (NodeKind::Reverb { node: new, .. }, NodeKind::Reverb { node: old, .. }) => {
+                new.reverb = old.reverb.clone();
+            }
+            (NodeKind::Delay { node: new, .. }, NodeKind::Delay { node: old, .. }) => {
+                new.delay = old.delay.clone();
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -349,7 +494,7 @@ impl Node for ConstantNode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SineNode {
-    phase: f32,
+    pub(crate) phase: f32,
 }
 
 impl SineNode {
@@ -605,9 +750,9 @@ pub enum EnvelopeState {
 
 #[derive(Clone)]
 pub(crate) struct ARNode {
-    state: EnvelopeState,
-    value: f32,
-    time: f32,
+    pub(crate) state: EnvelopeState,
+    pub(crate) value: f32,
+    pub(crate) time: f32,
 }
 
 impl ARNode {
@@ -749,8 +894,8 @@ impl Node for SVFNode {
 
 #[derive(Clone)]
 pub(crate) struct SeqNode {
-    values: Vec<f32>,
-    step: usize,
+    pub(crate) values: Vec<f32>,
+    pub(crate) step: usize,
 }
 
 impl SeqNode {
