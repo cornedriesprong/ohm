@@ -1,6 +1,5 @@
 use std::vec;
 
-use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::{DelayLine, InterpolationType};
 use crate::dsp::filters::{AllPass, SVF};
 use rand::{thread_rng, Rng};
@@ -15,14 +14,14 @@ struct ReverbPath {
 }
 
 impl ReverbPath {
-    fn new(sample_rate: f32) -> Self {
+    fn new() -> Self {
         let mut rng = thread_rng();
         let delay_time = rng.gen_range(10..10000);
         let is_inverted = rng.gen_bool(1.0 / 3.0);
 
         Self {
             delay_line: DelayLine::new(InterpolationType::None, delay_time),
-            svf: SVF::new(5000.0, 0.707, sample_rate),
+            svf: SVF::new(5000.0, 0.707),
             delay_time: delay_time as i32,
             is_inverted,
             feedback: 0.95,
@@ -70,9 +69,7 @@ impl Reverb {
         let allpasses = (0..ALLPASS_COUNT)
             .map(|i| AllPass::new(ALLPASS_LENGTHS[i]))
             .collect();
-        let paths = (0..DELAY_COUNT)
-            .map(|_| ReverbPath::new(SAMPLE_RATE))
-            .collect();
+        let paths = (0..DELAY_COUNT).map(|_| ReverbPath::new()).collect();
         Self { allpasses, paths }
     }
 

@@ -385,9 +385,7 @@ mod tests {
     #[test]
     fn test_apply_diff_partial_match() {
         // Create initial graph: sine(440) + sine(880)
-        let mut old_graph = parse_to_audio_graph(
-            mix(sine(constant(440.0)), sine(constant(880.0)))
-        );
+        let mut old_graph = parse_to_audio_graph(mix(sine(constant(440.0)), sine(constant(880.0))));
 
         // Advance both sine nodes
         for _ in 0..100 {
@@ -398,9 +396,7 @@ mod tests {
         let phase_440 = find_sine_phase_by_freq(&old_graph, 440.0).unwrap();
 
         // Create new graph where only one frequency changes: sine(440) + sine(1760)
-        let new_graph = parse_to_audio_graph(
-            mix(sine(constant(440.0)), sine(constant(1760.0)))
-        );
+        let new_graph = parse_to_audio_graph(mix(sine(constant(440.0)), sine(constant(1760.0))));
 
         // Apply diff
         old_graph.apply_diff(new_graph);
@@ -483,36 +479,19 @@ mod tests {
     // Helper function to extract phase from sine node at given index
     fn get_sine_phase(graph: &AudioGraph, node_index: usize) -> f32 {
         if node_index >= graph.sorted_nodes.len() {
-            panic!("Node index {} out of bounds (graph has {} nodes)", node_index, graph.sorted_nodes.len());
+            panic!(
+                "Node index {} out of bounds (graph has {} nodes)",
+                node_index,
+                graph.sorted_nodes.len()
+            );
         }
         let node_idx = graph.sorted_nodes[node_index];
         match &**graph.graph.node_weight(node_idx).unwrap() {
             NodeKind::Sine { node, .. } => node.phase,
-            other => panic!("Expected sine node at index {}, found {:?}", node_index, other),
-        }
-    }
-
-    // Helper function to extract AR envelope state
-    fn get_ar_state(graph: &AudioGraph, node_index: usize) -> (crate::nodes::EnvelopeState, f32, f32) {
-        if node_index >= graph.sorted_nodes.len() {
-            panic!("Node index {} out of bounds (graph has {} nodes)", node_index, graph.sorted_nodes.len());
-        }
-        let node_idx = graph.sorted_nodes[node_index];
-        match &**graph.graph.node_weight(node_idx).unwrap() {
-            NodeKind::AR { node, .. } => (node.state, node.value, node.time),
-            other => panic!("Expected AR node at index {}, found {:?}", node_index, other),
-        }
-    }
-
-    // Helper function to extract sequencer step
-    fn get_seq_step(graph: &AudioGraph, node_index: usize) -> usize {
-        if node_index >= graph.sorted_nodes.len() {
-            panic!("Node index {} out of bounds (graph has {} nodes)", node_index, graph.sorted_nodes.len());
-        }
-        let node_idx = graph.sorted_nodes[node_index];
-        match &**graph.graph.node_weight(node_idx).unwrap() {
-            NodeKind::Seq { node, .. } => node.step,
-            other => panic!("Expected Seq node at index {}, found {:?}", node_index, other),
+            other => panic!(
+                "Expected sine node at index {}, found {:?}",
+                node_index, other
+            ),
         }
     }
 }

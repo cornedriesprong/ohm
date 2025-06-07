@@ -1,10 +1,12 @@
 use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
+use crate::dsp::filters::SVFMode;
 use crate::dsp::reverb::Reverb;
 use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
+use fundsp::hacker32::*;
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rtsan_standalone::nonblocking;
@@ -359,13 +361,24 @@ impl NodeKind {
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            NodeKind::AR { attack, release, trig, .. } => {
+            NodeKind::AR {
+                attack,
+                release,
+                trig,
+                ..
+            } => {
                 8u8.hash(hasher);
                 attack.hash_structure(hasher);
                 release.hash_structure(hasher);
                 trig.hash_structure(hasher);
             }
-            NodeKind::SVF { mode, cutoff, resonance, input, .. } => {
+            NodeKind::SVF {
+                mode,
+                cutoff,
+                resonance,
+                input,
+                ..
+            } => {
                 9u8.hash(hasher);
                 mode.hash_structure(hasher);
                 cutoff.hash_structure(hasher);
@@ -384,7 +397,13 @@ impl NodeKind {
                 delay.hash_structure(hasher);
                 input.hash_structure(hasher);
             }
-            NodeKind::Pluck { freq, tone, damping, trig, .. } => {
+            NodeKind::Pluck {
+                freq,
+                tone,
+                damping,
+                trig,
+                ..
+            } => {
                 12u8.hash(hasher);
                 freq.hash_structure(hasher);
                 tone.hash_structure(hasher);
@@ -430,10 +449,6 @@ impl NodeKind {
                 new.state = old.state;
                 new.value = old.value;
                 new.time = old.time;
-            }
-            (NodeKind::SVF { node: new, .. }, NodeKind::SVF { node: old, .. }) => {
-                new.ic1eq = old.ic1eq;
-                new.ic2eq = old.ic2eq;
             }
             (NodeKind::Seq { node: new, .. }, NodeKind::Seq { node: old, .. }) => {
                 new.step = old.step;
@@ -818,50 +833,26 @@ impl Node for ARNode {
     }
 }
 
-#[derive(Clone)]
-pub enum SVFMode {
-    Lowpass,
-    Highpass,
-    Bandpass,
+/// FunDSP-based state-variable filter
+pub enum SVFNode {
+    Lowpass(An<Svf<f32, LowpassMode<f32>>>),
+    Highpass(An<Svf<f32, HighpassMode<f32>>>),
+    Bandpass(An<Svf<f32, BandpassMode<f32>>>),
 }
 
-/// Cytomic (Andrew Simper) state-variable filter
-#[derive(Clone)]
-pub struct SVFNode {
-    g: f32,
-    k: f32,
-    a1: f32,
-    a2: f32,
-    a3: f32,
-    ic1eq: f32,
-    ic2eq: f32,
-    mode: SVFMode,
-    set: bool,
+impl Clone for SVFNode {
+    fn clone(&self) -> Self {
+        match self {
+            SVFNode::Lowpass(filter) => SVFNode::Lowpass(filter.clone()),
+            SVFNode::Highpass(filter) => SVFNode::Highpass(filter.clone()),
+            SVFNode::Bandpass(filter) => SVFNode::Bandpass(filter.clone()),
+        }
+    }
 }
 
 impl SVFNode {
     fn new() -> SVFNode {
-        let mut svf = Self {
-            g: 0.0,
-            k: 0.0,
-            a1: 0.0,
-            a2: 0.0,
-            a3: 0.0,
-            ic1eq: 0.0,
-            ic2eq: 0.0,
-            mode: SVFMode::Lowpass,
-            set: false,
-        };
-        svf.update_coefficients();
-        svf
-    }
-
-    #[inline]
-    #[nonblocking]
-    fn update_coefficients(&mut self) {
-        self.a1 = 1.0 / (1.0 + self.g * (self.g + self.k));
-        self.a2 = self.g * self.a1;
-        self.a3 = self.g * self.a2;
+        SVFNode::Lowpass(lowpass())
     }
 }
 
@@ -870,24 +861,39 @@ impl Node for SVFNode {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let mode = *inputs.get(0).expect("svf: missing mode") as i32;
-        let cutoff = inputs.get(1).expect("svf: missing cutoff input");
-        self.g = (std::f32::consts::PI * cutoff / SAMPLE_RATE).tan();
-        let resonance = inputs.get(2).expect("svf: missing resonance input");
-        let input = inputs.get(3).expect("svf: missing input");
-        self.k = 1.0 / resonance;
-        self.update_coefficients();
+        let cutoff = *inputs.get(1).expect("svf: missing cutoff input");
+        let resonance = *inputs.get(2).expect("svf: missing resonance input");
+        let input = *inputs.get(3).expect("svf: missing input");
 
-        let v3 = input - self.ic2eq;
-        let v1 = self.a1 * self.ic1eq + self.a2 * v3;
-        let v2 = self.ic2eq + self.a2 * self.ic1eq + self.a3 * v3;
-        self.ic1eq = 2.0 * v1 - self.ic1eq;
-        self.ic2eq = 2.0 * v2 - self.ic2eq;
-
-        match mode {
-            0 => v2,                                        // lowpass
-            1 => input - self.ic2eq - self.a2 * self.ic1eq, // highpass
-            2 => self.k * v1,                               // bandpass
+        // Update filter based on mode (only if mode changed)
+        let target_mode = match mode {
+            0 => SVFMode::Lowpass,
+            1 => SVFMode::Highpass,
+            2 => SVFMode::Bandpass,
             _ => panic!("invalid mode"),
+        };
+
+        // Check if we need to change filter type
+        let needs_mode_change = match (&*self, target_mode) {
+            (SVFNode::Lowpass(_), SVFMode::Lowpass) => false,
+            (SVFNode::Highpass(_), SVFMode::Highpass) => false,
+            (SVFNode::Bandpass(_), SVFMode::Bandpass) => false,
+            _ => true,
+        };
+
+        if needs_mode_change {
+            *self = match target_mode {
+                SVFMode::Lowpass => SVFNode::Lowpass(lowpass()),
+                SVFMode::Highpass => SVFNode::Highpass(highpass()),
+                SVFMode::Bandpass => SVFNode::Bandpass(bandpass()),
+            };
+        }
+
+        // Process with dynamic parameters - filters accept [audio, cutoff, Q]
+        match self {
+            SVFNode::Lowpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
+            SVFNode::Highpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
+            SVFNode::Bandpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
         }
     }
 }
