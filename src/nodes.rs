@@ -7,11 +7,12 @@ use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
 use fundsp::hacker32::*;
+use fundsp::typenum::{UInt, UTerm, B1};
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
-use std::f32::consts::{FRAC_PI_4, PI};
+use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use strum::AsRefStr;
@@ -424,22 +425,13 @@ impl NodeKind {
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         match (self, other) {
             (NodeKind::Sine { node: new, .. }, NodeKind::Sine { node: old, .. }) => {
-                new.phase = old.phase;
+                *new = SineNode::new_with_phase(old.get_phase());
             }
             (NodeKind::Square { node: new, .. }, NodeKind::Square { node: old, .. }) => {
-                new.phase = old.phase;
+                *new = SquareNode::new_with_phase(old.get_phase());
             }
             (NodeKind::Saw { node: new, .. }, NodeKind::Saw { node: old, .. }) => {
-                new.period = old.period;
-                new.amplitude = old.amplitude;
-                new.phase = old.phase;
-                new.phase_max = old.phase_max;
-                new.inc = old.inc;
-                new.sin0 = old.sin0;
-                new.sin1 = old.sin1;
-                new.dsin = old.dsin;
-                new.dc = old.dc;
-                new.saw = old.saw;
+                *new = SawNode::new_with_phase(old.get_phase());
             }
             (NodeKind::Pulse { node: new, .. }, NodeKind::Pulse { node: old, .. }) => {
                 new.phase = old.phase;
@@ -507,14 +499,34 @@ impl Node for ConstantNode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub(crate) struct SineNode {
-    pub(crate) phase: f32,
+    osc: An<Sine<f32>>,
+    ramp: An<Ramp<f32>>,
+    phase: f32,
 }
 
 impl SineNode {
     fn new() -> Self {
-        Self { phase: 0. }
+        use fundsp::hacker32::{ramp, sine};
+        Self {
+            osc: sine(),
+            ramp: ramp(),
+            phase: 0.0,
+        }
+    }
+
+    fn new_with_phase(phase: f32) -> Self {
+        use fundsp::hacker32::{ramp_phase, sine_phase};
+        Self {
+            osc: sine_phase(phase),
+            ramp: ramp_phase(phase),
+            phase,
+        }
+    }
+
+    pub fn get_phase(&self) -> f32 {
+        self.phase
     }
 }
 
@@ -523,28 +535,40 @@ impl Node for SineNode {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let freq = inputs.get(0).expect("sine: missing freq input");
-        let reset_phase = inputs.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
-        let y = (2. * PI * self.phase).sin();
-        self.phase += freq / SAMPLE_RATE;
-        if self.phase >= 1. {
-            self.phase -= 1.;
-        }
-        y
+        self.phase = self.ramp.tick(&[*freq].into())[0];
+        self.osc.tick(&[*freq].into())[0]
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct SquareNode {
+    osc: An<WaveSynth<UInt<UTerm, B1>>>,
+    ramp: An<Ramp<f32>>,
     phase: f32,
 }
 
 impl SquareNode {
     fn new() -> Self {
-        Self { phase: 0. }
+        use fundsp::hacker32::{ramp, square};
+        Self {
+            osc: square(),
+            ramp: ramp(),
+            phase: 0.0,
+        }
+    }
+
+    fn new_with_phase(phase: f32) -> Self {
+        use fundsp::hacker32::{ramp_phase, square};
+        // Note: square() doesn't support phase initialization, but we track phase separately
+        Self {
+            osc: square(),
+            ramp: ramp_phase(phase),
+            phase,
+        }
+    }
+
+    pub fn get_phase(&self) -> f32 {
+        self.phase
     }
 }
 
@@ -553,93 +577,39 @@ impl Node for SquareNode {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let freq = inputs.get(0).expect("square: missing freq input");
-        let reset_phase = inputs.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
-        let inc = 2. * PI * freq / SAMPLE_RATE;
-        let y = if self.phase < PI { 1. } else { -1. };
-        self.phase += inc;
-
-        if self.phase >= 2. * PI {
-            self.phase -= 2. * PI;
-        }
-
-        y
+        self.phase = self.ramp.tick(&[*freq].into())[0];
+        self.osc.tick(&[*freq].into())[0]
     }
 }
 
 #[derive(Clone)]
 pub struct SawNode {
-    period: f32,
-    amplitude: f32,
+    osc: An<WaveSynth<UInt<UTerm, B1>>>,
+    ramp: An<Ramp<f32>>,
     phase: f32,
-    phase_max: f32,
-    inc: f32,
-    sin0: f32,
-    sin1: f32,
-    dsin: f32,
-    dc: f32,
-    saw: f32,
-    sample_rate: f32,
 }
 
 impl SawNode {
     fn new() -> Self {
+        use fundsp::hacker32::{ramp, saw};
         Self {
-            period: 0.0,
-            amplitude: 1.0,
+            osc: saw(),
+            ramp: ramp(),
             phase: 0.0,
-            phase_max: 0.0,
-            inc: 0.0,
-            sin0: 0.0,
-            sin1: 0.0,
-            dsin: 0.0,
-            dc: 0.0,
-            saw: 0.0,
-            sample_rate: SAMPLE_RATE,
         }
     }
 
-    #[inline(always)]
-    #[nonblocking]
-    fn next_sample(&mut self) -> f32 {
-        let y;
-        self.phase += self.inc;
-
-        if self.phase <= FRAC_PI_4 {
-            let half_period = self.period / 2.0;
-            self.phase_max = (0.5 + half_period).floor() - 0.5;
-            self.dc = 0.5 * self.amplitude / self.phase_max; // calculate DC offset
-            self.phase_max *= std::f32::consts::PI;
-
-            self.inc = self.phase_max / half_period;
-            self.phase = -self.phase;
-
-            // digital resonator approximation of a sine function
-            self.sin0 = self.amplitude * self.phase.sin();
-            self.sin1 = self.amplitude * (self.phase - self.inc).sin();
-            self.dsin = 2.0 * self.inc.cos();
-
-            if self.phase * self.phase > 1e-9 {
-                y = self.sin0 / self.phase;
-            } else {
-                y = self.amplitude;
-            }
-        } else {
-            if self.phase > self.phase_max {
-                self.phase = self.phase_max + self.phase_max - self.phase;
-                self.inc = -self.inc;
-            }
-
-            let sinp = self.dsin * self.sin0 - self.sin1;
-            self.sin1 = self.sin0;
-            self.sin0 = sinp;
-            y = sinp / self.phase;
+    fn new_with_phase(phase: f32) -> Self {
+        use fundsp::hacker32::{ramp_phase, saw};
+        Self {
+            osc: saw(),
+            ramp: ramp_phase(phase),
+            phase,
         }
+    }
 
-        y - self.dc
+    pub fn get_phase(&self) -> f32 {
+        self.phase
     }
 }
 
@@ -648,15 +618,8 @@ impl Node for SawNode {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let freq = inputs.get(0).expect("saw: missing freq input");
-        let reset_phase = inputs.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
-        self.period = self.sample_rate / freq;
-        let sample = self.next_sample();
-        self.saw = self.saw * 0.997 + sample;
-        self.saw
+        self.phase = self.ramp.tick(&[*freq].into())[0];
+        self.osc.tick(&[*freq].into())[0]
     }
 }
 
@@ -681,10 +644,18 @@ impl Node for NoiseNode {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct PulseNode {
     phase: f32,
     prev_phase: f32,
+}
+
+impl Clone for PulseNode {
+    fn clone(&self) -> Self {
+        Self {
+            phase: 0.0,
+            prev_phase: 0.0,
+        }
+    }
 }
 
 impl PulseNode {
