@@ -139,8 +139,10 @@ impl AudioGraph {
             (Square { .. }, Square { .. }) => true,
             (Saw { .. }, Saw { .. }) => true,
             (Pulse { .. }, Pulse { .. }) => true,
+            (Triangle { .. }, Triangle { .. }) => true,
             (AR { .. }, AR { .. }) => true,
-            _ => false, // For now, only support oscillators and envelopes
+            (Moog { .. }, Moog { .. }) => true,
+            _ => false, // For now, only support oscillators, filters, and effects
         }
     }
 }
@@ -213,6 +215,13 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             } => add_node(vec![freq, tone, damping, trig], expr, graph),
             NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
+            NodeKind::Triangle { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Moog {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => add_node(vec![cutoff, resonance, input], expr, graph),
         }
     }
 

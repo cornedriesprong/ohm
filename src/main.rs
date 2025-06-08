@@ -80,7 +80,7 @@ where
                 Ok(expr) => {
                     let new_graph = parse_to_audio_graph(expr.to_owned());
                     let mut guard = graph.lock().unwrap();
-                    
+
                     match guard.as_mut() {
                         Some(existing_graph) => {
                             // Apply diff to preserve state
@@ -225,6 +225,20 @@ fn create_env(koto: &Koto) {
         let input = expr_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(delay(input).into()))
+    });
+    koto.prelude()
+        .add_fn("triangle", make_expr_node(|args| triangle(args[0].clone())));
+    koto.prelude().add_fn("moog", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 3 {
+            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+        }
+
+        let cutoff = expr_from_kvalue(&args[0])?;
+        let resonance = expr_from_kvalue(&args[1])?;
+        let input = expr_from_kvalue(&args[2])?;
+
+        Ok(KValue::Object(moog(cutoff, resonance, input).into()))
     });
 }
 

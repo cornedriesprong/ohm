@@ -7,7 +7,7 @@ use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
 use fundsp::hacker32::*;
-use fundsp::typenum::{UInt, UTerm, B1};
+use fundsp::typenum::{UInt, UTerm, B1, U1, U3};
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use rtsan_standalone::nonblocking;
@@ -83,6 +83,16 @@ pub(crate) enum NodeKind {
     Delay {
         input: BoxedNode,
         node: DelayNode,
+    },
+    Triangle {
+        freq: BoxedNode,
+        node: TriangleNode,
+    },
+    Moog {
+        cutoff: BoxedNode,
+        resonance: BoxedNode,
+        input: BoxedNode,
+        node: MoogNode,
     },
 }
 
@@ -272,6 +282,22 @@ pub(crate) fn delay(input: NodeKind) -> NodeKind {
     }
 }
 
+pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
+    NodeKind::Triangle {
+        freq: Box::new(freq),
+        node: TriangleNode::new(),
+    }
+}
+
+pub(crate) fn moog(cutoff: NodeKind, resonance: NodeKind, input: NodeKind) -> NodeKind {
+    NodeKind::Moog {
+        cutoff: Box::new(cutoff),
+        resonance: Box::new(resonance),
+        input: Box::new(input),
+        node: MoogNode::new(),
+    }
+}
+
 impl Node for NodeKind {
     #[inline(always)]
     #[nonblocking]
@@ -292,6 +318,8 @@ impl Node for NodeKind {
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => node.tick(inputs),
             NodeKind::Delay { node, .. } => node.tick(inputs),
+            NodeKind::Triangle { node, .. } => node.tick(inputs),
+            NodeKind::Moog { node, .. } => node.tick(inputs),
         }
     }
 }
@@ -314,6 +342,8 @@ impl PartialEq for NodeKind {
             (Self::Pluck { node: n1, .. }, Self::Pluck { node: n2, .. }) => n1.buffer == n2.buffer,
             (Self::Reverb { .. }, Self::Reverb { .. }) => true,
             (Self::Delay { .. }, Self::Delay { .. }) => true,
+            (Self::Triangle { .. }, Self::Triangle { .. }) => true,
+            (Self::Moog { .. }, Self::Moog { .. }) => true,
             _ => false,
             // _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
@@ -419,6 +449,21 @@ impl NodeKind {
                 14u8.hash(hasher);
                 input.hash_structure(hasher);
             }
+            NodeKind::Triangle { freq, .. } => {
+                15u8.hash(hasher);
+                freq.hash_structure(hasher);
+            }
+            NodeKind::Moog {
+                input: audio,
+                cutoff,
+                resonance,
+                ..
+            } => {
+                16u8.hash(hasher);
+                audio.hash_structure(hasher);
+                cutoff.hash_structure(hasher);
+                resonance.hash_structure(hasher);
+            }
         }
     }
 
@@ -461,6 +506,13 @@ impl NodeKind {
             }
             (NodeKind::Delay { node: new, .. }, NodeKind::Delay { node: old, .. }) => {
                 new.delay = old.delay.clone();
+            }
+            (NodeKind::Triangle { node: new, .. }, NodeKind::Triangle { node: old, .. }) => {
+                let old_phase = old.get_phase();
+                *new = TriangleNode::new_with_phase(old_phase);
+            }
+            (NodeKind::Moog { node: new, .. }, NodeKind::Moog { node: old, .. }) => {
+                *new = old.clone(); // Filters preserve internal state via clone
             }
             _ => {}
         }
@@ -618,6 +670,47 @@ impl Node for SawNode {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let freq = inputs.get(0).expect("saw: missing freq input");
+        self.phase = self.ramp.tick(&[*freq].into())[0];
+        self.osc.tick(&[*freq].into())[0]
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct TriangleNode {
+    osc: An<WaveSynth<U1>>,
+    ramp: An<Ramp<f32>>,
+    phase: f32,
+}
+
+impl TriangleNode {
+    fn new() -> Self {
+        use fundsp::hacker32::{ramp, triangle};
+        Self {
+            osc: triangle(),
+            ramp: ramp(),
+            phase: 0.0,
+        }
+    }
+
+    fn new_with_phase(phase: f32) -> Self {
+        use fundsp::hacker32::{ramp_phase, triangle};
+        Self {
+            osc: triangle(), // Triangle doesn't have phase init, but we track separately
+            ramp: ramp_phase(phase),
+            phase,
+        }
+    }
+
+    pub fn get_phase(&self) -> f32 {
+        self.phase
+    }
+}
+
+impl Node for TriangleNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let freq = inputs.get(0).expect("triangle: missing freq input");
         self.phase = self.ramp.tick(&[*freq].into())[0];
         self.osc.tick(&[*freq].into())[0]
     }
@@ -1083,5 +1176,28 @@ impl Node for DelayNode {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let input = inputs.get(0).expect("delay: missing input");
         self.delay.process(*input)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct MoogNode {
+    filter: An<Moog<f32, U3>>,
+}
+
+impl MoogNode {
+    fn new() -> Self {
+        use fundsp::hacker32::moog;
+        Self { filter: moog() }
+    }
+}
+
+impl Node for MoogNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let cutoff = inputs[0];
+        let resonance = inputs[1];
+        let input = inputs[2];
+        self.filter.tick(&[input, cutoff, resonance].into())[0]
     }
 }
