@@ -5,7 +5,7 @@ use cpal::{
 };
 use koto::prelude::*;
 use nodes::*;
-use notify::{Event, RecursiveMode, Watcher};
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{
@@ -104,26 +104,44 @@ where
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx)?;
-    watcher.watch(Path::new(filename), RecursiveMode::NonRecursive)?;
+
+    let path = Path::new(filename);
+    watcher.watch(path, RecursiveMode::NonRecursive)?;
 
     let mut last_update = Instant::now();
     let debounce_duration = Duration::from_millis(100); // Adjust as needed
 
     for res in rx {
         match res {
-            Ok(Event { kind, .. }) if kind.is_modify() => {
-                let now = Instant::now();
-                if now.duration_since(last_update) >= debounce_duration {
-                    if let Err(e) = update_audio_graph(Path::new(filename)) {
-                        eprintln!("Error updating audio graph: {}", e);
+            Ok(event) => match event.kind {
+                EventKind::Modify(ModifyKind::Data(_)) => {
+                    let now = Instant::now();
+                    if now.duration_since(last_update) >= debounce_duration {
+                        if let Err(e) = update_audio_graph(path) {
+                            eprintln!("Error updating audio graph: {}", e);
+                        }
+                        last_update = now;
                     }
-                    last_update = now;
                 }
-            }
+                EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+                    // re watch the file
+                    watcher.unwatch(path).ok();
+                    watcher.watch(path, RecursiveMode::NonRecursive).ok();
+
+                    let now = Instant::now();
+                    if now.duration_since(last_update) >= debounce_duration {
+                        if let Err(e) = update_audio_graph(path) {
+                            eprintln!("Error updating audio graph: {}", e);
+                        }
+                        last_update = now;
+                    }
+                }
+                _ => {}
+            },
             Err(e) => eprintln!("Watch error: {}", e),
-            _ => {}
         }
     }
+
     Ok(())
 }
 
