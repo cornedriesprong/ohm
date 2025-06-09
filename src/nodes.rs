@@ -551,170 +551,85 @@ impl Node for ConstantNode {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct SineNode {
-    osc: An<Sine<f32>>,
-    ramp: An<Ramp<f32>>,
-    phase: f32,
-}
-
-impl SineNode {
-    fn new() -> Self {
-        use fundsp::hacker32::{ramp, sine};
-        Self {
-            osc: sine(),
-            ramp: ramp(),
-            phase: 0.0,
+macro_rules! define_node {
+    (
+        $name:ident,
+        osc: $osc_type:ty = $osc_fn:ident,
+        ramp: $ramp_type:ty = $ramp_fn:ident,
+        ramp_phase_fn: $ramp_phase_fn:ident,
+    ) => {
+        #[derive(Clone)]
+        pub(crate) struct $name {
+            osc: An<$osc_type>,
+            ramp: An<$ramp_type>,
+            phase: f32,
         }
-    }
 
-    fn new_with_phase(phase: f32) -> Self {
-        use fundsp::hacker32::{ramp_phase, sine_phase};
-        Self {
-            osc: sine_phase(phase),
-            ramp: ramp_phase(phase),
-            phase,
+        impl $name {
+            fn new() -> Self {
+                use fundsp::hacker32::{$osc_fn, $ramp_fn};
+                Self {
+                    osc: $osc_fn(),
+                    ramp: $ramp_fn(),
+                    phase: 0.0,
+                }
+            }
+
+            fn new_with_phase(phase: f32) -> Self {
+                use fundsp::hacker32::{$osc_fn, $ramp_fn};
+                Self {
+                    osc: $osc_fn(),
+                    ramp: $ramp_fn(),
+                    phase: phase,
+                }
+            }
+
+            pub fn get_phase(&self) -> f32 {
+                self.phase
+            }
         }
-    }
 
-    pub fn get_phase(&self) -> f32 {
-        self.phase
-    }
-}
-
-impl Node for SineNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("sine: missing freq input");
-        self.phase = self.ramp.tick(&[*freq].into())[0];
-        self.osc.tick(&[*freq].into())[0]
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct SquareNode {
-    osc: An<WaveSynth<UInt<UTerm, B1>>>,
-    ramp: An<Ramp<f32>>,
-    phase: f32,
-}
-
-impl SquareNode {
-    fn new() -> Self {
-        use fundsp::hacker32::{ramp, square};
-        Self {
-            osc: square(),
-            ramp: ramp(),
-            phase: 0.0,
+        impl Node for $name {
+            #[inline(always)]
+            #[nonblocking]
+            fn tick(&mut self, inputs: &[f32]) -> f32 {
+                let freq = inputs
+                    .get(0)
+                    .expect(concat!(stringify!($name), ": missing freq input"));
+                self.phase = self.ramp.tick(&[*freq].into())[0];
+                self.osc.tick(&[*freq].into())[0]
+            }
         }
-    }
-
-    fn new_with_phase(phase: f32) -> Self {
-        use fundsp::hacker32::{ramp_phase, square};
-        // Note: square() doesn't support phase initialization, but we track phase separately
-        Self {
-            osc: square(),
-            ramp: ramp_phase(phase),
-            phase,
-        }
-    }
-
-    pub fn get_phase(&self) -> f32 {
-        self.phase
-    }
+    };
 }
 
-impl Node for SquareNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("square: missing freq input");
-        self.phase = self.ramp.tick(&[*freq].into())[0];
-        self.osc.tick(&[*freq].into())[0]
-    }
-}
+define_node!(
+    SineNode,
+    osc: Sine<f32> = sine,
+    ramp: Ramp<f32> = ramp,
+    ramp_phase_fn: ramp_phase,
+);
 
-#[derive(Clone)]
-pub struct SawNode {
-    osc: An<WaveSynth<UInt<UTerm, B1>>>,
-    ramp: An<Ramp<f32>>,
-    phase: f32,
-}
+define_node!(
+    SquareNode,
+    osc: WaveSynth<UInt<UTerm, B1>> = square,
+    ramp: Ramp<f32> = ramp,
+    ramp_phase_fn: ramp_phase,
+);
 
-impl SawNode {
-    fn new() -> Self {
-        use fundsp::hacker32::{ramp, saw};
-        Self {
-            osc: saw(),
-            ramp: ramp(),
-            phase: 0.0,
-        }
-    }
+define_node!(
+    SawNode,
+    osc: WaveSynth<UInt<UTerm, B1>> = saw,
+    ramp: Ramp<f32> = ramp,
+    ramp_phase_fn: ramp_phase,
+);
 
-    fn new_with_phase(phase: f32) -> Self {
-        use fundsp::hacker32::{ramp_phase, saw};
-        Self {
-            osc: saw(),
-            ramp: ramp_phase(phase),
-            phase,
-        }
-    }
-
-    pub fn get_phase(&self) -> f32 {
-        self.phase
-    }
-}
-
-impl Node for SawNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("saw: missing freq input");
-        self.phase = self.ramp.tick(&[*freq].into())[0];
-        self.osc.tick(&[*freq].into())[0]
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct TriangleNode {
-    osc: An<WaveSynth<U1>>,
-    ramp: An<Ramp<f32>>,
-    phase: f32,
-}
-
-impl TriangleNode {
-    fn new() -> Self {
-        use fundsp::hacker32::{ramp, triangle};
-        Self {
-            osc: triangle(),
-            ramp: ramp(),
-            phase: 0.0,
-        }
-    }
-
-    fn new_with_phase(phase: f32) -> Self {
-        use fundsp::hacker32::{ramp_phase, triangle};
-        Self {
-            osc: triangle(), // Triangle doesn't have phase init, but we track separately
-            ramp: ramp_phase(phase),
-            phase,
-        }
-    }
-
-    pub fn get_phase(&self) -> f32 {
-        self.phase
-    }
-}
-
-impl Node for TriangleNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("triangle: missing freq input");
-        self.phase = self.ramp.tick(&[*freq].into())[0];
-        self.osc.tick(&[*freq].into())[0]
-    }
-}
+define_node!(
+    TriangleNode,
+    osc: WaveSynth<U1> = triangle,
+    ramp: Ramp<f32> = ramp,
+    ramp_phase_fn: ramp_phase,
+);
 
 #[derive(Clone)]
 pub(crate) struct NoiseNode {
