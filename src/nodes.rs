@@ -304,7 +304,6 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
             NodeKind::Constant(node) => node.tick(inputs),
-            NodeKind::Sine { node, .. } => node.tick(inputs),
             NodeKind::Square { node, .. } => node.tick(inputs),
             NodeKind::Saw { node, .. } => node.tick(inputs),
             NodeKind::Noise(node) => node.tick(inputs),
@@ -348,6 +347,19 @@ impl PartialEq for NodeKind {
             // _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
     }
+}
+
+macro_rules! transfer_node_state {
+    ( $self:ident, $other:ident; $( $variant:ident ),* $(,)? ) => {
+        match ($self, $other) {
+            $(
+                (NodeKind::$variant { node: new, .. }, NodeKind::$variant { node: old, .. }) => {
+                    *new = old.clone();
+                }
+            )*
+            _ => {}
+        }
+    };
 }
 
 impl NodeKind {
@@ -468,54 +480,23 @@ impl NodeKind {
     }
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
-        match (self, other) {
-            (NodeKind::Sine { node: new, .. }, NodeKind::Sine { node: old, .. }) => {
-                *new = SineNode::new_with_phase(old.get_phase());
-            }
-            (NodeKind::Square { node: new, .. }, NodeKind::Square { node: old, .. }) => {
-                *new = SquareNode::new_with_phase(old.get_phase());
-            }
-            (NodeKind::Saw { node: new, .. }, NodeKind::Saw { node: old, .. }) => {
-                *new = SawNode::new_with_phase(old.get_phase());
-            }
-            (NodeKind::Pulse { node: new, .. }, NodeKind::Pulse { node: old, .. }) => {
-                new.phase = old.phase;
-                new.prev_phase = old.prev_phase;
-            }
-            (NodeKind::AR { node: new, .. }, NodeKind::AR { node: old, .. }) => {
-                new.state = old.state;
-                new.value = old.value;
-                new.time = old.time;
-            }
-            (NodeKind::Seq { node: new, .. }, NodeKind::Seq { node: old, .. }) => {
-                new.step = old.step;
-            }
-            (NodeKind::Pipe { node: new, .. }, NodeKind::Pipe { node: old, .. }) => {
-                new.buffer = old.buffer;
-                new.read_pos = old.read_pos;
-            }
-            (NodeKind::Pluck { node: new, .. }, NodeKind::Pluck { node: old, .. }) => {
-                new.buffer = old.buffer;
-                new.period = old.period;
-                new.read_pos = old.read_pos;
-                new.pitch_track = old.pitch_track;
-                new.is_stopped = old.is_stopped;
-            }
-            (NodeKind::Reverb { node: new, .. }, NodeKind::Reverb { node: old, .. }) => {
-                new.reverb = old.reverb.clone();
-            }
-            (NodeKind::Delay { node: new, .. }, NodeKind::Delay { node: old, .. }) => {
-                new.delay = old.delay.clone();
-            }
-            (NodeKind::Triangle { node: new, .. }, NodeKind::Triangle { node: old, .. }) => {
-                let old_phase = old.get_phase();
-                *new = TriangleNode::new_with_phase(old_phase);
-            }
-            (NodeKind::Moog { node: new, .. }, NodeKind::Moog { node: old, .. }) => {
-                *new = old.clone(); // Filters preserve internal state via clone
-            }
-            _ => {}
-        }
+        transfer_node_state!(self, other;
+            Sine,
+            Square ,
+            Saw,
+            Pulse,
+            Gain,
+            Mix,
+            AR,
+            SVF,
+            Seq,
+            Pipe,
+            Pluck,
+            Reverb,
+            Delay,
+            Triangle,
+            Moog
+        );
     }
 }
 
