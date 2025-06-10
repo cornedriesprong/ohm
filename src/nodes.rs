@@ -304,6 +304,7 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
             NodeKind::Constant(node) => node.tick(inputs),
+            NodeKind::Sine { node, .. } => node.tick(inputs),
             NodeKind::Square { node, .. } => node.tick(inputs),
             NodeKind::Saw { node, .. } => node.tick(inputs),
             NodeKind::Noise(node) => node.tick(inputs),
