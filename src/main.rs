@@ -5,7 +5,7 @@ use cpal::{
 };
 use koto::prelude::*;
 use nodes::*;
-use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::{
