@@ -9,12 +9,11 @@ use fmt::{Debug, Formatter};
 use fundsp::hacker32::*;
 use fundsp::typenum::{UInt, UTerm, B1, U1, U3};
 use koto::{derive::*, prelude::*, runtime::Result};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::Rng;
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
 use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
 use strum::AsRefStr;
 
 #[derive(Clone, KotoType, KotoCopy, AsRefStr)]
