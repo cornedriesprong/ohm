@@ -19,24 +19,28 @@ use strum::AsRefStr;
 
 #[derive(Clone, KotoType, KotoCopy, AsRefStr)]
 pub(crate) enum NodeKind {
-    Constant(ConstantNode),
+    Constant(An<Constant<UInt<UTerm, B1>>>),
     Sine {
         freq: BoxedNode,
-        node: SineNode,
+        node: An<Sine<f32>>,
     },
     Square {
         freq: BoxedNode,
-        node: SquareNode,
+        node: An<WaveSynth<UInt<UTerm, B1>>>,
     },
     Saw {
         freq: BoxedNode,
-        node: SawNode,
+        node: An<WaveSynth<UInt<UTerm, B1>>>,
+    },
+    Triangle {
+        freq: BoxedNode,
+        node: An<WaveSynth<U1>>,
     },
     Pulse {
         freq: BoxedNode,
         node: PulseNode,
     },
-    Noise(NoiseNode),
+    Noise(An<Noise>),
     Mix {
         lhs: BoxedNode,
         rhs: BoxedNode,
@@ -84,10 +88,6 @@ pub(crate) enum NodeKind {
         input: BoxedNode,
         node: DelayNode,
     },
-    Triangle {
-        freq: BoxedNode,
-        node: TriangleNode,
-    },
     Moog {
         cutoff: BoxedNode,
         resonance: BoxedNode,
@@ -100,9 +100,9 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => {
-                Ok(KValue::Object(constant(node.value + f32::from(num)).into()))
-            }
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                constant(node.value()[0] + f32::from(num)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((num).into())).into(),
             )),
@@ -115,9 +115,9 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => {
-                Ok(KValue::Object(constant(node.value * f32::from(num)).into()))
-            }
+            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
+                constant(node.value()[0] * f32::from(num)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
             )),
@@ -131,7 +131,7 @@ impl KotoObject for NodeKind {
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value - f32::from(-num)).into(),
+                constant(node.value()[0] - f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((-num).into())).into(),
@@ -146,7 +146,7 @@ impl KotoObject for NodeKind {
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
             (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value / f32::from(-num)).into(),
+                constant(node.value()[0] / f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
@@ -168,32 +168,37 @@ impl KotoEntries for NodeKind {
 const BUFFER_SIZE: usize = 8192;
 
 pub(crate) fn constant(value: f32) -> NodeKind {
-    NodeKind::Constant(ConstantNode::new(value))
+    use fundsp::hacker32::dc;
+    NodeKind::Constant(dc(value))
 }
 
 pub(crate) fn sine(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::sine;
     NodeKind::Sine {
         freq: Box::new(freq),
-        node: SineNode::new(),
+        node: sine(),
     }
 }
 
 pub(crate) fn square(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::square;
     NodeKind::Square {
         freq: Box::new(freq),
-        node: SquareNode::new(),
+        node: square(),
     }
 }
 
 pub(crate) fn saw(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::saw;
     NodeKind::Saw {
         freq: Box::new(freq),
-        node: SawNode::new(),
+        node: saw(),
     }
 }
 
 pub(crate) fn noise() -> NodeKind {
-    NodeKind::Noise(NoiseNode::new())
+    use fundsp::hacker32::noise;
+    NodeKind::Noise(noise())
 }
 
 pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
@@ -283,9 +288,10 @@ pub(crate) fn delay(input: NodeKind) -> NodeKind {
 }
 
 pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::triangle;
     NodeKind::Triangle {
         freq: Box::new(freq),
-        node: TriangleNode::new(),
+        node: triangle(),
     }
 }
 
@@ -303,11 +309,12 @@ impl Node for NodeKind {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant(node) => node.tick(inputs),
-            NodeKind::Sine { node, .. } => node.tick(inputs),
-            NodeKind::Square { node, .. } => node.tick(inputs),
-            NodeKind::Saw { node, .. } => node.tick(inputs),
-            NodeKind::Noise(node) => node.tick(inputs),
+            NodeKind::Constant(node) => node.tick(inputs.into())[0],
+            NodeKind::Sine { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Square { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Saw { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Triangle { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Noise(node) => node.tick(inputs.into())[0],
             NodeKind::Pulse { node, .. } => node.tick(inputs),
             NodeKind::Gain { node, .. } => node.tick(inputs),
             NodeKind::Mix { node, .. } => node.tick(inputs),
@@ -318,7 +325,6 @@ impl Node for NodeKind {
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => node.tick(inputs),
             NodeKind::Delay { node, .. } => node.tick(inputs),
-            NodeKind::Triangle { node, .. } => node.tick(inputs),
             NodeKind::Moog { node, .. } => node.tick(inputs),
         }
     }
@@ -327,7 +333,7 @@ impl Node for NodeKind {
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Constant(a), Self::Constant(b)) => a.value == b.value,
+            (Self::Constant(a), Self::Constant(b)) => a.value()[0] == b.value()[0],
             (Self::Sine { .. }, Self::Sine { .. }) => true,
             (Self::Square { .. }, Self::Square { .. }) => true,
             (Self::Saw { .. }, Self::Saw { .. }) => true,
@@ -374,7 +380,7 @@ impl NodeKind {
         match self {
             NodeKind::Constant(node) => {
                 0u8.hash(hasher);
-                node.value.to_bits().hash(hasher);
+                node.value()[0].to_bits().hash(hasher);
             }
             NodeKind::Sine { freq, .. } => {
                 1u8.hash(hasher);
@@ -504,7 +510,7 @@ impl NodeKind {
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            NodeKind::Constant(c) => write!(f, "{}({})", self.as_ref(), c.value),
+            NodeKind::Constant(c) => write!(f, "{}({})", self.as_ref(), c.value()[0]),
             _ => write!(f, "{}", self.as_ref()),
         }
     }
@@ -512,126 +518,6 @@ impl Debug for NodeKind {
 
 pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[f32]) -> f32;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ConstantNode {
-    pub value: f32,
-}
-
-impl ConstantNode {
-    fn new(value: f32) -> Self {
-        Self { value }
-    }
-}
-
-impl Node for ConstantNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, _: &[f32]) -> f32 {
-        self.value
-    }
-}
-
-macro_rules! define_node {
-    (
-        $name:ident,
-        osc: $osc_type:ty = $osc_fn:ident,
-        ramp: $ramp_type:ty = $ramp_fn:ident,
-        ramp_phase_fn: $ramp_phase_fn:ident,
-    ) => {
-        #[derive(Clone)]
-        pub(crate) struct $name {
-            osc: An<$osc_type>,
-            ramp: An<$ramp_type>,
-            phase: f32,
-        }
-
-        impl $name {
-            fn new() -> Self {
-                use fundsp::hacker32::{$osc_fn, $ramp_fn};
-                Self {
-                    osc: $osc_fn(),
-                    ramp: $ramp_fn(),
-                    phase: 0.0,
-                }
-            }
-
-            fn new_with_phase(phase: f32) -> Self {
-                use fundsp::hacker32::{$osc_fn, $ramp_fn};
-                Self {
-                    osc: $osc_fn(),
-                    ramp: $ramp_fn(),
-                    phase: phase,
-                }
-            }
-
-            pub fn get_phase(&self) -> f32 {
-                self.phase
-            }
-        }
-
-        impl Node for $name {
-            #[inline(always)]
-            #[nonblocking]
-            fn tick(&mut self, inputs: &[f32]) -> f32 {
-                let freq = inputs
-                    .get(0)
-                    .expect(concat!(stringify!($name), ": missing freq input"));
-                self.phase = self.ramp.tick(&[*freq].into())[0];
-                self.osc.tick(&[*freq].into())[0]
-            }
-        }
-    };
-}
-
-define_node!(
-    SineNode,
-    osc: Sine<f32> = sine,
-    ramp: Ramp<f32> = ramp,
-    ramp_phase_fn: ramp_phase,
-);
-
-define_node!(
-    SquareNode,
-    osc: WaveSynth<UInt<UTerm, B1>> = square,
-    ramp: Ramp<f32> = ramp,
-    ramp_phase_fn: ramp_phase,
-);
-
-define_node!(
-    SawNode,
-    osc: WaveSynth<UInt<UTerm, B1>> = saw,
-    ramp: Ramp<f32> = ramp,
-    ramp_phase_fn: ramp_phase,
-);
-
-define_node!(
-    TriangleNode,
-    osc: WaveSynth<U1> = triangle,
-    ramp: Ramp<f32> = ramp,
-    ramp_phase_fn: ramp_phase,
-);
-
-#[derive(Clone)]
-pub(crate) struct NoiseNode {
-    rng: Arc<Mutex<SmallRng>>,
-}
-
-impl NoiseNode {
-    fn new() -> Self {
-        Self {
-            rng: Arc::new(Mutex::new(SmallRng::from_entropy())),
-        }
-    }
-}
-
-impl Node for NoiseNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, _: &[f32]) -> f32 {
-        self.rng.lock().unwrap().gen::<f32>() * 2. - 1.
-    }
 }
 
 pub(crate) struct PulseNode {
