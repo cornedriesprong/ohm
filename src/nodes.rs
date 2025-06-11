@@ -19,23 +19,23 @@ pub(crate) enum NodeKind {
     Constant(An<Constant<UInt<UTerm, B1>>>),
     Sine {
         freq: BoxedNode,
-        node: An<Sine<f32>>,
+        node: Box<dyn AudioUnit>,
     },
     Square {
         freq: BoxedNode,
-        node: An<WaveSynth<UInt<UTerm, B1>>>,
+        node: Box<dyn AudioUnit>,
     },
     Saw {
         freq: BoxedNode,
-        node: An<WaveSynth<UInt<UTerm, B1>>>,
+        node: Box<dyn AudioUnit>,
     },
     Triangle {
         freq: BoxedNode,
-        node: An<WaveSynth<U1>>,
+        node: Box<dyn AudioUnit>,
     },
     Pulse {
         freq: BoxedNode,
-        node: An<PulseWave>,
+        node: Box<dyn AudioUnit>,
     },
     Noise(An<Noise>),
     Mix {
@@ -184,7 +184,7 @@ pub(crate) fn sine(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::sine;
     NodeKind::Sine {
         freq: Box::new(freq),
-        node: sine(),
+        node: Box::new(sine()),
     }
 }
 
@@ -192,7 +192,7 @@ pub(crate) fn square(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::square;
     NodeKind::Square {
         freq: Box::new(freq),
-        node: square(),
+        node: Box::new(square()),
     }
 }
 
@@ -200,7 +200,7 @@ pub(crate) fn saw(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::saw;
     NodeKind::Saw {
         freq: Box::new(freq),
-        node: saw(),
+        node: Box::new(saw()),
     }
 }
 
@@ -208,7 +208,7 @@ pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::triangle;
     NodeKind::Triangle {
         freq: Box::new(freq),
-        node: triangle(),
+        node: Box::new(triangle()),
     }
 }
 
@@ -221,7 +221,7 @@ pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::pulse;
     NodeKind::Pulse {
         freq: Box::new(freq),
-        node: pulse(),
+        node: Box::new(pulse()),
     }
 }
 
@@ -335,12 +335,32 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
             NodeKind::Constant(node) => node.tick(inputs.into())[0],
-            NodeKind::Sine { node, .. } => node.tick(inputs.into())[0],
-            NodeKind::Square { node, .. } => node.tick(inputs.into())[0],
-            NodeKind::Saw { node, .. } => node.tick(inputs.into())[0],
-            NodeKind::Triangle { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Sine { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
+            NodeKind::Square { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
+            NodeKind::Saw { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
+            NodeKind::Triangle { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Noise(node) => node.tick(inputs.into())[0],
-            NodeKind::Pulse { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Pulse { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Gain { node, .. } => node.tick(inputs),
             NodeKind::Mix { node, .. } => node.tick(inputs),
             NodeKind::AR { node, .. } => node.tick(inputs),
