@@ -1,7 +1,6 @@
 use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
-use crate::dsp::filters::SVFMode;
 use crate::dsp::reverb::Reverb;
 use crate::utils::{freq_to_period, lerp};
 use core::fmt;
@@ -12,7 +11,6 @@ use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
-use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 use strum::AsRefStr;
 
@@ -37,7 +35,7 @@ pub(crate) enum NodeKind {
     },
     Pulse {
         freq: BoxedNode,
-        node: PulseNode,
+        node: An<PulseWave>,
     },
     Noise(An<Noise>),
     Mix {
@@ -56,12 +54,23 @@ pub(crate) enum NodeKind {
         release: BoxedNode,
         node: ARNode,
     },
-    SVF {
-        mode: BoxedNode,
+    Lowpass {
+        input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
+        node: An<Svf<f32, LowpassMode<f32>>>,
+    },
+    Bandpass {
         input: BoxedNode,
-        node: SVFNode,
+        cutoff: BoxedNode,
+        resonance: BoxedNode,
+        node: An<Svf<f32, BandpassMode<f32>>>,
+    },
+    Highpass {
+        input: BoxedNode,
+        cutoff: BoxedNode,
+        resonance: BoxedNode,
+        node: An<Svf<f32, HighpassMode<f32>>>,
     },
     Seq {
         trig: BoxedNode,
@@ -88,10 +97,10 @@ pub(crate) enum NodeKind {
         node: DelayNode,
     },
     Moog {
+        input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        input: BoxedNode,
-        node: MoogNode,
+        node: An<Moog<f32, U3>>,
     },
 }
 
@@ -195,15 +204,24 @@ pub(crate) fn saw(freq: NodeKind) -> NodeKind {
     }
 }
 
+pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::triangle;
+    NodeKind::Triangle {
+        freq: Box::new(freq),
+        node: triangle(),
+    }
+}
+
 pub(crate) fn noise() -> NodeKind {
     use fundsp::hacker32::noise;
     NodeKind::Noise(noise())
 }
 
 pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
+    use fundsp::hacker32::pulse;
     NodeKind::Pulse {
         freq: Box::new(freq),
-        node: PulseNode::new(),
+        node: pulse(),
     }
 }
 
@@ -232,18 +250,33 @@ pub(crate) fn ar(attack: NodeKind, release: NodeKind, trig: NodeKind) -> NodeKin
     }
 }
 
-pub(crate) fn svf(
-    mode: NodeKind,
-    cutoff: NodeKind,
-    resonance: NodeKind,
-    input: NodeKind,
-) -> NodeKind {
-    NodeKind::SVF {
-        mode: Box::new(mode),
+pub(crate) fn lowpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
+    use fundsp::hacker32::lowpass;
+    NodeKind::Lowpass {
+        input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
+        node: lowpass(),
+    }
+}
+
+pub(crate) fn bandpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
+    use fundsp::hacker32::bandpass;
+    NodeKind::Bandpass {
         input: Box::new(input),
-        node: SVFNode::new(),
+        cutoff: Box::new(cutoff),
+        resonance: Box::new(resonance),
+        node: bandpass(),
+    }
+}
+
+pub(crate) fn highpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
+    use fundsp::hacker32::highpass;
+    NodeKind::Highpass {
+        input: Box::new(input),
+        cutoff: Box::new(cutoff),
+        resonance: Box::new(resonance),
+        node: highpass(),
     }
 }
 
@@ -286,20 +319,13 @@ pub(crate) fn delay(input: NodeKind) -> NodeKind {
     }
 }
 
-pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::triangle;
-    NodeKind::Triangle {
-        freq: Box::new(freq),
-        node: triangle(),
-    }
-}
-
-pub(crate) fn moog(cutoff: NodeKind, resonance: NodeKind, input: NodeKind) -> NodeKind {
+pub(crate) fn moog(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
+    use fundsp::hacker32::moog;
     NodeKind::Moog {
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
         input: Box::new(input),
-        node: MoogNode::new(),
+        node: moog(),
     }
 }
 
@@ -314,17 +340,19 @@ impl Node for NodeKind {
             NodeKind::Saw { node, .. } => node.tick(inputs.into())[0],
             NodeKind::Triangle { node, .. } => node.tick(inputs.into())[0],
             NodeKind::Noise(node) => node.tick(inputs.into())[0],
-            NodeKind::Pulse { node, .. } => node.tick(inputs),
+            NodeKind::Pulse { node, .. } => node.tick(inputs.into())[0],
             NodeKind::Gain { node, .. } => node.tick(inputs),
             NodeKind::Mix { node, .. } => node.tick(inputs),
             NodeKind::AR { node, .. } => node.tick(inputs),
-            NodeKind::SVF { node, .. } => node.tick(inputs),
+            NodeKind::Lowpass { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Bandpass { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Highpass { node, .. } => node.tick(inputs.into())[0],
             NodeKind::Seq { node, .. } => node.tick(inputs),
             NodeKind::Pipe { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => node.tick(inputs),
             NodeKind::Delay { node, .. } => node.tick(inputs),
-            NodeKind::Moog { node, .. } => node.tick(inputs),
+            NodeKind::Moog { node, .. } => node.tick(inputs.into())[0],
         }
     }
 }
@@ -341,7 +369,9 @@ impl PartialEq for NodeKind {
             (Self::Gain { .. }, Self::Gain { .. }) => true,
             (Self::Mix { .. }, Self::Mix { .. }) => true,
             (Self::AR { .. }, Self::AR { .. }) => true,
-            (Self::SVF { .. }, Self::SVF { .. }) => true,
+            (Self::Lowpass { .. }, Self::Lowpass { .. }) => true,
+            (Self::Bandpass { .. }, Self::Bandpass { .. }) => true,
+            (Self::Highpass { .. }, Self::Highpass { .. }) => true,
             (Self::Seq { node: n1, .. }, Self::Seq { node: n2, .. }) => n1.values == n2.values,
             (Self::Pipe { node: n1, .. }, Self::Pipe { node: n2, .. }) => n1.buffer == n2.buffer,
             (Self::Pluck { node: n1, .. }, Self::Pluck { node: n2, .. }) => n1.buffer == n2.buffer,
@@ -421,18 +451,38 @@ impl NodeKind {
                 release.hash_structure(hasher);
                 trig.hash_structure(hasher);
             }
-            NodeKind::SVF {
-                mode,
+            NodeKind::Lowpass {
+                input,
                 cutoff,
                 resonance,
-                input,
                 ..
             } => {
                 9u8.hash(hasher);
-                mode.hash_structure(hasher);
+                input.hash_structure(hasher);
                 cutoff.hash_structure(hasher);
                 resonance.hash_structure(hasher);
+            }
+            NodeKind::Bandpass {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => {
+                9u8.hash(hasher);
                 input.hash_structure(hasher);
+                cutoff.hash_structure(hasher);
+                resonance.hash_structure(hasher);
+            }
+            NodeKind::Highpass {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => {
+                9u8.hash(hasher);
+                input.hash_structure(hasher);
+                cutoff.hash_structure(hasher);
+                resonance.hash_structure(hasher);
             }
             NodeKind::Seq { trig, node } => {
                 10u8.hash(hasher);
@@ -472,13 +522,13 @@ impl NodeKind {
                 freq.hash_structure(hasher);
             }
             NodeKind::Moog {
-                input: audio,
+                input,
                 cutoff,
                 resonance,
                 ..
             } => {
                 16u8.hash(hasher);
-                audio.hash_structure(hasher);
+                input.hash_structure(hasher);
                 cutoff.hash_structure(hasher);
                 resonance.hash_structure(hasher);
             }
@@ -494,7 +544,9 @@ impl NodeKind {
             Gain,
             Mix,
             AR,
-            SVF,
+            Lowpass,
+            Bandpass,
+            Highpass,
             Seq,
             Pipe,
             Pluck,
@@ -517,51 +569,6 @@ impl Debug for NodeKind {
 
 pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[f32]) -> f32;
-}
-
-pub(crate) struct PulseNode {
-    phase: f32,
-    prev_phase: f32,
-}
-
-impl Clone for PulseNode {
-    fn clone(&self) -> Self {
-        Self {
-            phase: 0.0,
-            prev_phase: 0.0,
-        }
-    }
-}
-
-impl PulseNode {
-    fn new() -> Self {
-        Self {
-            phase: 0.,
-            prev_phase: 0.,
-        }
-    }
-}
-
-impl Node for PulseNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("pulse: missing freq input");
-        let reset_phase = inputs.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
-
-        self.prev_phase = self.phase;
-        self.phase += 2. * PI * freq / SAMPLE_RATE;
-
-        if self.phase >= 2. * PI {
-            self.phase -= 2. * PI;
-            1.0
-        } else {
-            0.0
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -676,71 +683,6 @@ impl Node for ARNode {
         self.time += 1.0;
 
         self.value
-    }
-}
-
-/// FunDSP-based state-variable filter
-pub enum SVFNode {
-    Lowpass(An<Svf<f32, LowpassMode<f32>>>),
-    Highpass(An<Svf<f32, HighpassMode<f32>>>),
-    Bandpass(An<Svf<f32, BandpassMode<f32>>>),
-}
-
-impl Clone for SVFNode {
-    fn clone(&self) -> Self {
-        match self {
-            SVFNode::Lowpass(filter) => SVFNode::Lowpass(filter.clone()),
-            SVFNode::Highpass(filter) => SVFNode::Highpass(filter.clone()),
-            SVFNode::Bandpass(filter) => SVFNode::Bandpass(filter.clone()),
-        }
-    }
-}
-
-impl SVFNode {
-    fn new() -> SVFNode {
-        SVFNode::Lowpass(lowpass())
-    }
-}
-
-impl Node for SVFNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let mode = *inputs.get(0).expect("svf: missing mode") as i32;
-        let cutoff = *inputs.get(1).expect("svf: missing cutoff input");
-        let resonance = *inputs.get(2).expect("svf: missing resonance input");
-        let input = *inputs.get(3).expect("svf: missing input");
-
-        // Update filter based on mode (only if mode changed)
-        let target_mode = match mode {
-            0 => SVFMode::Lowpass,
-            1 => SVFMode::Highpass,
-            2 => SVFMode::Bandpass,
-            _ => panic!("invalid mode"),
-        };
-
-        // Check if we need to change filter type
-        let needs_mode_change = match (&*self, target_mode) {
-            (SVFNode::Lowpass(_), SVFMode::Lowpass) => false,
-            (SVFNode::Highpass(_), SVFMode::Highpass) => false,
-            (SVFNode::Bandpass(_), SVFMode::Bandpass) => false,
-            _ => true,
-        };
-
-        if needs_mode_change {
-            *self = match target_mode {
-                SVFMode::Lowpass => SVFNode::Lowpass(lowpass()),
-                SVFMode::Highpass => SVFNode::Highpass(highpass()),
-                SVFMode::Bandpass => SVFNode::Bandpass(bandpass()),
-            };
-        }
-
-        // Process with dynamic parameters - filters accept [audio, cutoff, Q]
-        match self {
-            SVFNode::Lowpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
-            SVFNode::Highpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
-            SVFNode::Bandpass(filter) => filter.tick(&[input, cutoff, resonance].into())[0],
-        }
     }
 }
 
@@ -958,28 +900,5 @@ impl Node for DelayNode {
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         let input = inputs.get(0).expect("delay: missing input");
         self.delay.process(*input)
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct MoogNode {
-    filter: An<Moog<f32, U3>>,
-}
-
-impl MoogNode {
-    fn new() -> Self {
-        use fundsp::hacker32::moog;
-        Self { filter: moog() }
-    }
-}
-
-impl Node for MoogNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let cutoff = inputs[0];
-        let resonance = inputs[1];
-        let input = inputs[2];
-        self.filter.tick(&[input, cutoff, resonance].into())[0]
     }
 }

@@ -197,13 +197,24 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 trig,
                 ..
             } => add_node(vec![attack, release, trig], &expr, graph),
-            NodeKind::SVF {
-                mode,
+            NodeKind::Lowpass {
+                input,
                 cutoff,
                 resonance,
-                input,
                 ..
-            } => add_node(vec![mode, cutoff, resonance, input], &expr, graph),
+            } => add_node(vec![input, cutoff, resonance], &expr, graph),
+            NodeKind::Bandpass {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => add_node(vec![input, cutoff, resonance], &expr, graph),
+            NodeKind::Highpass {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => add_node(vec![input, cutoff, resonance], &expr, graph),
             NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
             NodeKind::Pipe { delay, input, .. } => add_node(vec![delay, input], expr, graph),
             NodeKind::Pluck {
@@ -221,7 +232,7 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 cutoff,
                 resonance,
                 ..
-            } => add_node(vec![cutoff, resonance, input], expr, graph),
+            } => add_node(vec![input, cutoff, resonance], expr, graph),
         }
     }
 

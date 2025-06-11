@@ -168,21 +168,41 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(ar(attack, release, trig).into()))
     });
-    koto.prelude().add_fn("svf", move |ctx| {
+    koto.prelude().add_fn("lowpass", move |ctx| {
         let args = ctx.args();
-        if args.len() != 4 {
-            return unexpected_args(
-                "4 arguments: mode (lp, hp, bp), cutoff, resonance, input",
-                args,
-            );
+        if args.len() != 3 {
+            return unexpected_args("3 arguments: cutoff, resonance, input", args);
         }
 
-        let mode = expr_from_kvalue(&args[0])?;
-        let cutoff = expr_from_kvalue(&args[1])?;
-        let resonance = expr_from_kvalue(&args[2])?;
-        let input = expr_from_kvalue(&args[3])?;
+        let cutoff = expr_from_kvalue(&args[0])?;
+        let resonance = expr_from_kvalue(&args[1])?;
+        let input = expr_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(svf(mode, cutoff, resonance, input).into()))
+        Ok(KValue::Object(lowpass(input, cutoff, resonance).into()))
+    });
+    koto.prelude().add_fn("bandpass", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 3 {
+            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+        }
+
+        let cutoff = expr_from_kvalue(&args[0])?;
+        let resonance = expr_from_kvalue(&args[1])?;
+        let input = expr_from_kvalue(&args[2])?;
+
+        Ok(KValue::Object(bandpass(input, cutoff, resonance).into()))
+    });
+    koto.prelude().add_fn("highpass", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 3 {
+            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+        }
+
+        let cutoff = expr_from_kvalue(&args[0])?;
+        let resonance = expr_from_kvalue(&args[1])?;
+        let input = expr_from_kvalue(&args[2])?;
+
+        Ok(KValue::Object(highpass(input, cutoff, resonance).into()))
     });
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
@@ -256,7 +276,7 @@ fn create_env(koto: &Koto) {
         let resonance = expr_from_kvalue(&args[1])?;
         let input = expr_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(moog(cutoff, resonance, input).into()))
+        Ok(KValue::Object(moog(input, cutoff, resonance).into()))
     });
 }
 
