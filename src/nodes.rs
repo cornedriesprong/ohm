@@ -6,7 +6,6 @@ use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
 use fundsp::hacker32::*;
-use fundsp::typenum::{UInt, UTerm, B1, U1, U3};
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
@@ -16,7 +15,10 @@ use strum::AsRefStr;
 
 #[derive(Clone, KotoType, KotoCopy, AsRefStr)]
 pub(crate) enum NodeKind {
-    Constant(An<Constant<UInt<UTerm, B1>>>),
+    Constant {
+        value: f32,
+        node: Box<dyn AudioUnit>,
+    },
     Sine {
         freq: BoxedNode,
         node: Box<dyn AudioUnit>,
@@ -37,7 +39,7 @@ pub(crate) enum NodeKind {
         freq: BoxedNode,
         node: Box<dyn AudioUnit>,
     },
-    Noise(An<Noise>),
+    Noise(Box<dyn AudioUnit>),
     Mix {
         lhs: BoxedNode,
         rhs: BoxedNode,
@@ -58,19 +60,19 @@ pub(crate) enum NodeKind {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        node: An<Svf<f32, LowpassMode<f32>>>,
+        node: Box<dyn AudioUnit>,
     },
     Bandpass {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        node: An<Svf<f32, BandpassMode<f32>>>,
+        node: Box<dyn AudioUnit>,
     },
     Highpass {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        node: An<Svf<f32, HighpassMode<f32>>>,
+        node: Box<dyn AudioUnit>,
     },
     Seq {
         trig: BoxedNode,
@@ -100,7 +102,7 @@ pub(crate) enum NodeKind {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        node: An<Moog<f32, U3>>,
+        node: Box<dyn AudioUnit>,
     },
 }
 
@@ -108,8 +110,8 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value()[0] + f32::from(num)).into(),
+            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
+                constant(value + f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((num).into())).into(),
@@ -123,8 +125,8 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value()[0] * f32::from(num)).into(),
+            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
+                constant(value * f32::from(num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
@@ -138,8 +140,8 @@ impl KotoObject for NodeKind {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value()[0] - f32::from(-num)).into(),
+            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
+                constant(value - f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((-num).into())).into(),
@@ -153,8 +155,8 @@ impl KotoObject for NodeKind {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(node), KValue::Number(num)) => Ok(KValue::Object(
-                constant(node.value()[0] / f32::from(-num)).into(),
+            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
+                constant(value / f32::from(-num)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
@@ -177,7 +179,10 @@ const BUFFER_SIZE: usize = 8192;
 
 pub(crate) fn constant(value: f32) -> NodeKind {
     use fundsp::hacker32::dc;
-    NodeKind::Constant(dc(value))
+    NodeKind::Constant {
+        value,
+        node: Box::new(dc(value)),
+    }
 }
 
 pub(crate) fn sine(freq: NodeKind) -> NodeKind {
@@ -214,7 +219,7 @@ pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
 
 pub(crate) fn noise() -> NodeKind {
     use fundsp::hacker32::noise;
-    NodeKind::Noise(noise())
+    NodeKind::Noise(Box::new(noise()))
 }
 
 pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
@@ -256,7 +261,7 @@ pub(crate) fn lowpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) ->
         input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
-        node: lowpass(),
+        node: Box::new(lowpass()),
     }
 }
 
@@ -266,7 +271,7 @@ pub(crate) fn bandpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -
         input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
-        node: bandpass(),
+        node: Box::new(bandpass()),
     }
 }
 
@@ -276,7 +281,7 @@ pub(crate) fn highpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -
         input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
-        node: highpass(),
+        node: Box::new(highpass()),
     }
 }
 
@@ -325,7 +330,7 @@ pub(crate) fn moog(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> No
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
         input: Box::new(input),
-        node: moog(),
+        node: Box::new(moog()),
     }
 }
 
@@ -334,7 +339,11 @@ impl Node for NodeKind {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant(node) => node.tick(inputs.into())[0],
+            NodeKind::Constant { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Sine { node, .. } => {
                 let mut output = [0.0];
                 node.tick(inputs.into(), &mut output);
@@ -355,7 +364,11 @@ impl Node for NodeKind {
                 node.tick(inputs.into(), &mut output);
                 output[0]
             }
-            NodeKind::Noise(node) => node.tick(inputs.into())[0],
+            NodeKind::Noise(node) => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Pulse { node, .. } => {
                 let mut output = [0.0];
                 node.tick(inputs.into(), &mut output);
@@ -364,15 +377,31 @@ impl Node for NodeKind {
             NodeKind::Gain { node, .. } => node.tick(inputs),
             NodeKind::Mix { node, .. } => node.tick(inputs),
             NodeKind::AR { node, .. } => node.tick(inputs),
-            NodeKind::Lowpass { node, .. } => node.tick(inputs.into())[0],
-            NodeKind::Bandpass { node, .. } => node.tick(inputs.into())[0],
-            NodeKind::Highpass { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Lowpass { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
+            NodeKind::Bandpass { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
+            NodeKind::Highpass { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Seq { node, .. } => node.tick(inputs),
             NodeKind::Pipe { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => node.tick(inputs),
             NodeKind::Delay { node, .. } => node.tick(inputs),
-            NodeKind::Moog { node, .. } => node.tick(inputs.into())[0],
+            NodeKind::Moog { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
         }
     }
 }
@@ -380,7 +409,7 @@ impl Node for NodeKind {
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Constant(a), Self::Constant(b)) => a.value()[0] == b.value()[0],
+            (Self::Constant { value: a, .. }, Self::Constant { value: b, .. }) => a == b,
             (Self::Sine { .. }, Self::Sine { .. }) => true,
             (Self::Square { .. }, Self::Square { .. }) => true,
             (Self::Saw { .. }, Self::Saw { .. }) => true,
@@ -405,6 +434,7 @@ impl PartialEq for NodeKind {
     }
 }
 
+
 macro_rules! transfer_node_state {
     ( $self:ident, $other:ident; $( $variant:ident ),* $(,)? ) => {
         match ($self, $other) {
@@ -413,6 +443,10 @@ macro_rules! transfer_node_state {
                     *new = old.clone();
                 }
             )*
+            // Handle tuple variants separately
+            (NodeKind::Noise(new), NodeKind::Noise(old)) => {
+                *new = old.clone();
+            }
             _ => {}
         }
     };
@@ -427,9 +461,9 @@ impl NodeKind {
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
         match self {
-            NodeKind::Constant(node) => {
+            NodeKind::Constant { value, .. } => {
                 0u8.hash(hasher);
-                node.value()[0].to_bits().hash(hasher);
+                value.to_bits().hash(hasher);
             }
             NodeKind::Sine { freq, .. } => {
                 1u8.hash(hasher);
@@ -557,10 +591,12 @@ impl NodeKind {
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         transfer_node_state!(self, other;
+            Constant,
             Sine,
-            Square ,
+            Square,
             Saw,
             Pulse,
+            Triangle,
             Gain,
             Mix,
             AR,
@@ -572,7 +608,6 @@ impl NodeKind {
             Pluck,
             Reverb,
             Delay,
-            Triangle,
             Moog
         );
     }
@@ -581,7 +616,7 @@ impl NodeKind {
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            NodeKind::Constant(c) => write!(f, "{}({})", self.as_ref(), c.value()[0]),
+            NodeKind::Constant { value, .. } => write!(f, "{}({})", self.as_ref(), value),
             _ => write!(f, "{}", self.as_ref()),
         }
     }

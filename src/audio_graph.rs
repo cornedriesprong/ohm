@@ -183,7 +183,7 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
 
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            NodeKind::Constant(_) => add_node(vec![], expr, graph),
+            NodeKind::Constant { .. } => add_node(vec![], expr, graph),
             NodeKind::Sine { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Square { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
