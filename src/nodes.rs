@@ -1,11 +1,10 @@
 use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
-use crate::dsp::reverb::Reverb;
 use crate::utils::{freq_to_period, lerp};
 use core::fmt;
 use fmt::{Debug, Formatter};
-use fundsp::hacker32::*;
+use fundsp::hacker32::AudioUnit;
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
@@ -37,6 +36,7 @@ pub(crate) enum NodeKind {
     },
     Pulse {
         freq: BoxedNode,
+        duty: BoxedNode,
         node: Box<dyn AudioUnit>,
     },
     Noise(Box<dyn AudioUnit>),
@@ -92,7 +92,7 @@ pub(crate) enum NodeKind {
     },
     Reverb {
         input: BoxedNode,
-        node: ReverbNode,
+        node: Box<dyn AudioUnit>,
     },
     Delay {
         input: BoxedNode,
@@ -110,9 +110,9 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
-                constant(value + f32::from(num)).into(),
-            )),
+            (Self::Constant { value, .. }, KValue::Number(num)) => {
+                Ok(KValue::Object(constant(value + f32::from(num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((num).into())).into(),
             )),
@@ -125,9 +125,9 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
-                constant(value * f32::from(num)).into(),
-            )),
+            (Self::Constant { value, .. }, KValue::Number(num)) => {
+                Ok(KValue::Object(constant(value * f32::from(num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
             )),
@@ -140,9 +140,9 @@ impl KotoObject for NodeKind {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
-                constant(value - f32::from(-num)).into(),
-            )),
+            (Self::Constant { value, .. }, KValue::Number(num)) => {
+                Ok(KValue::Object(constant(value - f32::from(-num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((-num).into())).into(),
             )),
@@ -155,9 +155,9 @@ impl KotoObject for NodeKind {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => Ok(KValue::Object(
-                constant(value / f32::from(-num)).into(),
-            )),
+            (Self::Constant { value, .. }, KValue::Number(num)) => {
+                Ok(KValue::Object(constant(value / f32::from(-num)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
             )),
@@ -226,6 +226,7 @@ pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
     use fundsp::hacker32::pulse;
     NodeKind::Pulse {
         freq: Box::new(freq),
+        duty: Box::new(constant(0.1)),
         node: Box::new(pulse()),
     }
 }
@@ -311,9 +312,16 @@ pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: Nod
 }
 
 pub(crate) fn reverb(input: NodeKind) -> NodeKind {
+    use fundsp::hacker32::{delay, fdn, fir, join, lerp, rnd1, split, stacki, U16};
     NodeKind::Reverb {
         input: Box::new(input),
-        node: ReverbNode::new(),
+        node: Box::new(
+            split()
+                >> fdn::<U16, _>(stacki::<U16, _, _>(|i| {
+                    delay(lerp(0.01, 0.5, rnd1(i) as f32)) >> fir((0.2, 0.4, 0.2))
+                }))
+                >> join(),
+        ),
     }
 }
 
@@ -395,7 +403,11 @@ impl Node for NodeKind {
             NodeKind::Seq { node, .. } => node.tick(inputs),
             NodeKind::Pipe { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
-            NodeKind::Reverb { node, .. } => node.tick(inputs),
+            NodeKind::Reverb { node, .. } => {
+                let mut output = [0.0];
+                node.tick(inputs.into(), &mut output);
+                output[0]
+            }
             NodeKind::Delay { node, .. } => node.tick(inputs),
             NodeKind::Moog { node, .. } => {
                 let mut output = [0.0];
@@ -433,7 +445,6 @@ impl PartialEq for NodeKind {
         }
     }
 }
-
 
 macro_rules! transfer_node_state {
     ( $self:ident, $other:ident; $( $variant:ident ),* $(,)? ) => {
@@ -911,28 +922,6 @@ impl Node for PluckNode {
         }
 
         self.buffer[self.read_pos]
-    }
-}
-
-#[derive(Clone)]
-pub struct ReverbNode {
-    reverb: Reverb,
-}
-
-impl ReverbNode {
-    fn new() -> Self {
-        Self {
-            reverb: Reverb::new(),
-        }
-    }
-}
-
-impl Node for ReverbNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let input = inputs.get(0).expect("reverb: missing input");
-        self.reverb.process(*input)
     }
 }
 
