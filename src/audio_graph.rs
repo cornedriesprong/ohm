@@ -192,13 +192,13 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Env { segments, trig, .. } => {
-                let mut children = Vec::new();
+                let mut inputs = Vec::new();
                 for (value, duration) in segments {
-                    children.push(value);
-                    children.push(duration);
+                    inputs.push(value);
+                    inputs.push(duration);
                 }
-                children.push(trig);
-                add_node(children, expr, graph)
+                inputs.push(trig);
+                add_node(inputs, expr, graph)
             }
             NodeKind::Lowpass {
                 input,
@@ -218,7 +218,11 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 resonance,
                 ..
             } => add_node(vec![input, cutoff, resonance], &expr, graph),
-            NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
+            NodeKind::Seq { trig, values, .. } => {
+                let mut inputs = values.iter().collect::<Vec<_>>();
+                inputs.push(trig);
+                add_node(inputs, expr, graph)
+            }
             NodeKind::Pluck {
                 freq,
                 tone,

@@ -64,6 +64,7 @@ pub(crate) enum NodeKind {
     },
     Seq {
         trig: BoxedNode,
+        values: Vec<NodeKind>,
         node: SeqNode,
     },
     Pluck {
@@ -254,10 +255,11 @@ pub(crate) fn highpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -
     }
 }
 
-pub(crate) fn seq(values: Vec<f32>, trig: NodeKind) -> NodeKind {
+pub(crate) fn seq(values: Vec<NodeKind>, trig: NodeKind) -> NodeKind {
     NodeKind::Seq {
         trig: Box::new(trig),
-        node: SeqNode::new(values),
+        values,
+        node: SeqNode::new(),
     }
 }
 
@@ -307,7 +309,7 @@ impl Node for NodeKind {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant(value) => *value,
+            NodeKind::Constant(val) => *val,
             NodeKind::Sine { node, .. } => {
                 let mut output = [0.0];
                 node.tick(inputs.into(), &mut output);
@@ -388,7 +390,7 @@ impl PartialEq for NodeKind {
             (Self::Lowpass { .. }, Self::Lowpass { .. }) => true,
             (Self::Bandpass { .. }, Self::Bandpass { .. }) => true,
             (Self::Highpass { .. }, Self::Highpass { .. }) => true,
-            (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.values == rhs.values,
+            (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.step == rhs.step,
             (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => {
                 lhs.buffer == rhs.buffer
             }
@@ -428,9 +430,9 @@ impl NodeKind {
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
         match self {
-            NodeKind::Constant(value) => {
+            NodeKind::Constant(val) => {
                 0u8.hash(hasher);
-                value.to_bits().hash(hasher);
+                val.to_bits().hash(hasher);
             }
             NodeKind::Sine { freq, .. } => {
                 1u8.hash(hasher);
@@ -502,11 +504,12 @@ impl NodeKind {
                 cutoff.hash_structure(hasher);
                 resonance.hash_structure(hasher);
             }
-            NodeKind::Seq { trig, node } => {
+            NodeKind::Seq { trig, values, .. } => {
                 10u8.hash(hasher);
                 trig.hash_structure(hasher);
-                for val in &node.values {
-                    val.to_bits().hash(hasher);
+                for val in values {
+                    val.hash_structure(hasher);
+                    val.hash_structure(hasher);
                 }
             }
             NodeKind::Pluck {
@@ -571,7 +574,7 @@ impl NodeKind {
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            NodeKind::Constant(value) => write!(f, "{}({})", self.as_ref(), value),
+            NodeKind::Constant(val) => write!(f, "{}({})", self.as_ref(), val),
             _ => write!(f, "{}", self.as_ref()),
         }
     }
@@ -689,18 +692,17 @@ impl Node for EnvNode {
 
 #[derive(Clone)]
 pub(crate) struct SeqNode {
-    pub(crate) values: Vec<f32>,
     pub(crate) step: usize,
 }
 
 impl SeqNode {
-    fn new(values: Vec<f32>) -> Self {
-        Self { values, step: 0 }
+    fn new() -> Self {
+        Self { step: 0 }
     }
 
-    fn increment(&mut self) {
+    fn increment(&mut self, values: &[f32]) {
         self.step += 1;
-        if self.step >= self.values.len() {
+        if self.step >= values.len() {
             self.step = 0;
         }
     }
@@ -710,12 +712,13 @@ impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let trig = inputs.get(0).expect("seq: missing trigger input");
+        let trig = inputs.last().expect("seq: missing trigger input");
+        let values = &inputs[0..inputs.len() - 1];
         if *trig > 0.0 {
-            self.increment();
+            self.increment(values);
         }
 
-        self.values[self.step]
+        values[self.step]
     }
 }
 

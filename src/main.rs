@@ -210,20 +210,7 @@ fn create_env(koto: &Koto) {
             return unexpected_args("expected 2 arguments: list, trig", args);
         }
 
-        let values: Vec<_> = if let KValue::List(list) = &args[0] {
-            list.data()
-                .iter()
-                .map(|v| {
-                    if let KValue::Number(n) = v {
-                        Ok((*n).into())
-                    } else {
-                        unexpected_type("number", v)
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            unexpected_type("list", &args[0])?
-        };
+        let values = list_from_value(&args[0])?;
         let trig = node_from_kvalue(&args[1])?;
 
         Ok(KValue::Object(seq(values, trig).into()))
