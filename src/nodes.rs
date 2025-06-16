@@ -9,6 +9,7 @@ use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
+use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 use strum::AsRefStr;
 
@@ -33,8 +34,7 @@ pub(crate) enum NodeKind {
     },
     Pulse {
         freq: BoxedNode,
-        duty: BoxedNode,
-        node: Box<dyn AudioUnit>,
+        node: PulseNode,
     },
     Noise(Box<dyn AudioUnit>),
     Mix(BoxedNode, BoxedNode),
@@ -201,11 +201,9 @@ pub(crate) fn noise() -> NodeKind {
 }
 
 pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::pulse;
     NodeKind::Pulse {
         freq: Box::new(freq),
-        duty: Box::new(constant(0.1)),
-        node: Box::new(pulse()),
+        node: PulseNode::new(),
     }
 }
 
@@ -335,11 +333,7 @@ impl Node for NodeKind {
                 node.tick(inputs.into(), &mut output);
                 output[0]
             }
-            NodeKind::Pulse { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
+            NodeKind::Pulse { node, .. } => node.tick(inputs),
             NodeKind::Gain { .. } => inputs[0] * inputs[1],
             NodeKind::Mix { .. } => inputs[0] + inputs[1],
             NodeKind::Env { node, .. } => node.tick(inputs),
@@ -719,6 +713,70 @@ impl Node for SeqNode {
         }
 
         values[self.step]
+    }
+}
+
+pub(crate) struct PulseNode {
+    phase: f32,
+    prev_phase: f32,
+}
+
+impl Clone for PulseNode {
+    fn clone(&self) -> Self {
+        Self {
+            phase: 0.0,
+            prev_phase: 0.0,
+        }
+    }
+}
+
+impl PulseNode {
+    fn new() -> Self {
+        Self {
+            phase: 0.,
+            prev_phase: 0.,
+        }
+    }
+}
+
+impl Node for PulseNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let freq = inputs.get(0).expect("pulse: missing freq input");
+        let reset_phase = inputs.get(1).unwrap_or(&0.0);
+        if *reset_phase > 0.0 {
+            self.phase = 0.0;
+        }
+
+        self.prev_phase = self.phase;
+        self.phase += 2. * PI * freq / SAMPLE_RATE;
+
+        if self.phase >= 2. * PI {
+            self.phase -= 2. * PI;
+            1.0
+        } else {
+            0.0
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct GainNode {}
+
+impl GainNode {
+    fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Node for GainNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[f32]) -> f32 {
+        let lhs = inputs.get(0).expect("gain: missing lhs input");
+        let rhs = inputs.get(1).expect("gain: missing rhs input");
+        lhs * rhs
     }
 }
 
