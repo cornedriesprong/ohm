@@ -306,98 +306,61 @@ impl Node for NodeKind {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
+        macro_rules! tick_node_output {
+            ($node:expr) => {{
+                let mut output = [0.0];
+                $node.tick(inputs.into(), &mut output);
+                output[0]
+            }};
+        }
+
         match self {
             NodeKind::Constant(val) => *val,
-            NodeKind::Sine { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Square { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Saw { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Triangle { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Noise(node) => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
+
+            NodeKind::Sine { node, .. }
+            | NodeKind::Square { node, .. }
+            | NodeKind::Saw { node, .. }
+            | NodeKind::Triangle { node, .. }
+            | NodeKind::Lowpass { node, .. }
+            | NodeKind::Bandpass { node, .. }
+            | NodeKind::Highpass { node, .. }
+            | NodeKind::Reverb { node, .. }
+            | NodeKind::Moog { node, .. } => tick_node_output!(node),
+
+            NodeKind::Noise(node) => tick_node_output!(node),
+
             NodeKind::Pulse { node, .. } => node.tick(inputs),
-            NodeKind::Gain { .. } => inputs[0] * inputs[1],
-            NodeKind::Mix { .. } => inputs[0] + inputs[1],
-            NodeKind::Env { node, .. } => node.tick(inputs),
-            NodeKind::Lowpass { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Bandpass { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
-            NodeKind::Highpass { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
             NodeKind::Seq { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
-            NodeKind::Reverb { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
             NodeKind::Delay { node, .. } => node.tick(inputs),
-            NodeKind::Moog { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
+            NodeKind::Env { node, .. } => node.tick(inputs),
+
+            NodeKind::Gain { .. } => inputs[0] * inputs[1],
+            NodeKind::Mix { .. } => inputs[0] + inputs[1],
         }
     }
 }
 
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
-            (Self::Sine { .. }, Self::Sine { .. }) => true,
-            (Self::Square { .. }, Self::Square { .. }) => true,
-            (Self::Saw { .. }, Self::Saw { .. }) => true,
-            (Self::Pulse { .. }, Self::Pulse { .. }) => true,
-            (Self::Noise(_), Self::Noise(_)) => true,
-            (Self::Gain { .. }, Self::Gain { .. }) => true,
-            (Self::Mix { .. }, Self::Mix { .. }) => true,
-            (Self::Env { .. }, Self::Env { .. }) => true,
-            (Self::Lowpass { .. }, Self::Lowpass { .. }) => true,
-            (Self::Bandpass { .. }, Self::Bandpass { .. }) => true,
-            (Self::Highpass { .. }, Self::Highpass { .. }) => true,
-            (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.step == rhs.step,
-            (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => {
-                lhs.buffer == rhs.buffer
+        macro_rules! simple_eq {
+            ($($variant:ident),* $(,)?) => {
+                match (self, other) {
+                    $( (Self::$variant { .. }, Self::$variant { .. }) => true, )*
+                    (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
+                    (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.step == rhs.step,
+                    (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => lhs.buffer == rhs.buffer,
+                    _ => false,
+                }
             }
-            (Self::Reverb { .. }, Self::Reverb { .. }) => true,
-            (Self::Delay { .. }, Self::Delay { .. }) => true,
-            (Self::Triangle { .. }, Self::Triangle { .. }) => true,
-            (Self::Moog { .. }, Self::Moog { .. }) => true,
-            _ => false,
-            // _ => std::mem::discriminant(self) == std::mem::discriminant(other),
         }
+
+        simple_eq!(
+            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, Lowpass, Bandpass, Highpass, Reverb,
+            Delay, Triangle, Moog,
+        )
     }
 }
-
 macro_rules! transfer_node_state {
     ( $self:ident, $other:ident; $( $variant:ident ),* $(,)? ) => {
         match ($self, $other) {
@@ -423,46 +386,30 @@ impl NodeKind {
     }
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
+        macro_rules! hash_node {
+        ($tag:expr $(, $field:expr)* $(,)?) => {{
+            ($tag as u8).hash(hasher);
+            $( $field.hash_structure(hasher); )*
+        }};
+    }
+
         match self {
             NodeKind::Constant(val) => {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            NodeKind::Sine { freq, .. } => {
-                1u8.hash(hasher);
-                freq.hash_structure(hasher);
-            }
-            NodeKind::Square { freq, .. } => {
-                2u8.hash(hasher);
-                freq.hash_structure(hasher);
-            }
-            NodeKind::Saw { freq, .. } => {
-                3u8.hash(hasher);
-                freq.hash_structure(hasher);
-            }
-            NodeKind::Pulse { freq, .. } => {
-                4u8.hash(hasher);
-                freq.hash_structure(hasher);
-            }
-            NodeKind::Noise(_) => {
-                5u8.hash(hasher);
-            }
-            NodeKind::Mix(lhs, rhs) => {
-                6u8.hash(hasher);
-                lhs.hash_structure(hasher);
-                rhs.hash_structure(hasher);
-            }
-            NodeKind::Gain(lhs, rhs) => {
-                7u8.hash(hasher);
-                lhs.hash_structure(hasher);
-                rhs.hash_structure(hasher);
-            }
+            NodeKind::Sine { freq, .. } => hash_node!(1, freq),
+            NodeKind::Square { freq, .. } => hash_node!(2, freq),
+            NodeKind::Saw { freq, .. } => hash_node!(3, freq),
+            NodeKind::Pulse { freq, .. } => hash_node!(4, freq),
+            NodeKind::Noise(_) => hash_node!(5),
+            NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
+            NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
             NodeKind::Env { segments, trig, .. } => {
-                8u8.hash(hasher);
-                trig.hash_structure(hasher);
-                for segment in segments {
-                    segment.0.hash_structure(hasher);
-                    segment.1.hash_structure(hasher);
+                hash_node!(8, trig);
+                for (val, dur) in segments {
+                    val.hash_structure(hasher);
+                    dur.hash_structure(hasher);
                 }
             }
             NodeKind::Lowpass {
@@ -470,39 +417,22 @@ impl NodeKind {
                 cutoff,
                 resonance,
                 ..
-            } => {
-                9u8.hash(hasher);
-                input.hash_structure(hasher);
-                cutoff.hash_structure(hasher);
-                resonance.hash_structure(hasher);
-            }
+            } => hash_node!(9, input, cutoff, resonance),
             NodeKind::Bandpass {
                 input,
                 cutoff,
                 resonance,
                 ..
-            } => {
-                9u8.hash(hasher);
-                input.hash_structure(hasher);
-                cutoff.hash_structure(hasher);
-                resonance.hash_structure(hasher);
-            }
+            } => hash_node!(10, input, cutoff, resonance),
             NodeKind::Highpass {
                 input,
                 cutoff,
                 resonance,
                 ..
-            } => {
-                9u8.hash(hasher);
-                input.hash_structure(hasher);
-                cutoff.hash_structure(hasher);
-                resonance.hash_structure(hasher);
-            }
+            } => hash_node!(11, input, cutoff, resonance),
             NodeKind::Seq { trig, values, .. } => {
-                10u8.hash(hasher);
-                trig.hash_structure(hasher);
+                hash_node!(12, trig);
                 for val in values {
-                    val.hash_structure(hasher);
                     val.hash_structure(hasher);
                 }
             }
@@ -512,36 +442,16 @@ impl NodeKind {
                 damping,
                 trig,
                 ..
-            } => {
-                12u8.hash(hasher);
-                freq.hash_structure(hasher);
-                tone.hash_structure(hasher);
-                damping.hash_structure(hasher);
-                trig.hash_structure(hasher);
-            }
-            NodeKind::Reverb { input, .. } => {
-                13u8.hash(hasher);
-                input.hash_structure(hasher);
-            }
-            NodeKind::Delay { input, .. } => {
-                14u8.hash(hasher);
-                input.hash_structure(hasher);
-            }
-            NodeKind::Triangle { freq, .. } => {
-                15u8.hash(hasher);
-                freq.hash_structure(hasher);
-            }
+            } => hash_node!(13, freq, tone, damping, trig),
+            NodeKind::Reverb { input, .. } => hash_node!(14, input),
+            NodeKind::Delay { input, .. } => hash_node!(15, input),
+            NodeKind::Triangle { freq, .. } => hash_node!(16, freq),
             NodeKind::Moog {
                 input,
                 cutoff,
                 resonance,
                 ..
-            } => {
-                16u8.hash(hasher);
-                input.hash_structure(hasher);
-                cutoff.hash_structure(hasher);
-                resonance.hash_structure(hasher);
-            }
+            } => hash_node!(17, input, cutoff, resonance),
         }
     }
 
@@ -758,25 +668,6 @@ impl Node for PulseNode {
         } else {
             0.0
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct GainNode {}
-
-impl GainNode {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Node for GainNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let lhs = inputs.get(0).expect("gain: missing lhs input");
-        let rhs = inputs.get(1).expect("gain: missing rhs input");
-        lhs * rhs
     }
 }
 
