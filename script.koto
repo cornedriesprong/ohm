@@ -1,1 +1,11 @@
-moog((sine(0.1)+1) * 2000, 0.2, saw(250))
+# make durations relative total length
+ar = | release, trig |
+  env([(1, 0), (0, release)], trig)
+
+lfo = sin(0.1) + 2.5
+trig = pulse 1.2
+
+e = ar lfo * 15000, trig
+s = seq([200, 300, lfo * 800, 500], trig)
+o = lp(e * 3000, 0.5, saw(s)) -> delay
+(o * 2 -> reverb) + o
