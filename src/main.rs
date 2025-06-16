@@ -228,17 +228,6 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(seq(values, trig).into()))
     });
-    koto.prelude().add_fn("pipe", move |ctx| {
-        let args = ctx.args();
-        if args.len() != 2 {
-            return unexpected_args("2 arguments: delay (in samples), input", args);
-        }
-
-        let delay = expr_from_kvalue(&args[0])?;
-        let input = expr_from_kvalue(&args[1])?;
-
-        Ok(KValue::Object(pipe(delay, input).into()))
-    });
     koto.prelude().add_fn("pluck", move |ctx| {
         let args = ctx.args();
         if args.len() != 4 {

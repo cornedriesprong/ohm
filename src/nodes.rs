@@ -78,11 +78,6 @@ pub(crate) enum NodeKind {
         trig: BoxedNode,
         node: SeqNode,
     },
-    Pipe {
-        delay: BoxedNode,
-        input: BoxedNode,
-        node: PipeNode,
-    },
     Pluck {
         freq: BoxedNode,
         tone: BoxedNode,
@@ -293,14 +288,6 @@ pub(crate) fn seq(values: Vec<f32>, trig: NodeKind) -> NodeKind {
     }
 }
 
-pub(crate) fn pipe(delay: NodeKind, input: NodeKind) -> NodeKind {
-    NodeKind::Pipe {
-        delay: Box::new(delay),
-        input: Box::new(input),
-        node: PipeNode::new(),
-    }
-}
-
 pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: NodeKind) -> NodeKind {
     NodeKind::Pluck {
         freq: Box::new(freq),
@@ -401,7 +388,6 @@ impl Node for NodeKind {
                 output[0]
             }
             NodeKind::Seq { node, .. } => node.tick(inputs),
-            NodeKind::Pipe { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => {
                 let mut output = [0.0];
@@ -434,7 +420,6 @@ impl PartialEq for NodeKind {
             (Self::Bandpass { .. }, Self::Bandpass { .. }) => true,
             (Self::Highpass { .. }, Self::Highpass { .. }) => true,
             (Self::Seq { node: n1, .. }, Self::Seq { node: n2, .. }) => n1.values == n2.values,
-            (Self::Pipe { node: n1, .. }, Self::Pipe { node: n2, .. }) => n1.buffer == n2.buffer,
             (Self::Pluck { node: n1, .. }, Self::Pluck { node: n2, .. }) => n1.buffer == n2.buffer,
             (Self::Reverb { .. }, Self::Reverb { .. }) => true,
             (Self::Delay { .. }, Self::Delay { .. }) => true,
@@ -556,11 +541,6 @@ impl NodeKind {
                     val.to_bits().hash(hasher);
                 }
             }
-            NodeKind::Pipe { delay, input, .. } => {
-                11u8.hash(hasher);
-                delay.hash_structure(hasher);
-                input.hash_structure(hasher);
-            }
             NodeKind::Pluck {
                 freq,
                 tone,
@@ -615,7 +595,6 @@ impl NodeKind {
             Bandpass,
             Highpass,
             Seq,
-            Pipe,
             Pluck,
             Reverb,
             Delay,
@@ -781,36 +760,6 @@ impl Node for SeqNode {
         }
 
         self.values[self.step]
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct PipeNode {
-    buffer: [f32; BUFFER_SIZE],
-    read_pos: usize,
-}
-
-impl PipeNode {
-    fn new() -> Self {
-        Self {
-            buffer: [0.0; BUFFER_SIZE],
-            read_pos: 0,
-        }
-    }
-}
-
-impl Node for PipeNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let delay = inputs.get(0).expect("pipe: missing delay input");
-        let input = inputs.get(1).expect("pipe: missing input");
-        self.buffer[self.read_pos] = *input;
-        self.read_pos = (self.read_pos + 1) % BUFFER_SIZE;
-        *self
-            .buffer
-            .get((self.read_pos + *delay as usize) % BUFFER_SIZE)
-            .unwrap_or(&0.0)
     }
 }
 

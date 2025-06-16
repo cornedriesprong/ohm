@@ -216,7 +216,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 ..
             } => add_node(vec![input, cutoff, resonance], &expr, graph),
             NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
-            NodeKind::Pipe { delay, input, .. } => add_node(vec![delay, input], expr, graph),
             NodeKind::Pluck {
                 freq,
                 tone,
