@@ -1,7 +1,7 @@
 use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
-use crate::utils::{freq_to_period, lerp};
+use crate::utils::freq_to_period;
 use core::fmt;
 use fmt::{Debug, Formatter};
 use fundsp::hacker32::AudioUnit;
@@ -14,10 +14,7 @@ use strum::AsRefStr;
 
 #[derive(Clone, KotoType, KotoCopy, AsRefStr)]
 pub(crate) enum NodeKind {
-    Constant {
-        value: f32,
-        node: Box<dyn AudioUnit>,
-    },
+    Constant(f32),
     Sine {
         freq: BoxedNode,
         node: Box<dyn AudioUnit>,
@@ -40,21 +37,12 @@ pub(crate) enum NodeKind {
         node: Box<dyn AudioUnit>,
     },
     Noise(Box<dyn AudioUnit>),
-    Mix {
-        lhs: BoxedNode,
-        rhs: BoxedNode,
-        node: MixNode,
-    },
-    Gain {
-        lhs: BoxedNode,
-        rhs: BoxedNode,
-        node: GainNode,
-    },
-    AR {
+    Mix(BoxedNode, BoxedNode),
+    Gain(BoxedNode, BoxedNode),
+    Env {
         trig: BoxedNode,
-        attack: BoxedNode,
-        release: BoxedNode,
-        node: ARNode,
+        segments: Vec<(NodeKind, NodeKind)>,
+        node: EnvNode,
     },
     Lowpass {
         input: BoxedNode,
@@ -77,11 +65,6 @@ pub(crate) enum NodeKind {
     Seq {
         trig: BoxedNode,
         node: SeqNode,
-    },
-    Pipe {
-        delay: BoxedNode,
-        input: BoxedNode,
-        node: PipeNode,
     },
     Pluck {
         freq: BoxedNode,
@@ -110,8 +93,8 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => {
-                Ok(KValue::Object(constant(value + f32::from(num)).into()))
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(constant(lhs + f32::from(rhs)).into()))
             }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((num).into())).into(),
@@ -125,8 +108,8 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => {
-                Ok(KValue::Object(constant(value * f32::from(num)).into()))
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(constant(lhs * f32::from(rhs)).into()))
             }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
@@ -140,8 +123,8 @@ impl KotoObject for NodeKind {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => {
-                Ok(KValue::Object(constant(value - f32::from(-num)).into()))
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(constant(lhs - f32::from(-rhs)).into()))
             }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 mix(self.clone(), constant((-num).into())).into(),
@@ -155,8 +138,8 @@ impl KotoObject for NodeKind {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant { value, .. }, KValue::Number(num)) => {
-                Ok(KValue::Object(constant(value / f32::from(-num)).into()))
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(constant(lhs / f32::from(-rhs)).into()))
             }
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
@@ -175,14 +158,8 @@ impl KotoEntries for NodeKind {
     }
 }
 
-const BUFFER_SIZE: usize = 8192;
-
 pub(crate) fn constant(value: f32) -> NodeKind {
-    use fundsp::hacker32::dc;
-    NodeKind::Constant {
-        value,
-        node: Box::new(dc(value)),
-    }
+    NodeKind::Constant(value)
 }
 
 pub(crate) fn sine(freq: NodeKind) -> NodeKind {
@@ -232,27 +209,18 @@ pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
 }
 
 pub(crate) fn gain(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
-    NodeKind::Gain {
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        node: GainNode::new(),
-    }
+    NodeKind::Gain(Box::new(lhs), Box::new(rhs))
 }
 
 pub(crate) fn mix(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
-    NodeKind::Mix {
-        lhs: Box::new(lhs),
-        rhs: Box::new(rhs),
-        node: MixNode::new(),
-    }
+    NodeKind::Mix(Box::new(lhs), Box::new(rhs))
 }
 
-pub(crate) fn ar(attack: NodeKind, release: NodeKind, trig: NodeKind) -> NodeKind {
-    NodeKind::AR {
+pub(crate) fn env(segments: Vec<(NodeKind, NodeKind)>, trig: NodeKind) -> NodeKind {
+    NodeKind::Env {
         trig: Box::new(trig),
-        attack: Box::new(attack),
-        release: Box::new(release),
-        node: ARNode::new(),
+        segments,
+        node: EnvNode::new(),
     }
 }
 
@@ -290,14 +258,6 @@ pub(crate) fn seq(values: Vec<f32>, trig: NodeKind) -> NodeKind {
     NodeKind::Seq {
         trig: Box::new(trig),
         node: SeqNode::new(values),
-    }
-}
-
-pub(crate) fn pipe(delay: NodeKind, input: NodeKind) -> NodeKind {
-    NodeKind::Pipe {
-        delay: Box::new(delay),
-        input: Box::new(input),
-        node: PipeNode::new(),
     }
 }
 
@@ -347,11 +307,7 @@ impl Node for NodeKind {
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
         match self {
-            NodeKind::Constant { node, .. } => {
-                let mut output = [0.0];
-                node.tick(inputs.into(), &mut output);
-                output[0]
-            }
+            NodeKind::Constant(value) => *value,
             NodeKind::Sine { node, .. } => {
                 let mut output = [0.0];
                 node.tick(inputs.into(), &mut output);
@@ -382,9 +338,9 @@ impl Node for NodeKind {
                 node.tick(inputs.into(), &mut output);
                 output[0]
             }
-            NodeKind::Gain { node, .. } => node.tick(inputs),
-            NodeKind::Mix { node, .. } => node.tick(inputs),
-            NodeKind::AR { node, .. } => node.tick(inputs),
+            NodeKind::Gain { .. } => inputs[0] * inputs[1],
+            NodeKind::Mix { .. } => inputs[0] + inputs[1],
+            NodeKind::Env { node, .. } => node.tick(inputs),
             NodeKind::Lowpass { node, .. } => {
                 let mut output = [0.0];
                 node.tick(inputs.into(), &mut output);
@@ -401,7 +357,6 @@ impl Node for NodeKind {
                 output[0]
             }
             NodeKind::Seq { node, .. } => node.tick(inputs),
-            NodeKind::Pipe { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Reverb { node, .. } => {
                 let mut output = [0.0];
@@ -421,7 +376,7 @@ impl Node for NodeKind {
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Constant { value: a, .. }, Self::Constant { value: b, .. }) => a == b,
+            (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
             (Self::Sine { .. }, Self::Sine { .. }) => true,
             (Self::Square { .. }, Self::Square { .. }) => true,
             (Self::Saw { .. }, Self::Saw { .. }) => true,
@@ -429,13 +384,14 @@ impl PartialEq for NodeKind {
             (Self::Noise(_), Self::Noise(_)) => true,
             (Self::Gain { .. }, Self::Gain { .. }) => true,
             (Self::Mix { .. }, Self::Mix { .. }) => true,
-            (Self::AR { .. }, Self::AR { .. }) => true,
+            (Self::Env { .. }, Self::Env { .. }) => true,
             (Self::Lowpass { .. }, Self::Lowpass { .. }) => true,
             (Self::Bandpass { .. }, Self::Bandpass { .. }) => true,
             (Self::Highpass { .. }, Self::Highpass { .. }) => true,
-            (Self::Seq { node: n1, .. }, Self::Seq { node: n2, .. }) => n1.values == n2.values,
-            (Self::Pipe { node: n1, .. }, Self::Pipe { node: n2, .. }) => n1.buffer == n2.buffer,
-            (Self::Pluck { node: n1, .. }, Self::Pluck { node: n2, .. }) => n1.buffer == n2.buffer,
+            (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.values == rhs.values,
+            (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => {
+                lhs.buffer == rhs.buffer
+            }
             (Self::Reverb { .. }, Self::Reverb { .. }) => true,
             (Self::Delay { .. }, Self::Delay { .. }) => true,
             (Self::Triangle { .. }, Self::Triangle { .. }) => true,
@@ -472,7 +428,7 @@ impl NodeKind {
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
         match self {
-            NodeKind::Constant { value, .. } => {
+            NodeKind::Constant(value) => {
                 0u8.hash(hasher);
                 value.to_bits().hash(hasher);
             }
@@ -495,26 +451,23 @@ impl NodeKind {
             NodeKind::Noise(_) => {
                 5u8.hash(hasher);
             }
-            NodeKind::Mix { lhs, rhs, .. } => {
+            NodeKind::Mix(lhs, rhs) => {
                 6u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            NodeKind::Gain { lhs, rhs, .. } => {
+            NodeKind::Gain(lhs, rhs) => {
                 7u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            NodeKind::AR {
-                attack,
-                release,
-                trig,
-                ..
-            } => {
+            NodeKind::Env { segments, trig, .. } => {
                 8u8.hash(hasher);
-                attack.hash_structure(hasher);
-                release.hash_structure(hasher);
                 trig.hash_structure(hasher);
+                for segment in segments {
+                    segment.0.hash_structure(hasher);
+                    segment.1.hash_structure(hasher);
+                }
             }
             NodeKind::Lowpass {
                 input,
@@ -555,11 +508,6 @@ impl NodeKind {
                 for val in &node.values {
                     val.to_bits().hash(hasher);
                 }
-            }
-            NodeKind::Pipe { delay, input, .. } => {
-                11u8.hash(hasher);
-                delay.hash_structure(hasher);
-                input.hash_structure(hasher);
             }
             NodeKind::Pluck {
                 freq,
@@ -602,20 +550,16 @@ impl NodeKind {
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         transfer_node_state!(self, other;
-            Constant,
             Sine,
             Square,
             Saw,
             Pulse,
             Triangle,
-            Gain,
-            Mix,
-            AR,
+            Env,
             Lowpass,
             Bandpass,
             Highpass,
             Seq,
-            Pipe,
             Pluck,
             Reverb,
             Delay,
@@ -627,7 +571,7 @@ impl NodeKind {
 impl Debug for NodeKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            NodeKind::Constant { value, .. } => write!(f, "{}({})", self.as_ref(), value),
+            NodeKind::Constant(value) => write!(f, "{}({})", self.as_ref(), value),
             _ => write!(f, "{}", self.as_ref()),
         }
     }
@@ -637,116 +581,107 @@ pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[f32]) -> f32;
 }
 
-#[derive(Clone)]
-pub(crate) struct GainNode {}
-
-impl GainNode {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Node for GainNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let lhs = inputs.get(0).expect("gain: missing lhs input");
-        let rhs = inputs.get(1).expect("gain: missing rhs input");
-        lhs * rhs
-    }
+#[derive(Clone, Debug)]
+pub struct EnvSegment {
+    pub duration: usize, // Duration in samples or ms (interpreted as needed)
+    pub target: f32,     // Target value at end of this segment
 }
 
 #[derive(Clone)]
-pub(crate) struct MixNode {}
-
-impl MixNode {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Node for MixNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let lhs = inputs.get(0).expect("mix: missing lhs input");
-        let rhs = inputs.get(1).expect("mix: missing rhs input");
-        lhs + rhs
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum EnvelopeState {
-    Attack,
-    Release,
-    Off,
-}
-
-#[derive(Clone)]
-pub(crate) struct ARNode {
-    pub(crate) state: EnvelopeState,
+pub(crate) struct EnvNode {
+    pub(crate) current_idx: usize,
     pub(crate) value: f32,
-    pub(crate) time: f32,
+    pub(crate) time: usize,
+    pub(crate) active: bool,
+    pub(crate) prev_trig: f32,
 }
 
-impl ARNode {
+impl EnvNode {
     fn new() -> Self {
         Self {
+            current_idx: 0,
             value: 0.0,
-            state: EnvelopeState::Off,
-            time: 0.0,
+            time: 0,
+            active: false,
+            prev_trig: 0.0,
         }
     }
 
-    fn get_curve(&self, length: f32) -> f32 {
-        lerp(self.time, length)
+    fn start(&mut self) {
+        self.active = true;
+        self.current_idx = 0;
+        self.time = 0;
     }
 
-    fn get_curve_rev(&self, length: f32) -> f32 {
-        lerp(length - self.time, length)
+    fn advance(&mut self, segments: &[EnvSegment]) {
+        self.current_idx += 1;
+        self.time = 0;
+
+        if self.current_idx >= segments.len() {
+            self.active = false;
+            self.value = 0.0;
+        }
+    }
+
+    fn interpolate_segment(&self, segments: &[EnvSegment]) -> f32 {
+        let segment = &segments[self.current_idx];
+
+        if segment.duration == 0 {
+            return segment.target;
+        }
+
+        let pow = 3.0; // curve
+        let raw_t = (self.time as f32 / segment.duration as f32).clamp(0.0, 1.0);
+
+        // reverse the curve if we're going downward
+        let curved_t = if segment.target < self.value {
+            // ease out
+            1.0 - (1.0 - raw_t).powf(pow)
+        } else {
+            // ease in
+            raw_t.powf(pow)
+        };
+
+        let prev = if self.current_idx == 0 {
+            0.0
+        } else {
+            segments[self.current_idx - 1].target
+        };
+
+        prev + curved_t * (segment.target - prev)
     }
 }
 
-impl Node for ARNode {
+impl Node for EnvNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let attack = inputs.get(0).expect("missing attack input");
-        let release = inputs.get(1).expect("missing release input");
-        let trig = inputs.get(2).expect("missing trigger input");
+        let trig = *inputs.last().expect("env: missing trigger input");
+        let segments = &inputs[0..inputs.len() - 1]
+            .chunks_exact(2)
+            .map(|pair| EnvSegment {
+                target: pair[0],
+                duration: pair[1] as usize,
+            })
+            .collect::<Vec<_>>();
 
-        if *trig > 0.0 {
-            self.state = EnvelopeState::Attack;
+        if trig > 0.0 && self.prev_trig <= 0.0 {
+            self.start();
         }
 
-        use EnvelopeState as E;
-        match self.state {
-            E::Attack => {
-                if *attack == 0.0 {
-                    self.value = 1.0;
-                } else {
-                    self.value = self.get_curve(*attack);
-                }
+        self.prev_trig = trig;
 
-                if self.value >= 1.0 {
-                    self.value = 1.0;
-                    self.time = 0.0;
-                    self.state = E::Release;
-                }
-            }
-            E::Release => {
-                self.value = self.get_curve_rev(*release);
-                if self.value <= 0.0 {
-                    self.value = 0.0;
-                    self.time = 0.0;
-                    self.state = E::Off;
-                }
-            }
-            E::Off => {
-                self.time = 0.0;
-            }
+        if !self.active {
+            return 0.0;
         }
-        self.time += 1.0;
+
+        let segment = &segments[self.current_idx];
+        self.value = self.interpolate_segment(&segments);
+        self.time += 1;
+
+        if self.time >= segment.duration {
+            self.advance(&segments);
+        }
 
         self.value
     }
@@ -784,35 +719,7 @@ impl Node for SeqNode {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct PipeNode {
-    buffer: [f32; BUFFER_SIZE],
-    read_pos: usize,
-}
-
-impl PipeNode {
-    fn new() -> Self {
-        Self {
-            buffer: [0.0; BUFFER_SIZE],
-            read_pos: 0,
-        }
-    }
-}
-
-impl Node for PipeNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let delay = inputs.get(0).expect("pipe: missing delay input");
-        let input = inputs.get(1).expect("pipe: missing input");
-        self.buffer[self.read_pos] = *input;
-        self.read_pos = (self.read_pos + 1) % BUFFER_SIZE;
-        *self
-            .buffer
-            .get((self.read_pos + *delay as usize) % BUFFER_SIZE)
-            .unwrap_or(&0.0)
-    }
-}
+const BUFFER_SIZE: usize = 8192;
 
 // this is the number of samples we need to represent a full period
 // of the lowest possible MIDI pitch's frequency (A0 / 27.50 Hz)

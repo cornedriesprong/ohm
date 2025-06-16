@@ -140,7 +140,7 @@ impl AudioGraph {
             (Saw { .. }, Saw { .. }) => true,
             (Pulse { .. }, Pulse { .. }) => true,
             (Triangle { .. }, Triangle { .. }) => true,
-            (AR { .. }, AR { .. }) => true,
+            (Env { .. }, Env { .. }) => true,
             (Moog { .. }, Moog { .. }) => true,
             _ => false, // For now, only support oscillators, filters, and effects
         }
@@ -189,14 +189,17 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Pulse { freq, duty, .. } => add_node(vec![freq, duty], expr, graph),
-            NodeKind::Gain { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
-            NodeKind::Mix { lhs, rhs, .. } => add_node(vec![lhs, rhs], expr, graph),
-            NodeKind::AR {
-                attack,
-                release,
-                trig,
-                ..
-            } => add_node(vec![attack, release, trig], &expr, graph),
+            NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            NodeKind::Env { segments, trig, .. } => {
+                let mut children = Vec::new();
+                for (value, duration) in segments {
+                    children.push(value);
+                    children.push(duration);
+                }
+                children.push(trig);
+                add_node(children, expr, graph)
+            }
             NodeKind::Lowpass {
                 input,
                 cutoff,
@@ -216,7 +219,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 ..
             } => add_node(vec![input, cutoff, resonance], &expr, graph),
             NodeKind::Seq { trig, .. } => add_node(vec![trig], expr, graph),
-            NodeKind::Pipe { delay, input, .. } => add_node(vec![delay, input], expr, graph),
             NodeKind::Pluck {
                 freq,
                 tone,
@@ -380,8 +382,8 @@ mod tests {
 
     #[test]
     fn test_state_transfer_ar_node() {
-        let mut old_node = ar(constant(1000.0), constant(1000.0), constant(1.0));
-        let mut new_node = ar(constant(1000.0), constant(1000.0), constant(1.0));
+        let mut old_node = env(constant(1000.0), constant(1000.0), constant(1.0));
+        let mut new_node = env(constant(1000.0), constant(1000.0), constant(1.0));
 
         // Trigger and advance old node
         old_node.tick(&[1000.0, 1000.0, 1.0]); // trigger
@@ -391,7 +393,7 @@ mod tests {
 
         // Get old state
         let (old_state, old_value, old_time) = match &old_node {
-            NodeKind::AR { node, .. } => (node.state, node.value, node.time),
+            NodeKind::Env { node, .. } => (node.segments, node.value, node.time),
             _ => panic!("Expected AR node"),
         };
 
@@ -400,7 +402,7 @@ mod tests {
 
         // Check that state was transferred
         let (new_state, new_value, new_time) = match &new_node {
-            NodeKind::AR { node, .. } => (node.state, node.value, node.time),
+            NodeKind::Env { node, .. } => (node.segments, node.value, node.time),
             _ => panic!("Expected AR node"),
         };
 

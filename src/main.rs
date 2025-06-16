@@ -148,66 +148,66 @@ where
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
     koto.prelude()
-        .add_fn("sine", make_expr_node(|args| sine(args[0].clone())));
+        .add_fn("sin", make_expr_node(|args| sine(args[0].clone())));
     koto.prelude()
-        .add_fn("square", make_expr_node(|args| square(args[0].clone())));
+        .add_fn("sqr", make_expr_node(|args| square(args[0].clone())));
     koto.prelude()
         .add_fn("saw", make_expr_node(|args| saw(args[0].clone())));
     koto.prelude()
+        .add_fn("tri", make_expr_node(|args| triangle(args[0].clone())));
+    koto.prelude()
         .add_fn("pulse", make_expr_node(|args| pulse(args[0].clone())));
     koto.prelude().add_fn("noise", make_expr_node(|_| noise()));
-    koto.prelude().add_fn("ar", move |ctx| {
+    koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("3 arguments: attack, release, trig", args);
+        if args.len() != 2 {
+            return unexpected_args("expected 2 arguments: list, trig", args);
         }
+        let segments = list_of_tuples_from_value(&args[0])?;
+        let trig = node_from_kvalue(&args[1])?;
 
-        let attack = expr_from_kvalue(&args[0])?;
-        let release = expr_from_kvalue(&args[1])?;
-        let trig = expr_from_kvalue(&args[2])?;
-
-        Ok(KValue::Object(ar(attack, release, trig).into()))
+        Ok(KValue::Object(env(segments, trig).into()))
     });
-    koto.prelude().add_fn("lowpass", move |ctx| {
+    koto.prelude().add_fn("lp", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
         }
 
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
+        let cutoff = node_from_kvalue(&args[0])?;
+        let resonance = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(lowpass(input, cutoff, resonance).into()))
     });
-    koto.prelude().add_fn("bandpass", move |ctx| {
+    koto.prelude().add_fn("bp", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
         }
 
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
+        let cutoff = node_from_kvalue(&args[0])?;
+        let resonance = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(bandpass(input, cutoff, resonance).into()))
     });
-    koto.prelude().add_fn("highpass", move |ctx| {
+    koto.prelude().add_fn("hp", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
         }
 
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
+        let cutoff = node_from_kvalue(&args[0])?;
+        let resonance = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(highpass(input, cutoff, resonance).into()))
     });
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
         if args.len() != 2 {
-            return unexpected_args("2 arguments: list, trig", args);
+            return unexpected_args("expected 2 arguments: list, trig", args);
         }
 
         let values: Vec<_> = if let KValue::List(list) = &args[0] {
@@ -224,57 +224,44 @@ fn create_env(koto: &Koto) {
         } else {
             unexpected_type("list", &args[0])?
         };
-        let trig = expr_from_kvalue(&args[1])?;
+        let trig = node_from_kvalue(&args[1])?;
 
         Ok(KValue::Object(seq(values, trig).into()))
-    });
-    koto.prelude().add_fn("pipe", move |ctx| {
-        let args = ctx.args();
-        if args.len() != 2 {
-            return unexpected_args("2 arguments: delay (in samples), input", args);
-        }
-
-        let delay = expr_from_kvalue(&args[0])?;
-        let input = expr_from_kvalue(&args[1])?;
-
-        Ok(KValue::Object(pipe(delay, input).into()))
     });
     koto.prelude().add_fn("pluck", move |ctx| {
         let args = ctx.args();
         if args.len() != 4 {
-            return unexpected_args("4 arguments: frequency, tone, damping, trig", args);
+            return unexpected_args("expected 4 arguments: frequency, tone, damping, trig", args);
         }
 
-        let freq = expr_from_kvalue(&args[0])?;
-        let tone = expr_from_kvalue(&args[1])?;
-        let damping = expr_from_kvalue(&args[2])?;
-        let trig = expr_from_kvalue(&args[3])?;
+        let freq = node_from_kvalue(&args[0])?;
+        let tone = node_from_kvalue(&args[1])?;
+        let damping = node_from_kvalue(&args[2])?;
+        let trig = node_from_kvalue(&args[3])?;
 
         Ok(KValue::Object(pluck(freq, tone, damping, trig).into()))
     });
     koto.prelude().add_fn("reverb", move |ctx| {
         let args = ctx.args();
-        let input = expr_from_kvalue(&args[0])?;
+        let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(reverb(input).into()))
     });
     koto.prelude().add_fn("delay", move |ctx| {
         let args = ctx.args();
-        let input = expr_from_kvalue(&args[0])?;
+        let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(delay(input).into()))
     });
-    koto.prelude()
-        .add_fn("triangle", make_expr_node(|args| triangle(args[0].clone())));
     koto.prelude().add_fn("moog", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return unexpected_args("3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
         }
 
-        let cutoff = expr_from_kvalue(&args[0])?;
-        let resonance = expr_from_kvalue(&args[1])?;
-        let input = expr_from_kvalue(&args[2])?;
+        let cutoff = node_from_kvalue(&args[0])?;
+        let resonance = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(moog(input, cutoff, resonance).into()))
     });
@@ -285,17 +272,52 @@ where
     F: Fn(Vec<NodeKind>) -> NodeKind + 'static,
 {
     move |ctx| {
-        let args: Result<Vec<NodeKind>, _> = ctx.args().iter().map(expr_from_kvalue).collect();
+        let args: Result<Vec<NodeKind>, _> = ctx.args().iter().map(node_from_kvalue).collect();
         Ok(KValue::Object(node_constructor(args?).into()))
     }
 }
 
-fn expr_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
+fn node_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(constant(n.into())),
         KValue::Str(n) => Ok(constant(string_to_float(n)?)),
         KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
+    }
+}
+
+fn list_from_value(value: &KValue) -> Result<Vec<NodeKind>, koto::runtime::Error> {
+    match value {
+        KValue::List(list) => Ok(list
+            .data()
+            .iter()
+            .map(node_from_kvalue)
+            .collect::<Result<Vec<_>, _>>()?),
+        KValue::Tuple(t) => Ok(t
+            .iter()
+            .map(node_from_kvalue)
+            .collect::<Result<Vec<_>, _>>()?),
+        unexpected => unexpected_type("list", unexpected),
+    }
+}
+
+fn list_of_tuples_from_value(
+    value: &KValue,
+) -> Result<Vec<(NodeKind, NodeKind)>, koto::runtime::Error> {
+    match value {
+        KValue::List(list) => list
+            .data()
+            .iter()
+            .map(|item| match item {
+                KValue::Tuple(t) => {
+                    let target = node_from_kvalue(&t[0])?;
+                    let duration = node_from_kvalue(&t[1])?;
+                    Ok((target, duration))
+                }
+                unexpected => unexpected_type("tuple", unexpected),
+            })
+            .collect(),
+        unexpected => unexpected_type("list", unexpected),
     }
 }
 
