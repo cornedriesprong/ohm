@@ -348,7 +348,6 @@ impl PartialEq for NodeKind {
                 match (self, other) {
                     $( (Self::$variant { .. }, Self::$variant { .. }) => true, )*
                     (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
-                    (Self::Seq { node: lhs, .. }, Self::Seq { node: rhs, .. }) => lhs.step == rhs.step,
                     (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => lhs.buffer == rhs.buffer,
                     _ => false,
                 }
@@ -369,10 +368,6 @@ macro_rules! transfer_node_state {
                     *new = old.clone();
                 }
             )*
-            // Handle tuple variants separately
-            (NodeKind::Noise(new), NodeKind::Noise(old)) => {
-                *new = old.clone();
-            }
             _ => {}
         }
     };
