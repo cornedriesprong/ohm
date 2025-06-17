@@ -1,0 +1,4 @@
+from pitches import A3, A4
+
+# saw C3
+saw(A3, A4)
