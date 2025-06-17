@@ -178,7 +178,9 @@ fn create_env(koto: &Koto) {
         let resonance = node_from_kvalue(&args[1])?;
         let input = node_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(lowpass(input, cutoff, resonance).into()))
+        Ok(KValue::Object(
+            svf(input, cutoff, resonance, FilterMode::Lowpass).into(),
+        ))
     });
     koto.prelude().add_fn("bp", move |ctx| {
         let args = ctx.args();
@@ -190,7 +192,9 @@ fn create_env(koto: &Koto) {
         let resonance = node_from_kvalue(&args[1])?;
         let input = node_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(bandpass(input, cutoff, resonance).into()))
+        Ok(KValue::Object(
+            svf(input, cutoff, resonance, FilterMode::Bandpass).into(),
+        ))
     });
     koto.prelude().add_fn("hp", move |ctx| {
         let args = ctx.args();
@@ -202,7 +206,9 @@ fn create_env(koto: &Koto) {
         let resonance = node_from_kvalue(&args[1])?;
         let input = node_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(highpass(input, cutoff, resonance).into()))
+        Ok(KValue::Object(
+            svf(input, cutoff, resonance, FilterMode::Highpass).into(),
+        ))
     });
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();

@@ -13,6 +13,13 @@ use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 use strum::AsRefStr;
 
+#[derive(Clone)]
+pub(crate) enum FilterMode {
+    Lowpass,
+    Bandpass,
+    Highpass,
+}
+
 #[derive(Clone, KotoType, KotoCopy, AsRefStr)]
 pub(crate) enum NodeKind {
     Constant(f32),
@@ -44,22 +51,11 @@ pub(crate) enum NodeKind {
         segments: Vec<(NodeKind, NodeKind)>,
         node: EnvNode,
     },
-    Lowpass {
+    SVF {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        node: Box<dyn AudioUnit>,
-    },
-    Bandpass {
-        input: BoxedNode,
-        cutoff: BoxedNode,
-        resonance: BoxedNode,
-        node: Box<dyn AudioUnit>,
-    },
-    Highpass {
-        input: BoxedNode,
-        cutoff: BoxedNode,
-        resonance: BoxedNode,
+        mode: FilterMode,
         node: Box<dyn AudioUnit>,
     },
     Seq {
@@ -223,33 +219,23 @@ pub(crate) fn env(segments: Vec<(NodeKind, NodeKind)>, trig: NodeKind) -> NodeKi
     }
 }
 
-pub(crate) fn lowpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
-    use fundsp::hacker32::lowpass;
-    NodeKind::Lowpass {
+pub(crate) fn svf(
+    input: NodeKind,
+    cutoff: NodeKind,
+    resonance: NodeKind,
+    mode: FilterMode,
+) -> NodeKind {
+    use fundsp::hacker32::{bandpass, highpass, lowpass};
+    NodeKind::SVF {
         input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
-        node: Box::new(lowpass()),
-    }
-}
-
-pub(crate) fn bandpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
-    use fundsp::hacker32::bandpass;
-    NodeKind::Bandpass {
-        input: Box::new(input),
-        cutoff: Box::new(cutoff),
-        resonance: Box::new(resonance),
-        node: Box::new(bandpass()),
-    }
-}
-
-pub(crate) fn highpass(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
-    use fundsp::hacker32::highpass;
-    NodeKind::Highpass {
-        input: Box::new(input),
-        cutoff: Box::new(cutoff),
-        resonance: Box::new(resonance),
-        node: Box::new(highpass()),
+        mode: FilterMode::Bandpass,
+        node: match mode {
+            FilterMode::Lowpass => Box::new(lowpass()),
+            FilterMode::Bandpass => Box::new(bandpass()),
+            FilterMode::Highpass => Box::new(highpass()),
+        },
     }
 }
 
@@ -321,9 +307,7 @@ impl Node for NodeKind {
             | NodeKind::Square { node, .. }
             | NodeKind::Saw { node, .. }
             | NodeKind::Triangle { node, .. }
-            | NodeKind::Lowpass { node, .. }
-            | NodeKind::Bandpass { node, .. }
-            | NodeKind::Highpass { node, .. }
+            | NodeKind::SVF { node, .. }
             | NodeKind::Reverb { node, .. }
             | NodeKind::Moog { node, .. } => tick_node_output!(node),
 
@@ -355,8 +339,7 @@ impl PartialEq for NodeKind {
         }
 
         simple_eq!(
-            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, Lowpass, Bandpass, Highpass, Reverb,
-            Delay, Triangle, Moog,
+            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, SVF, Reverb, Delay, Triangle, Moog,
         )
     }
 }
@@ -407,24 +390,12 @@ impl NodeKind {
                     dur.hash_structure(hasher);
                 }
             }
-            NodeKind::Lowpass {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => hash_node!(9, input, cutoff, resonance),
-            NodeKind::Bandpass {
+            NodeKind::SVF {
                 input,
                 cutoff,
                 resonance,
                 ..
             } => hash_node!(10, input, cutoff, resonance),
-            NodeKind::Highpass {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => hash_node!(11, input, cutoff, resonance),
             NodeKind::Seq { trig, values, .. } => {
                 hash_node!(12, trig);
                 for val in values {
@@ -458,9 +429,7 @@ impl NodeKind {
             Pulse,
             Triangle,
             Env,
-            Lowpass,
-            Bandpass,
-            Highpass,
+            SVF,
             Seq,
             Pluck,
             Reverb,
