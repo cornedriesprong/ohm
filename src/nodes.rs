@@ -444,15 +444,6 @@ impl NodeKind {
     }
 }
 
-impl Debug for NodeKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            NodeKind::Constant(val) => write!(f, "{}({})", self.as_ref(), val),
-            _ => write!(f, "{}", self.as_ref()),
-        }
-    }
-}
-
 pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[f32]) -> f32;
 }

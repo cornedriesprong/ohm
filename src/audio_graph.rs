@@ -147,37 +147,6 @@ impl AudioGraph {
     }
 }
 
-impl fmt::Debug for AudioGraph {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // print out the graph in DOT format so we can visualize it with Graphviz
-        writeln!(f, "digraph AudioGraph {{")?;
-        writeln!(f, "  rankdir=LR;")?;
-        writeln!(f, "  node [shape=circle style=filled];\n")?;
-
-        // nodes
-        for (order, &node) in self.sorted_nodes.iter().enumerate() {
-            writeln!(
-                f,
-                "  n{} [label=\"{:?} ({})\"];",
-                node.index(),
-                self.graph[node],
-                order
-            )?;
-        }
-
-        // edges
-        for edge in self.graph.edge_references() {
-            writeln!(
-                f,
-                "  n{} -> n{};",
-                edge.source().index(),
-                edge.target().index()
-            )?;
-        }
-        write!(f, "}}")
-    }
-}
-
 pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     let mut graph = AudioGraph::new();
 
@@ -200,19 +169,7 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 inputs.push(trig);
                 add_node(inputs, expr, graph)
             }
-            NodeKind::Lowpass {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => add_node(vec![input, cutoff, resonance], &expr, graph),
-            NodeKind::Bandpass {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => add_node(vec![input, cutoff, resonance], &expr, graph),
-            NodeKind::Highpass {
+            NodeKind::SVF {
                 input,
                 cutoff,
                 resonance,
