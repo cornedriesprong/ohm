@@ -3,7 +3,7 @@ use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
-use fmt::{Debug, Formatter};
+use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
@@ -17,9 +17,6 @@ pub(crate) enum FilterMode {
     Lowpass,
     Highpass,
     Bandpass,
-    Notch,
-    Peak,
-    AllPass,
 }
 
 #[derive(Clone, KotoType, KotoCopy)]
@@ -57,7 +54,6 @@ pub(crate) enum NodeKind {
         input: BoxedNode,
         cutoff: BoxedNode,
         resonance: BoxedNode,
-        mode: FilterMode,
         node: Box<dyn AudioUnit>,
     },
     Seq {
@@ -227,19 +223,15 @@ pub(crate) fn svf(
     resonance: NodeKind,
     mode: FilterMode,
 ) -> NodeKind {
-    use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
+    use fundsp::hacker32::{bandpass, highpass, lowpass};
     NodeKind::SVF {
         input: Box::new(input),
         cutoff: Box::new(cutoff),
         resonance: Box::new(resonance),
-        mode: FilterMode::Bandpass,
         node: match mode {
             FilterMode::Lowpass => Box::new(lowpass()),
             FilterMode::Highpass => Box::new(highpass()),
             FilterMode::Bandpass => Box::new(bandpass()),
-            FilterMode::Notch => Box::new(notch()),
-            FilterMode::Peak => Box::new(peak()),
-            FilterMode::AllPass => Box::new(allpass()),
         },
     }
 }

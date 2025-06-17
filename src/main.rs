@@ -273,7 +273,6 @@ where
 fn node_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(constant(n.into())),
-        KValue::Str(n) => Ok(constant(string_to_float(n)?)),
         KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
@@ -311,14 +310,5 @@ fn list_of_tuples_from_value(
             })
             .collect(),
         unexpected => unexpected_type("list", unexpected),
-    }
-}
-
-fn string_to_float(s: &str) -> Result<f32, koto::runtime::Error> {
-    match s {
-        "lp" => Ok(0.),
-        "hp" => Ok(1.),
-        "bp" => Ok(2.),
-        _ => Ok(0.),
     }
 }
