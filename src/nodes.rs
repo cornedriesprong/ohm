@@ -11,16 +11,18 @@ use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
 use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
-use strum::AsRefStr;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) enum FilterMode {
     Lowpass,
-    Bandpass,
     Highpass,
+    Bandpass,
+    Notch,
+    Peak,
+    AllPass,
 }
 
-#[derive(Clone, KotoType, KotoCopy, AsRefStr)]
+#[derive(Clone, KotoType, KotoCopy)]
 pub(crate) enum NodeKind {
     Constant(f32),
     Sine {
@@ -225,7 +227,7 @@ pub(crate) fn svf(
     resonance: NodeKind,
     mode: FilterMode,
 ) -> NodeKind {
-    use fundsp::hacker32::{bandpass, highpass, lowpass};
+    use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
     NodeKind::SVF {
         input: Box::new(input),
         cutoff: Box::new(cutoff),
@@ -233,8 +235,11 @@ pub(crate) fn svf(
         mode: FilterMode::Bandpass,
         node: match mode {
             FilterMode::Lowpass => Box::new(lowpass()),
-            FilterMode::Bandpass => Box::new(bandpass()),
             FilterMode::Highpass => Box::new(highpass()),
+            FilterMode::Bandpass => Box::new(bandpass()),
+            FilterMode::Notch => Box::new(notch()),
+            FilterMode::Peak => Box::new(peak()),
+            FilterMode::AllPass => Box::new(allpass()),
         },
     }
 }
