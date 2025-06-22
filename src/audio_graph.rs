@@ -1,11 +1,6 @@
-use petgraph::{
-    graph::NodeIndex,
-    prelude::StableDiGraph,
-    visit::{EdgeRef, IntoEdgeReferences},
-};
+use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 
 use crate::nodes::{Node, NodeKind};
 
