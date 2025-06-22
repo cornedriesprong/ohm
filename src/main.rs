@@ -23,12 +23,13 @@ use audio_graph::*;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <filename>", args[0]);
-        std::process::exit(1);
-    }
+    // if args.len() != 2 {
+    //     eprintln!("Usage: {} <filename>", args[0]);
+    //     std::process::exit(1);
+    // }
 
-    let filename = &args[1];
+    // let filename = &args[1];
+    let filename = "patch.koto";
 
     let host = cpal::default_host();
     let device = host
