@@ -1,4 +1,3 @@
-use crate::audio_graph::BoxedNode;
 use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
@@ -12,6 +11,8 @@ use seahash::SeaHasher;
 use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 
+pub(crate) type Frame = [f32; 2];
+
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) enum FilterMode {
     Lowpass,
@@ -23,68 +24,68 @@ pub(crate) enum FilterMode {
 pub(crate) enum NodeKind {
     Constant(f32),
     Sine {
-        freq: BoxedNode,
+        freq: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Square {
-        freq: BoxedNode,
+        freq: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Saw {
-        freq: BoxedNode,
+        freq: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Triangle {
-        freq: BoxedNode,
+        freq: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Pulse {
-        freq: BoxedNode,
+        freq: Box<NodeKind>,
         node: PulseNode,
     },
     Noise(Box<dyn AudioUnit>),
-    Mix(BoxedNode, BoxedNode),
-    Gain(BoxedNode, BoxedNode),
+    Mix(Box<NodeKind>, Box<NodeKind>),
+    Gain(Box<NodeKind>, Box<NodeKind>),
     Env {
-        trig: BoxedNode,
+        trig: Box<NodeKind>,
         segments: Vec<(NodeKind, NodeKind)>,
         node: EnvNode,
     },
     SVF {
-        input: BoxedNode,
-        cutoff: BoxedNode,
-        resonance: BoxedNode,
+        input: Box<NodeKind>,
+        cutoff: Box<NodeKind>,
+        resonance: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Pan {
-        input: BoxedNode,
-        value: BoxedNode,
+        input: Box<NodeKind>,
+        value: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Seq {
-        trig: BoxedNode,
+        trig: Box<NodeKind>,
         values: Vec<NodeKind>,
         node: SeqNode,
     },
     Pluck {
-        freq: BoxedNode,
-        tone: BoxedNode,
-        damping: BoxedNode,
-        trig: BoxedNode,
+        freq: Box<NodeKind>,
+        tone: Box<NodeKind>,
+        damping: Box<NodeKind>,
+        trig: Box<NodeKind>,
         node: PluckNode,
     },
     Reverb {
-        input: BoxedNode,
+        input: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Delay {
-        input: BoxedNode,
+        input: Box<NodeKind>,
         node: DelayNode,
     },
     Moog {
-        input: BoxedNode,
-        cutoff: BoxedNode,
-        resonance: BoxedNode,
+        input: Box<NodeKind>,
+        cutoff: Box<NodeKind>,
+        resonance: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
 }
@@ -304,7 +305,7 @@ pub(crate) fn moog(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> No
 impl Node for NodeKind {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
             NodeKind::Constant(val) => [*val, *val],
             NodeKind::Sine { node, .. }
@@ -475,7 +476,7 @@ impl NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2];
+    fn tick(&mut self, inputs: &[Frame]) -> Frame;
 }
 
 #[derive(Clone, Debug)]
@@ -552,7 +553,7 @@ impl EnvNode {
 impl Node for EnvNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let trig = inputs.last().expect("env: missing trigger input")[0];
         let segments = &inputs[0..inputs.len() - 1]
             .chunks_exact(2)
@@ -594,7 +595,7 @@ impl SeqNode {
         Self { step: 0 }
     }
 
-    fn increment(&mut self, values: &[[f32; 2]]) {
+    fn increment(&mut self, values: &[Frame]) {
         self.step += 1;
         if self.step >= values.len() {
             self.step = 0;
@@ -605,7 +606,7 @@ impl SeqNode {
 impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let trig = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
         if (*trig)[0] > 0.0 {
@@ -642,7 +643,7 @@ impl PulseNode {
 impl Node for PulseNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let freq = inputs.get(0).expect("pulse: missing freq input")[0];
 
         self.prev_phase = self.phase;
@@ -731,7 +732,7 @@ impl PluckNode {
 impl Node for PluckNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let freq = inputs.get(0).map_or(0.0, |arr| arr[0]);
         let tone = inputs.get(1).map_or(0.0, |arr| arr[0]);
         let damping = inputs.get(2).map_or(0.0, |arr| arr[0]);
@@ -787,7 +788,7 @@ impl DelayNode {
 impl Node for DelayNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let input = inputs.get(0).expect("delay: missing input")[0];
         let output = self.delay.process(input);
         [output, output]

@@ -2,17 +2,16 @@ use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::{HashMap, HashSet};
 
-use crate::nodes::{Node, NodeKind};
+use crate::nodes::{Frame, Node, NodeKind};
 
-pub(crate) type BoxedNode = Box<NodeKind>;
-type Graph = StableDiGraph<BoxedNode, ()>;
+type Graph = StableDiGraph<Box<NodeKind>, ()>;
 
 #[derive(Clone)]
 pub(crate) struct AudioGraph {
     graph: Graph,
     sorted_nodes: Vec<NodeIndex>,
-    inputs: Vec<[f32; 2]>,
-    outputs: Vec<[f32; 2]>,
+    inputs: Vec<Frame>,
+    outputs: Vec<Frame>,
 }
 
 impl AudioGraph {
@@ -38,7 +37,7 @@ impl AudioGraph {
 
     #[inline]
     #[nonblocking]
-    pub(crate) fn tick(&mut self) -> [f32; 2] {
+    pub(crate) fn tick(&mut self) -> Frame {
         for &node_index in &self.sorted_nodes {
             self.inputs.clear();
 
