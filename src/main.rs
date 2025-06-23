@@ -1,10 +1,11 @@
+use crate::nodes::{DelayNode, EnvNode, NodeKind, PluckNode, PulseNode, SeqNode};
 use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
 };
+use fundsp::hacker32::{noise, saw, sine, square, triangle};
 use koto::prelude::*;
-use nodes::*;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -147,17 +148,60 @@ where
 
 fn create_env(koto: &Koto) {
     // add node creation functions to Koto environment
-    koto.prelude()
-        .add_fn("sin", make_expr_node(|args| sine(args[0].clone())));
-    koto.prelude()
-        .add_fn("sqr", make_expr_node(|args| square(args[0].clone())));
-    koto.prelude()
-        .add_fn("saw", make_expr_node(|args| saw(args[0].clone())));
-    koto.prelude()
-        .add_fn("tri", make_expr_node(|args| triangle(args[0].clone())));
-    koto.prelude()
-        .add_fn("pulse", make_expr_node(|args| pulse(args[0].clone())));
-    koto.prelude().add_fn("noise", make_expr_node(|_| noise()));
+    koto.prelude().add_fn(
+        "sin",
+        make_expr_node(|args| {
+            NodeKind::Sine {
+                freq: Box::new(args[0].clone()),
+                node: Box::new(sine()),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
+        "sqr",
+        make_expr_node(|args| {
+            NodeKind::Square {
+                freq: Box::new(args[0].clone()),
+                node: Box::new(square()),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
+        "saw",
+        make_expr_node(|args| {
+            NodeKind::Saw {
+                freq: Box::new(args[0].clone()),
+                node: Box::new(saw()),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
+        "tri",
+        make_expr_node(|args| {
+            NodeKind::Triangle {
+                freq: Box::new(args[0].clone()),
+                node: Box::new(triangle()),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
+        "pulse",
+        make_expr_node(|args| {
+            NodeKind::Pulse {
+                freq: Box::new(args[0].clone()),
+                node: PulseNode::new(),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
+        "noise",
+        make_expr_node(|_| NodeKind::Noise(Box::new(noise()))),
+    );
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
         if args.len() != 2 {
@@ -166,9 +210,17 @@ fn create_env(koto: &Koto) {
         let segments = list_of_tuples_from_value(&args[0])?;
         let trig = node_from_kvalue(&args[1])?;
 
-        Ok(KValue::Object(env(segments, trig).into()))
+        Ok(KValue::Object(
+            NodeKind::Env {
+                trig: Box::new(trig),
+                segments,
+                node: EnvNode::new(),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("lp", move |ctx| {
+        use fundsp::hacker32::lowpass;
         let args = ctx.args();
         if args.len() != 3 {
             return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
@@ -179,10 +231,17 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            svf(input, cutoff, resonance, FilterMode::Lowpass).into(),
+            NodeKind::SVF {
+                input: Box::new(input),
+                cutoff: Box::new(cutoff),
+                resonance: Box::new(resonance),
+                node: Box::new(lowpass()),
+            }
+            .into(),
         ))
     });
     koto.prelude().add_fn("bp", move |ctx| {
+        use fundsp::hacker32::bandpass;
         let args = ctx.args();
         if args.len() != 3 {
             return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
@@ -193,10 +252,17 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            svf(input, cutoff, resonance, FilterMode::Bandpass).into(),
+            NodeKind::SVF {
+                input: Box::new(input),
+                cutoff: Box::new(cutoff),
+                resonance: Box::new(resonance),
+                node: Box::new(bandpass()),
+            }
+            .into(),
         ))
     });
     koto.prelude().add_fn("hp", move |ctx| {
+        use fundsp::hacker32::highpass;
         let args = ctx.args();
         if args.len() != 3 {
             return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
@@ -207,7 +273,13 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            svf(input, cutoff, resonance, FilterMode::Highpass).into(),
+            NodeKind::SVF {
+                input: Box::new(input),
+                cutoff: Box::new(cutoff),
+                resonance: Box::new(resonance),
+                node: Box::new(highpass()),
+            }
+            .into(),
         ))
     });
     koto.prelude().add_fn("seq", move |ctx| {
@@ -219,18 +291,33 @@ fn create_env(koto: &Koto) {
         let values = list_from_value(&args[0])?;
         let trig = node_from_kvalue(&args[1])?;
 
-        Ok(KValue::Object(seq(values, trig).into()))
+        Ok(KValue::Object(
+            NodeKind::Seq {
+                trig: Box::new(trig),
+                values,
+                node: SeqNode::new(),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("pan", move |ctx| {
+        use fundsp::hacker32::panner;
         let args = ctx.args();
         if args.len() != 2 {
             return unexpected_args("expected 2 arguments: pan, input", args);
         }
 
-        let value = node_from_kvalue(&args[0])?;
-        let input = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[0])?;
+        let value = node_from_kvalue(&args[1])?;
 
-        Ok(KValue::Object(pan(input, value).into()))
+        Ok(KValue::Object(
+            NodeKind::Pan {
+                input: Box::new(input),
+                value: Box::new(value),
+                node: Box::new(panner()),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("pluck", move |ctx| {
         let args = ctx.args();
@@ -243,21 +330,44 @@ fn create_env(koto: &Koto) {
         let damping = node_from_kvalue(&args[2])?;
         let trig = node_from_kvalue(&args[3])?;
 
-        Ok(KValue::Object(pluck(freq, tone, damping, trig).into()))
+        Ok(KValue::Object(
+            NodeKind::Pluck {
+                freq: Box::new(freq),
+                tone: Box::new(tone),
+                damping: Box::new(damping),
+                trig: Box::new(trig),
+                node: PluckNode::new(),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("reverb", move |ctx| {
+        use fundsp::hacker32::{lowpole_hz, reverb2_stereo};
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
 
-        Ok(KValue::Object(reverb(input).into()))
+        Ok(KValue::Object(
+            NodeKind::Reverb {
+                input: Box::new(input),
+                node: Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("delay", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
 
-        Ok(KValue::Object(delay(input).into()))
+        Ok(KValue::Object(
+            NodeKind::Delay {
+                input: Box::new(input),
+                node: DelayNode::new(),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("moog", move |ctx| {
+        use fundsp::hacker32::moog;
         let args = ctx.args();
         if args.len() != 3 {
             return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
@@ -267,7 +377,15 @@ fn create_env(koto: &Koto) {
         let resonance = node_from_kvalue(&args[1])?;
         let input = node_from_kvalue(&args[2])?;
 
-        Ok(KValue::Object(moog(input, cutoff, resonance).into()))
+        Ok(KValue::Object(
+            NodeKind::Moog {
+                cutoff: Box::new(cutoff),
+                resonance: Box::new(resonance),
+                input: Box::new(input),
+                node: Box::new(moog()),
+            }
+            .into(),
+        ))
     });
 }
 

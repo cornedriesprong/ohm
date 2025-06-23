@@ -11,17 +11,10 @@ use seahash::SeaHasher;
 use std::f32::consts::PI;
 use std::hash::{Hash, Hasher};
 
-pub(crate) type Frame = [f32; 2];
-
-#[derive(Clone, PartialEq, Debug)]
-pub(crate) enum FilterMode {
-    Lowpass,
-    Highpass,
-    Bandpass,
-}
+pub type Frame = [f32; 2];
 
 #[derive(Clone, KotoType, KotoCopy)]
-pub(crate) enum NodeKind {
+pub enum NodeKind {
     Constant(f32),
     Sine {
         freq: Box<NodeKind>,
@@ -105,7 +98,11 @@ impl KotoObject for NodeKind {
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
+                NodeKind::Mix(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                )
+                .into(),
             )),
             _ => panic!("invalid add operation"),
         }
@@ -117,10 +114,18 @@ impl KotoObject for NodeKind {
                 NodeKind::Constant(lhs * f32::from(rhs)).into(),
             )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                gain(self.clone(), constant(num.into())).into(),
+                NodeKind::Gain(
+                    Box::new(self.clone()),
+                    Box::new(NodeKind::Constant(num.into())),
+                )
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                gain(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
+                NodeKind::Gain(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                )
+                .into(),
             )),
             _ => panic!("invalid multiply operation"),
         }
@@ -139,7 +144,11 @@ impl KotoObject for NodeKind {
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
+                NodeKind::Mix(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                )
+                .into(),
             )),
             _ => panic!("invalid subtract operation"),
         }
@@ -147,14 +156,22 @@ impl KotoObject for NodeKind {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(constant(lhs / f32::from(-rhs)).into()))
-            }
+            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
+                NodeKind::Constant(lhs / f32::from(rhs)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                gain(self.clone(), constant(num.into())).into(),
+                NodeKind::Gain(
+                    Box::new(self.clone()),
+                    Box::new(NodeKind::Constant(1.0 / f32::from(num))),
+                )
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                gain(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
+                NodeKind::Gain(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                )
+                .into(),
             )),
             _ => panic!("invalid divide operation"),
         }
@@ -165,140 +182,6 @@ impl KotoObject for NodeKind {
 impl KotoEntries for NodeKind {
     fn entries(&self) -> Option<KMap> {
         None
-    }
-}
-
-pub(crate) fn constant(value: f32) -> NodeKind {
-    NodeKind::Constant(value)
-}
-
-pub(crate) fn sine(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::sine;
-    NodeKind::Sine {
-        freq: Box::new(freq),
-        node: Box::new(sine()),
-    }
-}
-
-pub(crate) fn square(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::square;
-    NodeKind::Square {
-        freq: Box::new(freq),
-        node: Box::new(square()),
-    }
-}
-
-pub(crate) fn saw(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::saw;
-    NodeKind::Saw {
-        freq: Box::new(freq),
-        node: Box::new(saw()),
-    }
-}
-
-pub(crate) fn triangle(freq: NodeKind) -> NodeKind {
-    use fundsp::hacker32::triangle;
-    NodeKind::Triangle {
-        freq: Box::new(freq),
-        node: Box::new(triangle()),
-    }
-}
-
-pub(crate) fn noise() -> NodeKind {
-    use fundsp::hacker32::noise;
-    NodeKind::Noise(Box::new(noise()))
-}
-
-pub(crate) fn pulse(freq: NodeKind) -> NodeKind {
-    NodeKind::Pulse {
-        freq: Box::new(freq),
-        node: PulseNode::new(),
-    }
-}
-
-pub(crate) fn gain(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
-    NodeKind::Gain(Box::new(lhs), Box::new(rhs))
-}
-
-pub(crate) fn mix(lhs: NodeKind, rhs: NodeKind) -> NodeKind {
-    NodeKind::Mix(Box::new(lhs), Box::new(rhs))
-}
-
-pub(crate) fn env(segments: Vec<(NodeKind, NodeKind)>, trig: NodeKind) -> NodeKind {
-    NodeKind::Env {
-        trig: Box::new(trig),
-        segments,
-        node: EnvNode::new(),
-    }
-}
-
-pub(crate) fn svf(
-    input: NodeKind,
-    cutoff: NodeKind,
-    resonance: NodeKind,
-    mode: FilterMode,
-) -> NodeKind {
-    use fundsp::hacker32::{bandpass, highpass, lowpass};
-    NodeKind::SVF {
-        input: Box::new(input),
-        cutoff: Box::new(cutoff),
-        resonance: Box::new(resonance),
-        node: match mode {
-            FilterMode::Lowpass => Box::new(lowpass()),
-            FilterMode::Highpass => Box::new(highpass()),
-            FilterMode::Bandpass => Box::new(bandpass()),
-        },
-    }
-}
-
-pub(crate) fn seq(values: Vec<NodeKind>, trig: NodeKind) -> NodeKind {
-    NodeKind::Seq {
-        trig: Box::new(trig),
-        values,
-        node: SeqNode::new(),
-    }
-}
-
-pub(crate) fn pan(value: NodeKind, input: NodeKind) -> NodeKind {
-    use fundsp::hacker32::panner;
-    NodeKind::Pan {
-        input: Box::new(input),
-        value: Box::new(value),
-        node: Box::new(panner()),
-    }
-}
-pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: NodeKind) -> NodeKind {
-    NodeKind::Pluck {
-        freq: Box::new(freq),
-        tone: Box::new(tone),
-        damping: Box::new(damping),
-        trig: Box::new(trig),
-        node: PluckNode::new(),
-    }
-}
-
-pub(crate) fn reverb(input: NodeKind) -> NodeKind {
-    use fundsp::hacker32::{lowpole_hz, reverb2_stereo};
-    NodeKind::Reverb {
-        input: Box::new(input),
-        node: Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
-    }
-}
-
-pub(crate) fn delay(input: NodeKind) -> NodeKind {
-    NodeKind::Delay {
-        input: Box::new(input),
-        node: DelayNode::new(),
-    }
-}
-
-pub(crate) fn moog(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> NodeKind {
-    use fundsp::hacker32::moog;
-    NodeKind::Moog {
-        cutoff: Box::new(cutoff),
-        resonance: Box::new(resonance),
-        input: Box::new(input),
-        node: Box::new(moog()),
     }
 }
 
@@ -322,14 +205,14 @@ impl Node for NodeKind {
             }
 
             NodeKind::Reverb { node, .. } => {
-                let mut output = [0.0, 0.0];
-                node.tick(&inputs[0], &mut output);
+                let mut output = [0.0; 2];
+                node.tick(inputs[0].as_slice(), &mut output);
                 output
             }
 
             NodeKind::Pan { node, .. } => {
                 let input: Vec<f32> = inputs.iter().map(|[left, _]| *left).collect();
-                let mut output = [0.0, 0.0];
+                let mut output = [0.0; 2];
                 node.tick(input.as_slice(), &mut output);
                 output
             }
@@ -486,7 +369,7 @@ pub struct EnvSegment {
 }
 
 #[derive(Clone)]
-pub(crate) struct EnvNode {
+pub struct EnvNode {
     pub(crate) current_idx: usize,
     pub(crate) value: f32,
     pub(crate) time: usize,
@@ -495,7 +378,7 @@ pub(crate) struct EnvNode {
 }
 
 impl EnvNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             current_idx: 0,
             value: 0.0,
@@ -586,12 +469,12 @@ impl Node for EnvNode {
 }
 
 #[derive(Clone)]
-pub(crate) struct SeqNode {
+pub struct SeqNode {
     pub(crate) step: usize,
 }
 
 impl SeqNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { step: 0 }
     }
 
@@ -617,7 +500,7 @@ impl Node for SeqNode {
     }
 }
 
-pub(crate) struct PulseNode {
+pub struct PulseNode {
     phase: f32,
     prev_phase: f32,
 }
@@ -632,7 +515,7 @@ impl Clone for PulseNode {
 }
 
 impl PulseNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             phase: 0.,
             prev_phase: 0.,
@@ -680,7 +563,7 @@ pub struct PluckNode {
 }
 
 impl PluckNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             // mode: Mode::String,
             buffer: [0.0; BUFFER_SIZE],
@@ -778,7 +661,7 @@ pub struct DelayNode {
 }
 
 impl DelayNode {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             delay: Delay::new(15000.0, 0.5),
         }
