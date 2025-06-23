@@ -4,7 +4,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
 };
-use fundsp::hacker32::{noise, saw, sine, square, triangle};
 use koto::prelude::*;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
@@ -151,6 +150,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "sin",
         make_expr_node(|args| {
+            use fundsp::hacker32::sine;
             NodeKind::Sine {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(sine()),
@@ -161,6 +161,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "sqr",
         make_expr_node(|args| {
+            use fundsp::hacker32::square;
             NodeKind::Square {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(square()),
@@ -171,6 +172,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "saw",
         make_expr_node(|args| {
+            use fundsp::hacker32::saw;
             NodeKind::Saw {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(saw()),
@@ -181,6 +183,7 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "tri",
         make_expr_node(|args| {
+            use fundsp::hacker32::triangle;
             NodeKind::Triangle {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(triangle()),
@@ -200,7 +203,10 @@ fn create_env(koto: &Koto) {
     );
     koto.prelude().add_fn(
         "noise",
-        make_expr_node(|_| NodeKind::Noise(Box::new(noise()))),
+        make_expr_node(|_| {
+            use fundsp::hacker32::noise;
+            NodeKind::Noise(Box::new(noise())).into()
+        }),
     );
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
