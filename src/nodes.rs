@@ -56,6 +56,11 @@ pub(crate) enum NodeKind {
         resonance: BoxedNode,
         node: Box<dyn AudioUnit>,
     },
+    Pan {
+        input: BoxedNode,
+        value: BoxedNode,
+        node: Box<dyn AudioUnit>,
+    },
     Seq {
         trig: BoxedNode,
         values: Vec<NodeKind>,
@@ -88,11 +93,15 @@ impl KotoObject for NodeKind {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(constant(lhs + f32::from(rhs)).into()))
-            }
+            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
+                NodeKind::Constant(lhs + f32::from(rhs)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                mix(self.clone(), constant((num).into())).into(),
+                NodeKind::Mix(
+                    Box::new(self.clone()),
+                    Box::new(NodeKind::Constant((num).into())),
+                )
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
@@ -103,9 +112,9 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(constant(lhs * f32::from(rhs)).into()))
-            }
+            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
+                NodeKind::Constant(lhs * f32::from(rhs)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
                 gain(self.clone(), constant(num.into())).into(),
             )),
@@ -118,11 +127,15 @@ impl KotoObject for NodeKind {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(constant(lhs - f32::from(-rhs)).into()))
-            }
+            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
+                NodeKind::Constant(lhs - f32::from(-rhs)).into(),
+            )),
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                mix(self.clone(), constant((-num).into())).into(),
+                NodeKind::Mix(
+                    Box::new(self.clone()),
+                    Box::new(NodeKind::Constant((-num).into())),
+                )
+                .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
                 mix(self.clone(), obj.cast::<NodeKind>()?.clone()).into(),
@@ -147,6 +160,7 @@ impl KotoObject for NodeKind {
     }
 }
 
+// necessary to satisfy KotoEntries trait
 impl KotoEntries for NodeKind {
     fn entries(&self) -> Option<KMap> {
         None
@@ -244,6 +258,14 @@ pub(crate) fn seq(values: Vec<NodeKind>, trig: NodeKind) -> NodeKind {
     }
 }
 
+pub(crate) fn pan(value: NodeKind, input: NodeKind) -> NodeKind {
+    use fundsp::hacker32::panner;
+    NodeKind::Pan {
+        input: Box::new(input),
+        value: Box::new(value),
+        node: Box::new(panner()),
+    }
+}
 pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: NodeKind) -> NodeKind {
     NodeKind::Pluck {
         freq: Box::new(freq),
@@ -255,16 +277,10 @@ pub(crate) fn pluck(freq: NodeKind, tone: NodeKind, damping: NodeKind, trig: Nod
 }
 
 pub(crate) fn reverb(input: NodeKind) -> NodeKind {
-    use fundsp::hacker32::{delay, fdn, fir, join, lerp, rnd1, split, stacki, U16};
+    use fundsp::hacker32::{lowpole_hz, reverb2_stereo};
     NodeKind::Reverb {
         input: Box::new(input),
-        node: Box::new(
-            split()
-                >> fdn::<U16, _>(stacki::<U16, _, _>(|i| {
-                    delay(lerp(0.01, 0.5, rnd1(i) as f32)) >> fir((0.2, 0.4, 0.2))
-                }))
-                >> join(),
-        ),
+        node: Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
     }
 }
 
@@ -288,27 +304,34 @@ pub(crate) fn moog(input: NodeKind, cutoff: NodeKind, resonance: NodeKind) -> No
 impl Node for NodeKind {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        macro_rules! tick_node_output {
-            ($node:expr) => {{
-                let mut output = [0.0];
-                $node.tick(inputs.into(), &mut output);
-                output[0]
-            }};
-        }
-
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
         match self {
-            NodeKind::Constant(val) => *val,
-
+            NodeKind::Constant(val) => [*val, *val],
             NodeKind::Sine { node, .. }
             | NodeKind::Square { node, .. }
             | NodeKind::Saw { node, .. }
             | NodeKind::Triangle { node, .. }
             | NodeKind::SVF { node, .. }
-            | NodeKind::Reverb { node, .. }
-            | NodeKind::Moog { node, .. } => tick_node_output!(node),
+            | NodeKind::Moog { node, .. }
+            | NodeKind::Noise(node) => {
+                let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
+                let mut output = [0.0];
+                node.tick(input.as_slice(), &mut output);
+                [output[0], output[0]]
+            }
 
-            NodeKind::Noise(node) => tick_node_output!(node),
+            NodeKind::Reverb { node, .. } => {
+                let mut output = [0.0, 0.0];
+                node.tick(&inputs[0], &mut output);
+                output
+            }
+
+            NodeKind::Pan { node, .. } => {
+                let input: Vec<f32> = inputs.iter().map(|[left, _]| *left).collect();
+                let mut output = [0.0, 0.0];
+                node.tick(input.as_slice(), &mut output);
+                output
+            }
 
             NodeKind::Pulse { node, .. } => node.tick(inputs),
             NodeKind::Seq { node, .. } => node.tick(inputs),
@@ -316,8 +339,20 @@ impl Node for NodeKind {
             NodeKind::Delay { node, .. } => node.tick(inputs),
             NodeKind::Env { node, .. } => node.tick(inputs),
 
-            NodeKind::Gain { .. } => inputs[0] * inputs[1],
-            NodeKind::Mix { .. } => inputs[0] + inputs[1],
+            NodeKind::Gain { .. } => {
+                if let [[l0, r0], [l1, r1]] = inputs {
+                    [l0 * l1, r0 * r1]
+                } else {
+                    panic!("Wrong input format");
+                }
+            }
+            NodeKind::Mix { .. } => {
+                if let [[l0, r0], [l1, r1]] = inputs {
+                    [l0 + l1, r0 + r1]
+                } else {
+                    panic!("Wrong input format");
+                }
+            }
         }
     }
 }
@@ -399,6 +434,9 @@ impl NodeKind {
                     val.hash_structure(hasher);
                 }
             }
+            NodeKind::Pan { input, value, .. } => {
+                hash_node!(18, input, value);
+            }
             NodeKind::Pluck {
                 freq,
                 tone,
@@ -437,7 +475,7 @@ impl NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
-    fn tick(&mut self, inputs: &[f32]) -> f32;
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2];
 }
 
 #[derive(Clone, Debug)]
@@ -514,13 +552,13 @@ impl EnvNode {
 impl Node for EnvNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let trig = *inputs.last().expect("env: missing trigger input");
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+        let trig = inputs.last().expect("env: missing trigger input")[0];
         let segments = &inputs[0..inputs.len() - 1]
             .chunks_exact(2)
             .map(|pair| EnvSegment {
-                target: pair[0],
-                duration: pair[1] as usize,
+                target: pair[0][0],
+                duration: pair[1][0] as usize,
             })
             .collect::<Vec<_>>();
 
@@ -531,7 +569,7 @@ impl Node for EnvNode {
         self.prev_trig = trig;
 
         if !self.active {
-            return 0.0;
+            return [0.0, 0.0];
         }
 
         let segment = &segments[self.current_idx];
@@ -542,7 +580,7 @@ impl Node for EnvNode {
             self.advance(&segments);
         }
 
-        self.value
+        [self.value, self.value]
     }
 }
 
@@ -556,7 +594,7 @@ impl SeqNode {
         Self { step: 0 }
     }
 
-    fn increment(&mut self, values: &[f32]) {
+    fn increment(&mut self, values: &[[f32; 2]]) {
         self.step += 1;
         if self.step >= values.len() {
             self.step = 0;
@@ -567,10 +605,10 @@ impl SeqNode {
 impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
         let trig = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
-        if *trig > 0.0 {
+        if (*trig)[0] > 0.0 {
             self.increment(values);
         }
 
@@ -604,21 +642,17 @@ impl PulseNode {
 impl Node for PulseNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("pulse: missing freq input");
-        let reset_phase = inputs.get(1).unwrap_or(&0.0);
-        if *reset_phase > 0.0 {
-            self.phase = 0.0;
-        }
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+        let freq = inputs.get(0).expect("pulse: missing freq input")[0];
 
         self.prev_phase = self.phase;
         self.phase += 2. * PI * freq / SAMPLE_RATE;
 
         if self.phase >= 2. * PI {
             self.phase -= 2. * PI;
-            1.0
+            [1.0, 1.0]
         } else {
-            0.0
+            [0.0, 0.0]
         }
     }
 }
@@ -697,14 +731,14 @@ impl PluckNode {
 impl Node for PluckNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let freq = inputs.get(0).expect("pluck: missing freq input");
-        let tone = inputs.get(1).expect("pluck: missing tone input");
-        let damping = inputs.get(2).expect("pluck: missing damping input");
-        let trig = inputs.get(3).expect("pluck: missing trigger input");
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+        let freq = inputs.get(0).map_or(0.0, |arr| arr[0]);
+        let tone = inputs.get(1).map_or(0.0, |arr| arr[0]);
+        let damping = inputs.get(2).map_or(0.0, |arr| arr[0]);
+        let trig = inputs.get(3).map_or(0.0, |arr| arr[0]);
 
-        if *trig > 0.0 {
-            self.play(*freq, *tone);
+        if trig > 0.0 {
+            self.play(freq, tone);
         }
 
         // if !self.is_active() {
@@ -732,7 +766,8 @@ impl Node for PluckNode {
             self.buffer[self.read_pos] *= 0.9;
         }
 
-        self.buffer[self.read_pos]
+        let output = self.buffer[self.read_pos];
+        [output, output]
     }
 }
 
@@ -752,8 +787,9 @@ impl DelayNode {
 impl Node for DelayNode {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[f32]) -> f32 {
-        let input = inputs.get(0).expect("delay: missing input");
-        self.delay.process(*input)
+    fn tick(&mut self, inputs: &[[f32; 2]]) -> [f32; 2] {
+        let input = inputs.get(0).expect("delay: missing input")[0];
+        let output = self.delay.process(input);
+        [output, output]
     }
 }

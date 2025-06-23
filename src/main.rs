@@ -61,10 +61,9 @@ where
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
             if let Some(graph) = graph_clone.lock().unwrap().as_mut() {
                 for frame in data.chunks_mut(2) {
-                    let s = graph.tick();
-                    for sample in frame.iter_mut() {
-                        *sample = s;
-                    }
+                    let out = graph.tick();
+                    frame[0] = out[0];
+                    frame[1] = out[1];
                 }
             }
         },
@@ -222,6 +221,17 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(seq(values, trig).into()))
     });
+    koto.prelude().add_fn("pan", move |ctx| {
+        let args = ctx.args();
+        if args.len() != 2 {
+            return unexpected_args("expected 2 arguments: pan, input", args);
+        }
+
+        let value = node_from_kvalue(&args[0])?;
+        let input = node_from_kvalue(&args[1])?;
+
+        Ok(KValue::Object(pan(input, value).into()))
+    });
     koto.prelude().add_fn("pluck", move |ctx| {
         let args = ctx.args();
         if args.len() != 4 {
@@ -273,7 +283,7 @@ where
 
 fn node_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
     match value {
-        KValue::Number(n) => Ok(constant(n.into())),
+        KValue::Number(n) => Ok(NodeKind::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
