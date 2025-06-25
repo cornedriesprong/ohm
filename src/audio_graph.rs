@@ -132,6 +132,7 @@ impl AudioGraph {
             (Triangle { .. }, Triangle { .. }) => true,
             (Env { .. }, Env { .. }) => true,
             (Moog { .. }, Moog { .. }) => true,
+            (SVF { .. }, SVF { .. }) => true,
             _ => false, // For now, only support oscillators, filters, and effects
         }
     }
@@ -165,6 +166,12 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 resonance,
                 ..
             } => add_node(vec![input, cutoff, resonance], &expr, graph),
+            NodeKind::Moog {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => add_node(vec![input, cutoff, resonance], expr, graph),
             NodeKind::Seq { trig, values, .. } => {
                 let mut inputs = values.iter().collect::<Vec<_>>();
                 inputs.push(trig);
@@ -181,12 +188,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Triangle { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Moog {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => add_node(vec![input, cutoff, resonance], expr, graph),
         }
     }
 

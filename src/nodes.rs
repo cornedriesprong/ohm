@@ -50,6 +50,12 @@ pub enum NodeKind {
         resonance: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
+    Moog {
+        input: Box<NodeKind>,
+        cutoff: Box<NodeKind>,
+        resonance: Box<NodeKind>,
+        node: Box<dyn AudioUnit>,
+    },
     Pan {
         input: Box<NodeKind>,
         value: Box<NodeKind>,
@@ -74,12 +80,6 @@ pub enum NodeKind {
     Delay {
         input: Box<NodeKind>,
         node: DelayNode,
-    },
-    Moog {
-        input: Box<NodeKind>,
-        cutoff: Box<NodeKind>,
-        resonance: Box<NodeKind>,
-        node: Box<dyn AudioUnit>,
     },
 }
 
@@ -255,7 +255,7 @@ impl PartialEq for NodeKind {
         }
 
         simple_eq!(
-            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, SVF, Reverb, Delay, Triangle, Moog,
+            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, SVF, Moog, Reverb, Delay, Triangle
         )
     }
 }
@@ -312,6 +312,12 @@ impl NodeKind {
                 resonance,
                 ..
             } => hash_node!(10, input, cutoff, resonance),
+            NodeKind::Moog {
+                input,
+                cutoff,
+                resonance,
+                ..
+            } => hash_node!(17, input, cutoff, resonance),
             NodeKind::Seq { trig, values, .. } => {
                 hash_node!(12, trig);
                 for val in values {
@@ -331,12 +337,6 @@ impl NodeKind {
             NodeKind::Reverb { input, .. } => hash_node!(14, input),
             NodeKind::Delay { input, .. } => hash_node!(15, input),
             NodeKind::Triangle { freq, .. } => hash_node!(16, freq),
-            NodeKind::Moog {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => hash_node!(17, input, cutoff, resonance),
         }
     }
 
@@ -349,11 +349,11 @@ impl NodeKind {
             Triangle,
             Env,
             SVF,
+            Moog,
             Seq,
             Pluck,
             Reverb,
             Delay,
-            Moog
         );
     }
 }
