@@ -188,6 +188,7 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Triangle { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Sampler { .. } => add_node(vec![], expr, graph),
         }
     }
 

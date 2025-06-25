@@ -81,6 +81,9 @@ pub enum NodeKind {
         input: Box<NodeKind>,
         node: DelayNode,
     },
+    Sampler {
+        node: Box<dyn AudioUnit>,
+    },
 }
 
 impl KotoObject for NodeKind {
@@ -201,6 +204,12 @@ impl Node for NodeKind {
                 let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
                 let mut output = [0.0];
                 node.tick(input.as_slice(), &mut output);
+                [output[0], output[0]]
+            }
+
+            NodeKind::Sampler { node, .. } => {
+                let mut output = [0.0; 1];
+                node.tick(&[], &mut output);
                 [output[0], output[0]]
             }
 
@@ -337,6 +346,7 @@ impl NodeKind {
             NodeKind::Reverb { input, .. } => hash_node!(14, input),
             NodeKind::Delay { input, .. } => hash_node!(15, input),
             NodeKind::Triangle { freq, .. } => hash_node!(16, freq),
+            NodeKind::Sampler { .. } => hash_node!(17),
         }
     }
 
@@ -354,6 +364,7 @@ impl NodeKind {
             Pluck,
             Reverb,
             Delay,
+            Sampler,
         );
     }
 }

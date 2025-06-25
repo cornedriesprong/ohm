@@ -4,6 +4,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
 };
+use fundsp::hacker::wavech;
 use koto::prelude::*;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
@@ -393,6 +394,24 @@ fn create_env(koto: &Koto) {
             .into(),
         ))
     });
+    koto.prelude().add_fn("wav", move |ctx| {
+        use fundsp::hacker32::Wave;
+        let args = ctx.args();
+        if args.len() != 1 {
+            return unexpected_args("expected 1 argument: filename", args);
+        }
+
+        let filename = format!("samples/{}", str_from_kvalue(&args[0])?);
+        let wave = Wave::load(&filename).expect("Could not load wave.");
+        let file = Arc::new(wave);
+
+        Ok(KValue::Object(
+            NodeKind::Sampler {
+                node: Box::new(wavech(&file, 0, Some(0))),
+            }
+            .into(),
+        ))
+    });
 }
 
 fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
@@ -410,6 +429,13 @@ fn node_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
         KValue::Number(n) => Ok(NodeKind::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
+    }
+}
+
+fn str_from_kvalue(value: &KValue) -> Result<String, koto::runtime::Error> {
+    match value {
+        KValue::Str(s) => Ok(s.to_string()),
+        unexpected => unexpected_type("string", unexpected)?,
     }
 }
 
