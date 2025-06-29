@@ -168,18 +168,6 @@ impl PartialEq for NodeKind {
         }
     }
 }
-macro_rules! transfer_node_state {
-    ( $self:ident, $other:ident; $( $variant:ident ),* $(,)? ) => {
-        match ($self, $other) {
-            $(
-                (NodeKind::$variant { node: new, .. }, NodeKind::$variant { node: old, .. }) => {
-                    *new = old.clone();
-                }
-            )*
-            _ => {}
-        }
-    };
-}
 
 impl NodeKind {
     pub(crate) fn compute_hash(&self) -> u64 {
@@ -189,33 +177,37 @@ impl NodeKind {
     }
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
-        macro_rules! hash_node {
-        ($tag:expr $(, $field:expr)* $(,)?) => {{
-            ($tag as u8).hash(hasher);
-            $( $field.hash_structure(hasher); )*
-        }};
-    }
-
         match self {
             NodeKind::Constant(val) => {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
             NodeKind::Node { inputs, .. } => {
-                hash_node!(13);
+                13u8.hash(hasher);
                 for val in inputs {
                     val.hash_structure(hasher);
                 }
             }
-            NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
-            NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
+            NodeKind::Mix(lhs, rhs) => {
+                6u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            NodeKind::Gain(lhs, rhs) => {
+                7u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
         }
     }
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
-        transfer_node_state!(self, other;
-            Node,
-        );
+        match (self, other) {
+            (NodeKind::Node { node: new, .. }, NodeKind::Node { node: old, .. }) => {
+                *new = old.clone();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -232,11 +224,17 @@ pub struct FunDSPNode {
 
 impl FunDSPNode {
     pub fn mono(node: Box<dyn AudioUnit>) -> Self {
-        Self { node, is_stereo: false }
+        Self {
+            node,
+            is_stereo: false,
+        }
     }
-    
+
     pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
-        Self { node, is_stereo: true }
+        Self {
+            node,
+            is_stereo: true,
+        }
     }
 }
 
