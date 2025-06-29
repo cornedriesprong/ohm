@@ -18,15 +18,7 @@ pub enum NodeKind {
     Constant(f32),
     Mix(Box<NodeKind>, Box<NodeKind>),
     Gain(Box<NodeKind>, Box<NodeKind>),
-    MonoAudioUnit {
-        inputs: Vec<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    StereoAudioUnit {
-        inputs: Vec<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    CustomNode {
+    Node {
         inputs: Vec<NodeKind>,
         node: Box<dyn Node>,
     },
@@ -145,20 +137,7 @@ impl Node for NodeKind {
         match self {
             NodeKind::Constant(val) => [*val; 2],
 
-            NodeKind::MonoAudioUnit { node, .. } => {
-                let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
-                let mut output = [0.0; 1];
-                node.tick(input.as_slice(), &mut output);
-                [output[0]; 2]
-            }
-
-            NodeKind::StereoAudioUnit { node, .. } => {
-                let mut output = [0.0; 2];
-                node.tick(inputs[0].as_slice(), &mut output);
-                output
-            }
-
-            NodeKind::CustomNode { node, .. } => node.tick(inputs),
+            NodeKind::Node { node, .. } => node.tick(inputs),
 
             NodeKind::Gain { .. } => {
                 if let [[l0, r0], [l1, r1]] = inputs {
@@ -181,9 +160,7 @@ impl Node for NodeKind {
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::MonoAudioUnit { .. }, Self::MonoAudioUnit { .. }) => true,
-            (Self::StereoAudioUnit { .. }, Self::StereoAudioUnit { .. }) => true,
-            (Self::CustomNode { .. }, Self::CustomNode { .. }) => true,
+            (Self::Node { .. }, Self::Node { .. }) => true,
             (Self::Gain { .. }, Self::Gain { .. }) => true,
             (Self::Mix { .. }, Self::Mix { .. }) => true,
             (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
@@ -224,19 +201,7 @@ impl NodeKind {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            NodeKind::MonoAudioUnit { inputs, .. } => {
-                hash_node!(3);
-                for val in inputs {
-                    val.hash_structure(hasher);
-                }
-            }
-            NodeKind::StereoAudioUnit { inputs, .. } => {
-                hash_node!(4);
-                for val in inputs {
-                    val.hash_structure(hasher);
-                }
-            }
-            NodeKind::CustomNode { inputs, .. } => {
+            NodeKind::Node { inputs, .. } => {
                 hash_node!(13);
                 for val in inputs {
                     val.hash_structure(hasher);
@@ -249,9 +214,7 @@ impl NodeKind {
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         transfer_node_state!(self, other;
-            MonoAudioUnit,
-            StereoAudioUnit,
-            CustomNode,
+            Node,
         );
     }
 }
@@ -259,6 +222,43 @@ impl NodeKind {
 pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[Frame]) -> Frame;
     fn clone_box(&self) -> Box<dyn Node>;
+}
+
+#[derive(Clone)]
+pub struct FunDSPNode {
+    node: Box<dyn AudioUnit>,
+    is_stereo: bool,
+}
+
+impl FunDSPNode {
+    pub fn mono(node: Box<dyn AudioUnit>) -> Self {
+        Self { node, is_stereo: false }
+    }
+    
+    pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
+        Self { node, is_stereo: true }
+    }
+}
+
+impl Node for FunDSPNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        if self.is_stereo {
+            let mut output = [0.0; 2];
+            self.node.tick(inputs[0].as_slice(), &mut output);
+            output
+        } else {
+            let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
+            let mut output = [0.0; 1];
+            self.node.tick(input.as_slice(), &mut output);
+            [output[0]; 2]
+        }
+    }
 }
 
 impl Clone for Box<dyn Node> {
