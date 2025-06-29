@@ -36,6 +36,10 @@ pub enum NodeKind {
         freq: Box<NodeKind>,
         node: PulseNode,
     },
+    Phasor {
+        freq: Box<NodeKind>,
+        node: Box<dyn AudioUnit>,
+    },
     Noise(Box<dyn AudioUnit>),
     Mix(Box<NodeKind>, Box<NodeKind>),
     Gain(Box<NodeKind>, Box<NodeKind>),
@@ -198,6 +202,7 @@ impl Node for NodeKind {
             | NodeKind::Square { node, .. }
             | NodeKind::Saw { node, .. }
             | NodeKind::Triangle { node, .. }
+            | NodeKind::Phasor { node, .. }
             | NodeKind::SVF { node, .. }
             | NodeKind::Moog { node, .. }
             | NodeKind::Noise(node) => {
@@ -347,6 +352,7 @@ impl NodeKind {
             NodeKind::Delay { input, .. } => hash_node!(15, input),
             NodeKind::Triangle { freq, .. } => hash_node!(16, freq),
             NodeKind::Sampler { .. } => hash_node!(17),
+            NodeKind::Phasor { freq, .. } => hash_node!(18, freq),
         }
     }
 
@@ -356,6 +362,7 @@ impl NodeKind {
             Square,
             Saw,
             Pulse,
+            Phasor,
             Triangle,
             Env,
             SVF,
@@ -482,11 +489,12 @@ impl Node for EnvNode {
 #[derive(Clone)]
 pub struct SeqNode {
     pub(crate) step: usize,
+    pub(crate) prev: f32,
 }
 
 impl SeqNode {
     pub(crate) fn new() -> Self {
-        Self { step: 0 }
+        Self { step: 0, prev: 0.0 }
     }
 
     fn increment(&mut self, values: &[Frame]) {
@@ -503,9 +511,12 @@ impl Node for SeqNode {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let trig = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
-        if (*trig)[0] > 0.0 {
+        if (*trig)[0] < self.prev {
+            println!("seq: trig {}", trig[0]);
             self.increment(values);
         }
+
+        self.prev = trig[0];
 
         values[self.step]
     }

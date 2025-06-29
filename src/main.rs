@@ -203,6 +203,17 @@ fn create_env(koto: &Koto) {
         }),
     );
     koto.prelude().add_fn(
+        "ramp",
+        make_expr_node(|args| {
+            use fundsp::hacker32::ramp;
+            NodeKind::Phasor {
+                freq: Box::new(args[0].clone()),
+                node: Box::new(ramp()),
+            }
+            .into()
+        }),
+    );
+    koto.prelude().add_fn(
         "noise",
         make_expr_node(|_| {
             use fundsp::hacker32::noise;

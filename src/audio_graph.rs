@@ -149,6 +149,7 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Phasor { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Env { segments, trig, .. } => {
