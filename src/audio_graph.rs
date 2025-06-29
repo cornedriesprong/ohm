@@ -123,12 +123,10 @@ impl AudioGraph {
     }
 
     fn nodes_are_type_compatible(&self, old_node: &NodeKind, new_node: &NodeKind) -> bool {
-        use NodeKind::*;
         match (old_node, new_node) {
-            (MonoNode { .. }, MonoNode { .. }) => true,
-            (StereoNode { .. }, StereoNode { .. }) => true,
-            (Pulse { .. }, Pulse { .. }) => true,
-            (Env { .. }, Env { .. }) => true,
+            (NodeKind::MonoAudioUnit { .. }, NodeKind::MonoAudioUnit { .. }) => true,
+            (NodeKind::StereoAudioUnit { .. }, NodeKind::StereoAudioUnit { .. }) => true,
+            (NodeKind::CustomNode { .. }, NodeKind::CustomNode { .. }) => true,
             _ => false, // For now, only support oscillators, filters, and effects
         }
     }
@@ -140,21 +138,13 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
             NodeKind::Constant { .. } => add_node(vec![], expr, graph),
-            NodeKind::MonoNode { inputs, .. }
-            | NodeKind::StereoNode { inputs, .. }
-            | NodeKind::Delay { inputs, .. }
-            | NodeKind::Pan { inputs, .. }
-            | NodeKind::Seq { inputs, .. }
-            | NodeKind::Env { inputs, .. }
-            | NodeKind::Pulse { inputs, .. } => {
+            NodeKind::MonoAudioUnit { inputs, .. }
+            | NodeKind::StereoAudioUnit { inputs, .. }
+            | NodeKind::CustomNode { inputs, .. } => {
                 add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
             }
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
-            NodeKind::Pluck { inputs, .. } => {
-                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
-            }
-            NodeKind::Sampler { .. } => add_node(vec![], expr, graph),
         }
     }
 

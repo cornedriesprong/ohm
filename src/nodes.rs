@@ -16,43 +16,19 @@ pub type Frame = [f32; 2];
 #[derive(Clone, KotoType, KotoCopy)]
 pub enum NodeKind {
     Constant(f32),
-    MonoNode {
-        inputs: Vec<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    StereoNode {
-        inputs: Vec<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    Pulse {
-        inputs: Vec<NodeKind>,
-        node: PulseNode,
-    },
     Mix(Box<NodeKind>, Box<NodeKind>),
     Gain(Box<NodeKind>, Box<NodeKind>),
-    Env {
-        inputs: Vec<NodeKind>,
-        node: EnvNode,
-    },
-    Pan {
+    MonoAudioUnit {
         inputs: Vec<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
-    Seq {
-        inputs: Vec<NodeKind>,
-        node: SeqNode,
-    },
-    Pluck {
-        inputs: Vec<NodeKind>,
-        node: PluckNode,
-    },
-    Delay {
-        inputs: Vec<NodeKind>,
-        node: DelayNode,
-    },
-    Sampler {
+    StereoAudioUnit {
         inputs: Vec<NodeKind>,
         node: Box<dyn AudioUnit>,
+    },
+    CustomNode {
+        inputs: Vec<NodeKind>,
+        node: Box<dyn Node>,
     },
 }
 
@@ -159,43 +135,30 @@ impl KotoEntries for NodeKind {
 }
 
 impl Node for NodeKind {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
             NodeKind::Constant(val) => [*val; 2],
 
-            NodeKind::MonoNode { node, .. } => {
+            NodeKind::MonoAudioUnit { node, .. } => {
                 let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
                 let mut output = [0.0; 1];
                 node.tick(input.as_slice(), &mut output);
                 [output[0]; 2]
             }
 
-            NodeKind::StereoNode { node, .. } => {
+            NodeKind::StereoAudioUnit { node, .. } => {
                 let mut output = [0.0; 2];
                 node.tick(inputs[0].as_slice(), &mut output);
                 output
             }
 
-            NodeKind::Sampler { node, .. } => {
-                let mut output = [0.0; 1];
-                node.tick(&[], &mut output);
-                [output[0]; 2]
-            }
-
-            NodeKind::Pan { node, .. } => {
-                let input: Vec<f32> = inputs.iter().map(|[left, _]| *left).collect();
-                let mut output = [0.0; 2];
-                node.tick(input.as_slice(), &mut output);
-                output
-            }
-
-            NodeKind::Seq { node, .. } => node.tick(inputs),
-            NodeKind::Pluck { node, .. } => node.tick(inputs),
-            NodeKind::Delay { node, .. } => node.tick(inputs),
-            NodeKind::Pulse { node, .. } => node.tick(inputs),
-            NodeKind::Env { node, .. } => node.tick(inputs),
+            NodeKind::CustomNode { node, .. } => node.tick(inputs),
 
             NodeKind::Gain { .. } => {
                 if let [[l0, r0], [l1, r1]] = inputs {
@@ -217,18 +180,15 @@ impl Node for NodeKind {
 
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
-        macro_rules! simple_eq {
-            ($($variant:ident),* $(,)?) => {
-                match (self, other) {
-                    $( (Self::$variant { .. }, Self::$variant { .. }) => true, )*
-                    (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
-                    (Self::Pluck { node: lhs, .. }, Self::Pluck { node: rhs, .. }) => lhs.buffer == rhs.buffer,
-                    _ => false,
-                }
-            }
+        match (self, other) {
+            (Self::MonoAudioUnit { .. }, Self::MonoAudioUnit { .. }) => true,
+            (Self::StereoAudioUnit { .. }, Self::StereoAudioUnit { .. }) => true,
+            (Self::CustomNode { .. }, Self::CustomNode { .. }) => true,
+            (Self::Gain { .. }, Self::Gain { .. }) => true,
+            (Self::Mix { .. }, Self::Mix { .. }) => true,
+            (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
+            _ => false,
         }
-
-        simple_eq!(MonoNode, StereoNode, Pulse, Gain, Mix, Env, Delay)
     }
 }
 macro_rules! transfer_node_state {
@@ -264,52 +224,47 @@ impl NodeKind {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            // TODO: maybe separate hashing for every osc type?
-            NodeKind::MonoNode { inputs, node } => {
+            NodeKind::MonoAudioUnit { inputs, .. } => {
                 hash_node!(3);
-                // for (input) in inputs {
-                //     input.hash_structure(hasher);
-                // }
+                for val in inputs {
+                    val.hash_structure(hasher);
+                }
             }
-            NodeKind::StereoNode { inputs, node } => {
+            NodeKind::StereoAudioUnit { inputs, .. } => {
                 hash_node!(4);
-                // for (input) in inputs {
-                //     input.hash_structure(hasher);
-                // }
+                for val in inputs {
+                    val.hash_structure(hasher);
+                }
             }
-            NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
-            NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
-            NodeKind::Pulse { inputs, .. }
-            | NodeKind::Pluck { inputs, .. }
-            | NodeKind::Pan { inputs, .. }
-            | NodeKind::Seq { inputs, .. }
-            | NodeKind::Env { inputs, .. }
-            | NodeKind::Delay { inputs, .. } => {
+            NodeKind::CustomNode { inputs, .. } => {
                 hash_node!(13);
                 for val in inputs {
                     val.hash_structure(hasher);
                 }
             }
-            NodeKind::Sampler { .. } => hash_node!(17),
+            NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
+            NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
         }
     }
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         transfer_node_state!(self, other;
-            MonoNode,
-            StereoNode,
-            Pulse,
-            Env,
-            Seq,
-            Pluck,
-            Delay,
-            Sampler,
+            MonoAudioUnit,
+            StereoAudioUnit,
+            CustomNode,
         );
     }
 }
 
 pub(crate) trait Node: Send + Sync {
     fn tick(&mut self, inputs: &[Frame]) -> Frame;
+    fn clone_box(&self) -> Box<dyn Node>;
+}
+
+impl Clone for Box<dyn Node> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -384,6 +339,10 @@ impl EnvNode {
 }
 
 impl Node for EnvNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -438,6 +397,10 @@ impl SeqNode {
 }
 
 impl Node for SeqNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -478,6 +441,10 @@ impl PulseNode {
 }
 
 impl Node for PulseNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -567,6 +534,10 @@ impl PluckNode {
 }
 
 impl Node for PluckNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -623,6 +594,10 @@ impl DelayNode {
 }
 
 impl Node for DelayNode {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {

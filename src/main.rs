@@ -152,7 +152,7 @@ fn create_env(koto: &Koto) {
         "sin",
         make_expr_node(|args| {
             use fundsp::hacker32::sine;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![args[0].clone()],
                 node: Box::new(sine()),
             }
@@ -163,7 +163,7 @@ fn create_env(koto: &Koto) {
         "sqr",
         make_expr_node(|args| {
             use fundsp::hacker32::square;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![args[0].clone()],
                 node: Box::new(square()),
             }
@@ -174,7 +174,7 @@ fn create_env(koto: &Koto) {
         "saw",
         make_expr_node(|args| {
             use fundsp::hacker32::saw;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![args[0].clone()],
                 node: Box::new(saw()),
             }
@@ -185,7 +185,7 @@ fn create_env(koto: &Koto) {
         "tri",
         make_expr_node(|args| {
             use fundsp::hacker32::triangle;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![args[0].clone()],
                 node: Box::new(triangle()),
             }
@@ -195,9 +195,9 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "pulse",
         make_expr_node(|args| {
-            NodeKind::Pulse {
+            NodeKind::CustomNode {
                 inputs: vec![args[0].clone()],
-                node: PulseNode::new(),
+                node: Box::new(PulseNode::new()),
             }
             .into()
         }),
@@ -206,7 +206,7 @@ fn create_env(koto: &Koto) {
         "ramp",
         make_expr_node(|args| {
             use fundsp::hacker32::ramp;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![args[0].clone()],
                 node: Box::new(ramp()),
             }
@@ -217,7 +217,7 @@ fn create_env(koto: &Koto) {
         "noise",
         make_expr_node(|_| {
             use fundsp::hacker32::noise;
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![],
                 node: Box::new(noise()),
             }
@@ -240,9 +240,9 @@ fn create_env(koto: &Koto) {
         inputs.push(trig);
 
         Ok(KValue::Object(
-            NodeKind::Env {
+            NodeKind::CustomNode {
                 inputs,
-                node: EnvNode::new(),
+                node: Box::new(EnvNode::new()),
             }
             .into(),
         ))
@@ -259,7 +259,7 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(lowpass()),
             }
@@ -278,7 +278,7 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(bandpass()),
             }
@@ -297,7 +297,7 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(highpass()),
             }
@@ -320,9 +320,9 @@ fn create_env(koto: &Koto) {
         values.push(trig.clone());
 
         Ok(KValue::Object(
-            NodeKind::Seq {
+            NodeKind::CustomNode {
                 inputs,
-                node: SeqNode::new(),
+                node: Box::new(SeqNode::new()),
             }
             .into(),
         ))
@@ -338,7 +338,7 @@ fn create_env(koto: &Koto) {
         let value = node_from_kvalue(&args[1])?;
 
         Ok(KValue::Object(
-            NodeKind::Pan {
+            NodeKind::StereoAudioUnit {
                 inputs: vec![input, value],
                 node: Box::new(panner()),
             }
@@ -357,9 +357,9 @@ fn create_env(koto: &Koto) {
         let trig = node_from_kvalue(&args[3])?;
 
         Ok(KValue::Object(
-            NodeKind::Pluck {
+            NodeKind::CustomNode {
                 inputs: vec![freq, tone, damping, trig],
-                node: PluckNode::new(),
+                node: Box::new(PluckNode::new()),
             }
             .into(),
         ))
@@ -370,7 +370,7 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(
-            NodeKind::StereoNode {
+            NodeKind::StereoAudioUnit {
                 inputs: vec![input],
                 node: Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
             }
@@ -382,9 +382,9 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(
-            NodeKind::Delay {
+            NodeKind::CustomNode {
                 inputs: vec![input],
-                node: DelayNode::new(),
+                node: Box::new(DelayNode::new()),
             }
             .into(),
         ))
@@ -401,7 +401,7 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::MonoNode {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![cutoff, resonance, input],
                 node: Box::new(moog()),
             }
@@ -420,7 +420,7 @@ fn create_env(koto: &Koto) {
         let file = Arc::new(wave);
 
         Ok(KValue::Object(
-            NodeKind::Sampler {
+            NodeKind::MonoAudioUnit {
                 inputs: vec![],
                 node: Box::new(wavech(&file, 0, Some(0))),
             }
