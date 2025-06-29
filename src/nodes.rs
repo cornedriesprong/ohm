@@ -16,29 +16,13 @@ pub type Frame = [f32; 2];
 #[derive(Clone, KotoType, KotoCopy)]
 pub enum NodeKind {
     Constant(f32),
-    Sine {
-        freq: Box<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    Square {
-        freq: Box<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    Saw {
-        freq: Box<NodeKind>,
-        node: Box<dyn AudioUnit>,
-    },
-    Triangle {
+    Osc {
         freq: Box<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Pulse {
         freq: Box<NodeKind>,
         node: PulseNode,
-    },
-    Phasor {
-        freq: Box<NodeKind>,
-        node: Box<dyn AudioUnit>,
     },
     Noise(Box<dyn AudioUnit>),
     Mix(Box<NodeKind>, Box<NodeKind>),
@@ -198,11 +182,7 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
             NodeKind::Constant(val) => [*val, *val],
-            NodeKind::Sine { node, .. }
-            | NodeKind::Square { node, .. }
-            | NodeKind::Saw { node, .. }
-            | NodeKind::Triangle { node, .. }
-            | NodeKind::Phasor { node, .. }
+            NodeKind::Osc { node, .. }
             | NodeKind::SVF { node, .. }
             | NodeKind::Moog { node, .. }
             | NodeKind::Noise(node) => {
@@ -231,10 +211,10 @@ impl Node for NodeKind {
                 output
             }
 
-            NodeKind::Pulse { node, .. } => node.tick(inputs),
             NodeKind::Seq { node, .. } => node.tick(inputs),
             NodeKind::Pluck { node, .. } => node.tick(inputs),
             NodeKind::Delay { node, .. } => node.tick(inputs),
+            NodeKind::Pulse { node, .. } => node.tick(inputs),
             NodeKind::Env { node, .. } => node.tick(inputs),
 
             NodeKind::Gain { .. } => {
@@ -268,9 +248,7 @@ impl PartialEq for NodeKind {
             }
         }
 
-        simple_eq!(
-            Sine, Square, Saw, Pulse, Noise, Gain, Mix, Env, SVF, Moog, Reverb, Delay, Triangle
-        )
+        simple_eq!(Osc, Pulse, Noise, Gain, Mix, Env, SVF, Moog, Reverb, Delay)
     }
 }
 macro_rules! transfer_node_state {
@@ -306,10 +284,9 @@ impl NodeKind {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            NodeKind::Sine { freq, .. } => hash_node!(1, freq),
-            NodeKind::Square { freq, .. } => hash_node!(2, freq),
-            NodeKind::Saw { freq, .. } => hash_node!(3, freq),
-            NodeKind::Pulse { freq, .. } => hash_node!(4, freq),
+            // TODO: maybe separate hashing for every osc type?
+            NodeKind::Osc { freq, .. } => hash_node!(1, freq),
+            NodeKind::Pulse { freq, .. } => hash_node!(2, freq),
             NodeKind::Noise(_) => hash_node!(5),
             NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
             NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
@@ -350,20 +327,14 @@ impl NodeKind {
             } => hash_node!(13, freq, tone, damping, trig),
             NodeKind::Reverb { input, .. } => hash_node!(14, input),
             NodeKind::Delay { input, .. } => hash_node!(15, input),
-            NodeKind::Triangle { freq, .. } => hash_node!(16, freq),
             NodeKind::Sampler { .. } => hash_node!(17),
-            NodeKind::Phasor { freq, .. } => hash_node!(18, freq),
         }
     }
 
     pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
         transfer_node_state!(self, other;
-            Sine,
-            Square,
-            Saw,
+            Osc,
             Pulse,
-            Phasor,
-            Triangle,
             Env,
             SVF,
             Moog,

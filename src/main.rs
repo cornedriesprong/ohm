@@ -152,7 +152,7 @@ fn create_env(koto: &Koto) {
         "sin",
         make_expr_node(|args| {
             use fundsp::hacker32::sine;
-            NodeKind::Sine {
+            NodeKind::Osc {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(sine()),
             }
@@ -163,7 +163,7 @@ fn create_env(koto: &Koto) {
         "sqr",
         make_expr_node(|args| {
             use fundsp::hacker32::square;
-            NodeKind::Square {
+            NodeKind::Osc {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(square()),
             }
@@ -174,7 +174,7 @@ fn create_env(koto: &Koto) {
         "saw",
         make_expr_node(|args| {
             use fundsp::hacker32::saw;
-            NodeKind::Saw {
+            NodeKind::Osc {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(saw()),
             }
@@ -185,7 +185,7 @@ fn create_env(koto: &Koto) {
         "tri",
         make_expr_node(|args| {
             use fundsp::hacker32::triangle;
-            NodeKind::Triangle {
+            NodeKind::Osc {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(triangle()),
             }
@@ -206,7 +206,7 @@ fn create_env(koto: &Koto) {
         "ramp",
         make_expr_node(|args| {
             use fundsp::hacker32::ramp;
-            NodeKind::Phasor {
+            NodeKind::Osc {
                 freq: Box::new(args[0].clone()),
                 node: Box::new(ramp()),
             }

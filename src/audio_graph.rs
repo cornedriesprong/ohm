@@ -125,11 +125,8 @@ impl AudioGraph {
     fn nodes_are_type_compatible(&self, old_node: &NodeKind, new_node: &NodeKind) -> bool {
         use NodeKind::*;
         match (old_node, new_node) {
-            (Sine { .. }, Sine { .. }) => true,
-            (Square { .. }, Square { .. }) => true,
-            (Saw { .. }, Saw { .. }) => true,
+            (Osc { .. }, Osc { .. }) => true,
             (Pulse { .. }, Pulse { .. }) => true,
-            (Triangle { .. }, Triangle { .. }) => true,
             (Env { .. }, Env { .. }) => true,
             (Moog { .. }, Moog { .. }) => true,
             (SVF { .. }, SVF { .. }) => true,
@@ -144,12 +141,9 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
             NodeKind::Constant { .. } => add_node(vec![], expr, graph),
-            NodeKind::Sine { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Square { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Saw { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Noise(_) => add_node(vec![], expr, graph),
+            NodeKind::Osc { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Phasor { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Env { segments, trig, .. } => {
@@ -188,7 +182,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
             } => add_node(vec![freq, tone, damping, trig], expr, graph),
             NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
-            NodeKind::Triangle { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Sampler { .. } => add_node(vec![], expr, graph),
         }
     }
