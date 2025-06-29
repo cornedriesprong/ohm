@@ -25,39 +25,33 @@ pub enum NodeKind {
         node: Box<dyn AudioUnit>,
     },
     Pulse {
-        freq: Box<NodeKind>,
+        inputs: Vec<NodeKind>,
         node: PulseNode,
     },
-    Noise(Box<dyn AudioUnit>),
     Mix(Box<NodeKind>, Box<NodeKind>),
     Gain(Box<NodeKind>, Box<NodeKind>),
     Env {
-        trig: Box<NodeKind>,
-        segments: Vec<(NodeKind, NodeKind)>,
+        inputs: Vec<NodeKind>,
         node: EnvNode,
     },
     Pan {
-        input: Box<NodeKind>,
-        value: Box<NodeKind>,
+        inputs: Vec<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
     Seq {
-        trig: Box<NodeKind>,
-        values: Vec<NodeKind>,
+        inputs: Vec<NodeKind>,
         node: SeqNode,
     },
     Pluck {
-        freq: Box<NodeKind>,
-        tone: Box<NodeKind>,
-        damping: Box<NodeKind>,
-        trig: Box<NodeKind>,
+        inputs: Vec<NodeKind>,
         node: PluckNode,
     },
     Delay {
-        input: Box<NodeKind>,
+        inputs: Vec<NodeKind>,
         node: DelayNode,
     },
     Sampler {
+        inputs: Vec<NodeKind>,
         node: Box<dyn AudioUnit>,
     },
 }
@@ -170,12 +164,6 @@ impl Node for NodeKind {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
             NodeKind::Constant(val) => [*val; 2],
-            NodeKind::Noise(node) => {
-                let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
-                let mut output = [0.0];
-                node.tick(input.as_slice(), &mut output);
-                [output[0]; 2]
-            }
 
             NodeKind::MonoNode { node, .. } => {
                 let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
@@ -240,7 +228,7 @@ impl PartialEq for NodeKind {
             }
         }
 
-        simple_eq!(MonoNode, StereoNode, Pulse, Noise, Gain, Mix, Env, Delay)
+        simple_eq!(MonoNode, StereoNode, Pulse, Gain, Mix, Env, Delay)
     }
 }
 macro_rules! transfer_node_state {
@@ -289,34 +277,19 @@ impl NodeKind {
                 //     input.hash_structure(hasher);
                 // }
             }
-            NodeKind::Pulse { freq, .. } => hash_node!(2, freq),
-            NodeKind::Noise(_) => hash_node!(5),
             NodeKind::Mix(lhs, rhs) => hash_node!(6, lhs, rhs),
             NodeKind::Gain(lhs, rhs) => hash_node!(7, lhs, rhs),
-            NodeKind::Env { segments, trig, .. } => {
-                hash_node!(8, trig);
-                for (val, dur) in segments {
-                    val.hash_structure(hasher);
-                    dur.hash_structure(hasher);
-                }
-            }
-            NodeKind::Seq { trig, values, .. } => {
-                hash_node!(12, trig);
-                for val in values {
+            NodeKind::Pulse { inputs, .. }
+            | NodeKind::Pluck { inputs, .. }
+            | NodeKind::Pan { inputs, .. }
+            | NodeKind::Seq { inputs, .. }
+            | NodeKind::Env { inputs, .. }
+            | NodeKind::Delay { inputs, .. } => {
+                hash_node!(13);
+                for val in inputs {
                     val.hash_structure(hasher);
                 }
             }
-            NodeKind::Pan { input, value, .. } => {
-                hash_node!(18, input, value);
-            }
-            NodeKind::Pluck {
-                freq,
-                tone,
-                damping,
-                trig,
-                ..
-            } => hash_node!(13, freq, tone, damping, trig),
-            NodeKind::Delay { input, .. } => hash_node!(15, input),
             NodeKind::Sampler { .. } => hash_node!(17),
         }
     }

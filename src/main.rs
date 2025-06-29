@@ -196,7 +196,7 @@ fn create_env(koto: &Koto) {
         "pulse",
         make_expr_node(|args| {
             NodeKind::Pulse {
-                freq: Box::new(args[0].clone()),
+                inputs: vec![args[0].clone()],
                 node: PulseNode::new(),
             }
             .into()
@@ -217,7 +217,11 @@ fn create_env(koto: &Koto) {
         "noise",
         make_expr_node(|_| {
             use fundsp::hacker32::noise;
-            NodeKind::Noise(Box::new(noise())).into()
+            NodeKind::MonoNode {
+                inputs: vec![],
+                node: Box::new(noise()),
+            }
+            .into()
         }),
     );
     koto.prelude().add_fn("env", move |ctx| {
@@ -228,10 +232,16 @@ fn create_env(koto: &Koto) {
         let segments = list_of_tuples_from_value(&args[0])?;
         let trig = node_from_kvalue(&args[1])?;
 
+        let mut inputs = Vec::new();
+        for (value, duration) in segments {
+            inputs.push(value);
+            inputs.push(duration);
+        }
+        inputs.push(trig);
+
         Ok(KValue::Object(
             NodeKind::Env {
-                trig: Box::new(trig),
-                segments,
+                inputs,
                 node: EnvNode::new(),
             }
             .into(),
@@ -300,13 +310,18 @@ fn create_env(koto: &Koto) {
             return unexpected_args("expected 2 arguments: list, trig", args);
         }
 
-        let values = list_from_value(&args[0])?;
+        let mut values = list_from_value(&args[0])?;
         let trig = node_from_kvalue(&args[1])?;
+
+        let mut inputs = Vec::new();
+        for value in values.iter_mut() {
+            inputs.push(value.clone());
+        }
+        values.push(trig.clone());
 
         Ok(KValue::Object(
             NodeKind::Seq {
-                trig: Box::new(trig),
-                values,
+                inputs,
                 node: SeqNode::new(),
             }
             .into(),
@@ -324,8 +339,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Pan {
-                input: Box::new(input),
-                value: Box::new(value),
+                inputs: vec![input, value],
                 node: Box::new(panner()),
             }
             .into(),
@@ -344,10 +358,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Pluck {
-                freq: Box::new(freq),
-                tone: Box::new(tone),
-                damping: Box::new(damping),
-                trig: Box::new(trig),
+                inputs: vec![freq, tone, damping, trig],
                 node: PluckNode::new(),
             }
             .into(),
@@ -372,7 +383,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Delay {
-                input: Box::new(input),
+                inputs: vec![input],
                 node: DelayNode::new(),
             }
             .into(),
@@ -410,6 +421,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Sampler {
+                inputs: vec![],
                 node: Box::new(wavech(&file, 0, Some(0))),
             }
             .into(),

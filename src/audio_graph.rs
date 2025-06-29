@@ -140,40 +140,20 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
             NodeKind::Constant { .. } => add_node(vec![], expr, graph),
-            NodeKind::MonoNode { inputs, .. } => {
+            NodeKind::MonoNode { inputs, .. }
+            | NodeKind::StereoNode { inputs, .. }
+            | NodeKind::Delay { inputs, .. }
+            | NodeKind::Pan { inputs, .. }
+            | NodeKind::Seq { inputs, .. }
+            | NodeKind::Env { inputs, .. }
+            | NodeKind::Pulse { inputs, .. } => {
                 add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
             }
-            NodeKind::StereoNode { inputs, .. } => {
-                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
-            }
-
-            NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
-            NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
-            NodeKind::Env { segments, trig, .. } => {
-                let mut inputs = Vec::new();
-                for (value, duration) in segments {
-                    inputs.push(value);
-                    inputs.push(duration);
-                }
-                inputs.push(trig);
-                add_node(inputs, expr, graph)
+            NodeKind::Pluck { inputs, .. } => {
+                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
             }
-            NodeKind::Seq { trig, values, .. } => {
-                let mut inputs = values.iter().collect::<Vec<_>>();
-                inputs.push(trig);
-                add_node(inputs, expr, graph)
-            }
-            NodeKind::Pan { input, value, .. } => add_node(vec![input, value], &expr, graph),
-            NodeKind::Pluck {
-                freq,
-                tone,
-                damping,
-                trig,
-                ..
-            } => add_node(vec![freq, tone, damping, trig], expr, graph),
-            NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Sampler { .. } => add_node(vec![], expr, graph),
         }
     }
