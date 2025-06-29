@@ -125,11 +125,10 @@ impl AudioGraph {
     fn nodes_are_type_compatible(&self, old_node: &NodeKind, new_node: &NodeKind) -> bool {
         use NodeKind::*;
         match (old_node, new_node) {
-            (Osc { .. }, Osc { .. }) => true,
+            (MonoNode { .. }, MonoNode { .. }) => true,
+            (StereoNode { .. }, StereoNode { .. }) => true,
             (Pulse { .. }, Pulse { .. }) => true,
             (Env { .. }, Env { .. }) => true,
-            (Moog { .. }, Moog { .. }) => true,
-            (SVF { .. }, SVF { .. }) => true,
             _ => false, // For now, only support oscillators, filters, and effects
         }
     }
@@ -141,7 +140,13 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
     fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
             NodeKind::Constant { .. } => add_node(vec![], expr, graph),
-            NodeKind::Osc { freq, .. } => add_node(vec![freq], expr, graph),
+            NodeKind::MonoNode { inputs, .. } => {
+                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
+            }
+            NodeKind::StereoNode { inputs, .. } => {
+                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
+            }
+
             NodeKind::Pulse { freq, .. } => add_node(vec![freq], expr, graph),
             NodeKind::Noise(_) => add_node(vec![], expr, graph),
             NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
@@ -155,18 +160,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 inputs.push(trig);
                 add_node(inputs, expr, graph)
             }
-            NodeKind::SVF {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => add_node(vec![input, cutoff, resonance], &expr, graph),
-            NodeKind::Moog {
-                input,
-                cutoff,
-                resonance,
-                ..
-            } => add_node(vec![input, cutoff, resonance], expr, graph),
             NodeKind::Seq { trig, values, .. } => {
                 let mut inputs = values.iter().collect::<Vec<_>>();
                 inputs.push(trig);
@@ -180,7 +173,6 @@ pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
                 trig,
                 ..
             } => add_node(vec![freq, tone, damping, trig], expr, graph),
-            NodeKind::Reverb { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Delay { input, .. } => add_node(vec![input], expr, graph),
             NodeKind::Sampler { .. } => add_node(vec![], expr, graph),
         }

@@ -152,8 +152,8 @@ fn create_env(koto: &Koto) {
         "sin",
         make_expr_node(|args| {
             use fundsp::hacker32::sine;
-            NodeKind::Osc {
-                freq: Box::new(args[0].clone()),
+            NodeKind::MonoNode {
+                inputs: vec![args[0].clone()],
                 node: Box::new(sine()),
             }
             .into()
@@ -163,8 +163,8 @@ fn create_env(koto: &Koto) {
         "sqr",
         make_expr_node(|args| {
             use fundsp::hacker32::square;
-            NodeKind::Osc {
-                freq: Box::new(args[0].clone()),
+            NodeKind::MonoNode {
+                inputs: vec![args[0].clone()],
                 node: Box::new(square()),
             }
             .into()
@@ -174,8 +174,8 @@ fn create_env(koto: &Koto) {
         "saw",
         make_expr_node(|args| {
             use fundsp::hacker32::saw;
-            NodeKind::Osc {
-                freq: Box::new(args[0].clone()),
+            NodeKind::MonoNode {
+                inputs: vec![args[0].clone()],
                 node: Box::new(saw()),
             }
             .into()
@@ -185,8 +185,8 @@ fn create_env(koto: &Koto) {
         "tri",
         make_expr_node(|args| {
             use fundsp::hacker32::triangle;
-            NodeKind::Osc {
-                freq: Box::new(args[0].clone()),
+            NodeKind::MonoNode {
+                inputs: vec![args[0].clone()],
                 node: Box::new(triangle()),
             }
             .into()
@@ -206,8 +206,8 @@ fn create_env(koto: &Koto) {
         "ramp",
         make_expr_node(|args| {
             use fundsp::hacker32::ramp;
-            NodeKind::Osc {
-                freq: Box::new(args[0].clone()),
+            NodeKind::MonoNode {
+                inputs: vec![args[0].clone()],
                 node: Box::new(ramp()),
             }
             .into()
@@ -249,10 +249,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::SVF {
-                input: Box::new(input),
-                cutoff: Box::new(cutoff),
-                resonance: Box::new(resonance),
+            NodeKind::MonoNode {
+                inputs: vec![input, cutoff, resonance],
                 node: Box::new(lowpass()),
             }
             .into(),
@@ -270,10 +268,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::SVF {
-                input: Box::new(input),
-                cutoff: Box::new(cutoff),
-                resonance: Box::new(resonance),
+            NodeKind::MonoNode {
+                inputs: vec![input, cutoff, resonance],
                 node: Box::new(bandpass()),
             }
             .into(),
@@ -291,10 +287,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::SVF {
-                input: Box::new(input),
-                cutoff: Box::new(cutoff),
-                resonance: Box::new(resonance),
+            NodeKind::MonoNode {
+                inputs: vec![input, cutoff, resonance],
                 node: Box::new(highpass()),
             }
             .into(),
@@ -365,8 +359,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(
-            NodeKind::Reverb {
-                input: Box::new(input),
+            NodeKind::StereoNode {
+                inputs: vec![input],
                 node: Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
             }
             .into(),
@@ -396,10 +390,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::Moog {
-                cutoff: Box::new(cutoff),
-                resonance: Box::new(resonance),
-                input: Box::new(input),
+            NodeKind::MonoNode {
+                inputs: vec![cutoff, resonance, input],
                 node: Box::new(moog()),
             }
             .into(),
