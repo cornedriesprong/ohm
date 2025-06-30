@@ -317,7 +317,7 @@ fn create_env(koto: &Koto) {
         for value in values.iter_mut() {
             inputs.push(value.clone());
         }
-        values.push(trig.clone());
+        inputs.push(trig.clone());
 
         Ok(KValue::Object(
             NodeKind::Node {
