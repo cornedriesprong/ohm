@@ -372,7 +372,6 @@ fn create_env(koto: &Koto) {
         Ok(KValue::Object(
             NodeKind::Node {
                 inputs: vec![input],
-                node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))))),
             }
             .into(),
         ))
