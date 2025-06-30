@@ -250,13 +250,20 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("lp", move |ctx| {
         use fundsp::hacker32::lowpass;
         let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
-        }
 
-        let cutoff = node_from_kvalue(&args[0])?;
-        let resonance = node_from_kvalue(&args[1])?;
-        let input = node_from_kvalue(&args[2])?;
+        let (cutoff, resonance, input) = match args {
+            [cutoff_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                NodeKind::Constant(0.717),
+                node_from_kvalue(input_val)?,
+            ),
+            [cutoff_val, resonance_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                node_from_kvalue(resonance_val)?,
+                node_from_kvalue(input_val)?,
+            ),
+            _ => return unexpected_args("invalid arguments: ", args),
+        };
 
         Ok(KValue::Object(
             NodeKind::Node {
@@ -269,13 +276,20 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("bp", move |ctx| {
         use fundsp::hacker32::bandpass;
         let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
-        }
 
-        let cutoff = node_from_kvalue(&args[0])?;
-        let resonance = node_from_kvalue(&args[1])?;
-        let input = node_from_kvalue(&args[2])?;
+        let (cutoff, resonance, input) = match args {
+            [cutoff_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                NodeKind::Constant(0.717),
+                node_from_kvalue(input_val)?,
+            ),
+            [cutoff_val, resonance_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                node_from_kvalue(resonance_val)?,
+                node_from_kvalue(input_val)?,
+            ),
+            _ => return unexpected_args("invalid arguments: ", args),
+        };
 
         Ok(KValue::Object(
             NodeKind::Node {
@@ -288,13 +302,20 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("hp", move |ctx| {
         use fundsp::hacker32::highpass;
         let args = ctx.args();
-        if args.len() != 3 {
-            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
-        }
 
-        let cutoff = node_from_kvalue(&args[0])?;
-        let resonance = node_from_kvalue(&args[1])?;
-        let input = node_from_kvalue(&args[2])?;
+        let (cutoff, resonance, input) = match args {
+            [cutoff_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                NodeKind::Constant(0.717),
+                node_from_kvalue(input_val)?,
+            ),
+            [cutoff_val, resonance_val, input_val] => (
+                node_from_kvalue(cutoff_val)?,
+                node_from_kvalue(resonance_val)?,
+                node_from_kvalue(input_val)?,
+            ),
+            _ => return unexpected_args("invalid arguments: ", args),
+        };
 
         Ok(KValue::Object(
             NodeKind::Node {
@@ -372,6 +393,13 @@ fn create_env(koto: &Koto) {
         Ok(KValue::Object(
             NodeKind::Node {
                 inputs: vec![input],
+                node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
+                    10.0,
+                    2.0,
+                    0.9,
+                    1.0,
+                    lowpole_hz(18000.0),
+                )))),
             }
             .into(),
         ))
