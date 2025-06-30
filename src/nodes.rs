@@ -404,8 +404,8 @@ impl Node for SeqNode {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let trig = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
+
         if (*trig)[0] < self.prev {
-            println!("seq: trig {}", trig[0]);
             self.increment(values);
         }
 
