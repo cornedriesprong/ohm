@@ -148,19 +148,20 @@ where
 fn create_env(koto: &Koto) {
     use fundsp::hacker32::*;
 
-    add_osc(koto, "sin", || Box::new(sine()));
-    add_osc(koto, "sqr", || Box::new(square()));
-    add_osc(koto, "saw", || Box::new(saw()));
-    add_osc(koto, "tri", || Box::new(triangle()));
-    add_osc(koto, "ramp", || Box::new(ramp()));
+    add_osc(koto, "sin".to_string(), || Box::new(sine()));
+    add_osc(koto, "sqr".to_string(), || Box::new(square()));
+    add_osc(koto, "saw".to_string(), || Box::new(saw()));
+    add_osc(koto, "tri".to_string(), || Box::new(triangle()));
+    add_osc(koto, "ramp".to_string(), || Box::new(ramp()));
 
-    add_filter(koto, "lp", || Box::new(lowpass()));
-    add_filter(koto, "bp", || Box::new(bandpass()));
-    add_filter(koto, "hp", || Box::new(highpass()));
+    add_filter(koto, "lp".to_string(), || Box::new(lowpass()));
+    add_filter(koto, "bp".to_string(), || Box::new(bandpass()));
+    add_filter(koto, "hp".to_string(), || Box::new(highpass()));
 
     koto.prelude().add_fn(
         "pulse",
         make_expr_node(|args| NodeKind::Node {
+            name: "pulse".to_string(),
             inputs: vec![args[0].clone()],
             node: Box::new(PulseNode::new()),
         }),
@@ -169,6 +170,7 @@ fn create_env(koto: &Koto) {
         "noise",
         make_expr_node(|_| {
             NodeKind::Node {
+                name: "noise".to_string(),
                 inputs: vec![],
                 node: Box::new(FunDSPNode::mono(Box::new(noise()))),
             }
@@ -192,6 +194,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "env".to_string(),
                 inputs,
                 node: Box::new(EnvNode::new()),
             }
@@ -215,6 +218,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "seq".to_string(),
                 inputs,
                 node: Box::new(SeqNode::new()),
             }
@@ -232,6 +236,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "pan".to_string(),
                 inputs: vec![input, value],
                 node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
             }
@@ -251,6 +256,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "pluck".to_string(),
                 inputs: vec![freq, tone, damping, trig],
                 node: Box::new(PluckNode::new()),
             }
@@ -263,6 +269,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "reverb".to_string(),
                 inputs: vec![input],
                 node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
                     10.0,
@@ -281,6 +288,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "delay".to_string(),
                 inputs: vec![input],
                 node: Box::new(DelayNode::new()),
             }
@@ -299,6 +307,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "moog".to_string(),
                 inputs: vec![cutoff, resonance, input],
                 node: Box::new(FunDSPNode::mono(Box::new(moog()))),
             }
@@ -317,6 +326,7 @@ fn create_env(koto: &Koto) {
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: "wav".to_string(),
                 inputs: vec![],
                 node: Box::new(FunDSPNode::mono(Box::new(wavech(&file, 0, Some(0))))),
             }
@@ -335,24 +345,25 @@ where
     }
 }
 
-fn add_osc<F>(koto: &Koto, name: &str, osc_fn: F)
+fn add_osc<F>(koto: &Koto, name: String, osc_fn: F)
 where
     F: Fn() -> Box<dyn fundsp::hacker32::AudioUnit> + 'static,
 {
     koto.prelude().add_fn(
-        name,
+        name.clone().as_str(),
         make_expr_node(move |args| NodeKind::Node {
+            name: name.clone(),
             inputs: vec![args[0].clone()],
             node: Box::new(FunDSPNode::mono(osc_fn())),
         }),
     );
 }
 
-fn add_filter<F>(koto: &Koto, name: &str, filter_fn: F)
+fn add_filter<F>(koto: &Koto, name: String, filter_fn: F)
 where
     F: Fn() -> Box<dyn fundsp::hacker32::AudioUnit> + 'static,
 {
-    koto.prelude().add_fn(name, move |ctx| {
+    koto.prelude().add_fn(name.clone().as_str(), move |ctx| {
         let args = ctx.args();
 
         let (cutoff, resonance, input) = match args {
@@ -371,6 +382,7 @@ where
 
         Ok(KValue::Object(
             NodeKind::Node {
+                name: name.clone(),
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(FunDSPNode::mono(filter_fn())),
             }

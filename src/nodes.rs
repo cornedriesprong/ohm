@@ -19,6 +19,7 @@ pub enum NodeKind {
     Mix(Box<NodeKind>, Box<NodeKind>),
     Gain(Box<NodeKind>, Box<NodeKind>),
     Node {
+        name: String,
         inputs: Vec<NodeKind>,
         node: Box<dyn Node>,
     },
@@ -157,18 +158,6 @@ impl Node for NodeKind {
     }
 }
 
-impl PartialEq for NodeKind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Node { .. }, Self::Node { .. }) => true,
-            (Self::Gain { .. }, Self::Gain { .. }) => true,
-            (Self::Mix { .. }, Self::Mix { .. }) => true,
-            (Self::Constant(lhs), Self::Constant(rhs)) => lhs == rhs,
-            _ => false,
-        }
-    }
-}
-
 impl NodeKind {
     pub(crate) fn compute_hash(&self) -> u64 {
         let mut hasher = SeaHasher::new();
@@ -182,11 +171,8 @@ impl NodeKind {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            NodeKind::Node { inputs, .. } => {
-                13u8.hash(hasher);
-                for val in inputs {
-                    val.hash_structure(hasher);
-                }
+            NodeKind::Node { name, .. } => {
+                name.hash(hasher);
             }
             NodeKind::Mix(lhs, rhs) => {
                 6u8.hash(hasher);

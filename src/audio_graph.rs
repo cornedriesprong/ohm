@@ -60,43 +60,18 @@ impl AudioGraph {
     }
 
     pub(crate) fn apply_diff(&mut self, mut new_graph: AudioGraph) {
-        // Build hash map of old nodes by their structure hash
         let mut old_nodes: HashMap<u64, NodeIndex> = HashMap::new();
         for &node_idx in &self.sorted_nodes {
             let hash = self.graph[node_idx].compute_hash();
             old_nodes.insert(hash, node_idx);
         }
 
-        // Track which old nodes have been used for state transfer
-        let mut used_old_nodes = HashSet::new();
-
-        // First pass: Transfer state from nodes with exact hash matches
         for &new_node_idx in &new_graph.sorted_nodes {
             let new_hash = new_graph.graph[new_node_idx].compute_hash();
             if let Some(&old_node_idx) = old_nodes.get(&new_hash) {
-                // Found an exact matching node - transfer state
                 let old_node = &self.graph[old_node_idx];
                 let new_node = &mut new_graph.graph[new_node_idx];
                 new_node.transfer_state_from(old_node);
-                used_old_nodes.insert(old_node_idx);
-            }
-        }
-
-        // Second pass: For unmatched new nodes, try to find compatible old nodes by type
-        for &new_node_idx in &new_graph.sorted_nodes {
-            let new_hash = new_graph.graph[new_node_idx].compute_hash();
-            if old_nodes.get(&new_hash).is_some() {
-                continue; // Already handled in first pass
-            }
-
-            // Look for an unused old node of the same type
-            if let Some(compatible_old_idx) =
-                self.find_compatible_unused_node(&new_graph.graph[new_node_idx], &used_old_nodes)
-            {
-                let old_node = &self.graph[compatible_old_idx];
-                let new_node = &mut new_graph.graph[new_node_idx];
-                new_node.transfer_state_from(old_node);
-                used_old_nodes.insert(compatible_old_idx);
             }
         }
 
