@@ -381,6 +381,7 @@ where
     koto.prelude().add_fn(name.clone().as_str(), move |ctx| {
         let args = ctx.args();
 
+        // resonance is optional, default to 0.717
         let (cutoff, resonance, input) = match args {
             [cutoff_val, input_val] => (
                 node_from_kvalue(cutoff_val)?,

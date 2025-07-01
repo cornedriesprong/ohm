@@ -50,90 +50,96 @@ pub enum Op {
     },
 }
 
-impl KotoObject for Op {
-    // TODO: test these
-    fn add(&self, rhs: &KValue) -> Result<KValue> {
+enum BinaryOp {
+    Add,
+    Multiply,
+    Subtract,
+    Divide,
+}
+
+impl Op {
+    fn binary_op(&self, rhs: &KValue, op: BinaryOp) -> Result<KValue> {
         match (self, rhs) {
             (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(Op::Constant(lhs + f32::from(rhs)).into()))
+                let result = match op {
+                    BinaryOp::Add => lhs + f32::from(rhs),
+                    BinaryOp::Multiply => lhs * f32::from(rhs),
+                    BinaryOp::Subtract => lhs - f32::from(rhs),
+                    BinaryOp::Divide => lhs / f32::from(rhs),
+                };
+                Ok(KValue::Object(Op::Constant(result).into()))
             }
-            (_, KValue::Number(num)) => Ok(KValue::Object(
-                Op::Mix(Box::new(self.clone()), Box::new(Op::Constant((num).into()))).into(),
-            )),
-            (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Op::Mix(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Op>()?.clone()).into(),
-                )
-                .into(),
-            )),
-            _ => panic!("invalid add operation"),
+            (_, KValue::Number(num)) => {
+                let rhs_val = match op {
+                    BinaryOp::Subtract => Op::Constant((-num).into()),
+                    BinaryOp::Divide => Op::Constant(1.0 / f32::from(num)),
+                    _ => Op::Constant(num.into()),
+                };
+                let op_variant = match op {
+                    BinaryOp::Add | BinaryOp::Subtract => {
+                        Op::Mix(Box::new(self.clone()), Box::new(rhs_val))
+                    }
+                    BinaryOp::Multiply | BinaryOp::Divide => {
+                        Op::Gain(Box::new(self.clone()), Box::new(rhs_val))
+                    }
+                };
+                Ok(KValue::Object(op_variant.into()))
+            }
+            (_, KValue::Object(obj)) => {
+                let op_variant = match op {
+                    BinaryOp::Add | BinaryOp::Subtract => {
+                        Op::Mix(Box::new(self.clone()), Box::new(obj.cast::<Op>()?.clone()))
+                    }
+                    BinaryOp::Multiply | BinaryOp::Divide => {
+                        Op::Gain(Box::new(self.clone()), Box::new(obj.cast::<Op>()?.clone()))
+                    }
+                };
+                Ok(KValue::Object(op_variant.into()))
+            }
+            _ => {
+                let op_name = match op {
+                    BinaryOp::Add => "add",
+                    BinaryOp::Multiply => "multiply",
+                    BinaryOp::Subtract => "subtract",
+                    BinaryOp::Divide => "divide",
+                };
+                panic!("invalid {} operation", op_name)
+            }
         }
+    }
+}
+
+impl KotoObject for Op {
+    fn add(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Add)
+    }
+
+    fn add_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Add)
     }
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
-        match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(Op::Constant(lhs * f32::from(rhs)).into()))
-            }
-            (_, KValue::Number(num)) => Ok(KValue::Object(
-                Op::Gain(Box::new(self.clone()), Box::new(Op::Constant(num.into()))).into(),
-            )),
-            (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Op::Gain(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Op>()?.clone()).into(),
-                )
-                .into(),
-            )),
-            _ => panic!("invalid multiply operation"),
-        }
+        self.binary_op(rhs, BinaryOp::Multiply)
+    }
+
+    fn multiply_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Multiply)
     }
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
-        match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(Op::Constant(lhs - f32::from(-rhs)).into()))
-            }
-            (_, KValue::Number(num)) => Ok(KValue::Object(
-                Op::Mix(
-                    Box::new(self.clone()),
-                    Box::new(Op::Constant((-num).into())),
-                )
-                .into(),
-            )),
-            (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Op::Mix(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Op>()?.clone()).into(),
-                )
-                .into(),
-            )),
-            _ => panic!("invalid subtract operation"),
-        }
+        self.binary_op(rhs, BinaryOp::Subtract)
+    }
+
+    fn subtract_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Subtract)
     }
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
-        match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => {
-                Ok(KValue::Object(Op::Constant(lhs / f32::from(rhs)).into()))
-            }
-            (_, KValue::Number(num)) => Ok(KValue::Object(
-                Op::Gain(
-                    Box::new(self.clone()),
-                    Box::new(Op::Constant(1.0 / f32::from(num))),
-                )
-                .into(),
-            )),
-            (_, KValue::Object(obj)) => Ok(KValue::Object(
-                Op::Gain(
-                    Box::new(self.clone()),
-                    Box::new(obj.cast::<Op>()?.clone()).into(),
-                )
-                .into(),
-            )),
-            _ => panic!("invalid divide operation"),
-        }
+        self.binary_op(rhs, BinaryOp::Divide)
+    }
+
+    fn divide_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Divide)
     }
 
     fn remainder(&self, other: &KValue) -> Result<KValue> {
