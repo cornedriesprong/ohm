@@ -1,4 +1,9 @@
 from pitches import A3, A4
 
-# saw C3
-saw(A3, A4)
+hz = seq [100, 300, 500], ramp 1
+
+rev = |mix, x| 
+  mix = mix or 0.5
+  (x * (1 - mix)) + ((x -> reverb) * mix)
+
+saw hz -> lp 1000 -> rev 0.2
