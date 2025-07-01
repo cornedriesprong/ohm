@@ -71,7 +71,11 @@ impl AudioGraph {
             if let Some(&old_node_idx) = old_nodes.get(&new_hash) {
                 let old_node = &self.graph[old_node_idx];
                 let new_node = &mut new_graph.graph[new_node_idx];
-                new_node.transfer_state_from(old_node);
+
+                if let (Op::Node { node: new, .. }, Op::Node { node: old, .. }) = 
+                    (&mut **new_node, &**old_node) {
+                    *new = old.clone();
+                }
             }
         }
 

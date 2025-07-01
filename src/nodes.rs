@@ -202,15 +202,6 @@ impl Op {
             }
         }
     }
-
-    pub(crate) fn transfer_state_from(&mut self, other: &Op) {
-        match (self, other) {
-            (Op::Node { node: new, .. }, Op::Node { node: old, .. }) => {
-                *new = old.clone();
-            }
-            _ => {}
-        }
-    }
 }
 
 pub(crate) trait Node: Send + Sync {
