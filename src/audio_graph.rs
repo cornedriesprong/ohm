@@ -78,31 +78,6 @@ impl AudioGraph {
         // Replace current graph with the state-transferred new graph
         *self = new_graph;
     }
-
-    fn find_compatible_unused_node(
-        &self,
-        new_node: &Op,
-        used_nodes: &HashSet<NodeIndex>,
-    ) -> Option<NodeIndex> {
-        for &old_node_idx in &self.sorted_nodes {
-            if used_nodes.contains(&old_node_idx) {
-                continue; // Already used
-            }
-
-            let old_node = &self.graph[old_node_idx];
-            if self.nodes_are_type_compatible(old_node, new_node) {
-                return Some(old_node_idx);
-            }
-        }
-        None
-    }
-
-    fn nodes_are_type_compatible(&self, old_node: &Op, new_node: &Op) -> bool {
-        match (old_node, new_node) {
-            (Op::Node { .. }, Op::Node { .. }) => true,
-            _ => false, // For now, only support oscillators, filters, and effects
-        }
-    }
 }
 
 pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
