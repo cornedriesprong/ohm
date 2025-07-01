@@ -194,25 +194,25 @@ impl Node for Op {
             Op::Node { kind, node, .. } => match kind {
                 NodeKind::Print => {
                     println!("{:?}", inputs);
-                    [0.0, 0.0]
+                    inputs[0]
                 }
                 _ => node.tick(inputs),
             },
             Op::Gain { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 * l1, r0 * r1],
-                _ => [0.0, 0.0],
+                _ => inputs[0],
             },
             Op::Mix { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 + l1, r0 + r1],
-                _ => [0.0, 0.0],
+                _ => inputs[0],
             },
             Op::Wrap { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 % l1, r0 % r1],
-                _ => [0.0, 0.0],
+                _ => inputs[0],
             },
             Op::Negate { .. } => match inputs {
                 [[l, r]] => [-l, -r],
-                _ => [0.0, 0.0],
+                _ => inputs[0],
             },
         }
     }
