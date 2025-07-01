@@ -200,19 +200,19 @@ impl Node for Op {
             },
             Op::Gain { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 * l1, r0 * r1],
-                _ => panic!("Gain expects two stereo input pairs"),
+                _ => [0.0, 0.0],
             },
             Op::Mix { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 + l1, r0 + r1],
-                _ => panic!("Mix expects two stereo input pairs"),
+                _ => [0.0, 0.0],
             },
             Op::Wrap { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 % l1, r0 % r1],
-                _ => panic!("Wrap expects two stereo input pairs"),
+                _ => [0.0, 0.0],
             },
             Op::Negate { .. } => match inputs {
                 [[l, r]] => [-l, -r],
-                _ => panic!("Negate expects one stereo input pair"),
+                _ => [0.0, 0.0],
             },
         }
     }
