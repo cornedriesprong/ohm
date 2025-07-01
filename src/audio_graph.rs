@@ -1,6 +1,6 @@
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::nodes::{Frame, Node, Op};
 
@@ -72,8 +72,9 @@ impl AudioGraph {
                 let old_node = &self.graph[old_node_idx];
                 let new_node = &mut new_graph.graph[new_node_idx];
 
-                if let (Op::Node { node: new, .. }, Op::Node { node: old, .. }) = 
-                    (&mut **new_node, &**old_node) {
+                if let (Op::Node { node: new, .. }, Op::Node { node: old, .. }) =
+                    (&mut **new_node, &**old_node)
+                {
                     *new = old.clone();
                 }
             }
@@ -93,6 +94,8 @@ pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
             Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
             Op::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             Op::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            Op::Wrap(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            Op::Negate(val) => add_node(vec![val], expr, graph),
         }
     }
 

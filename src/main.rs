@@ -159,6 +159,14 @@ fn create_env(koto: &Koto) {
     add_filter(koto, "hp".to_string(), || Box::new(highpass()));
 
     koto.prelude().add_fn(
+        "print",
+        make_expr_node(|args| Op::Node {
+            kind: NodeKind::Print,
+            inputs: vec![args[0].clone()],
+            node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+        }),
+    );
+    koto.prelude().add_fn(
         "pulse",
         make_expr_node(|args| Op::Node {
             kind: NodeKind::Pulse,

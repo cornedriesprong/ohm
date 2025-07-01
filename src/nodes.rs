@@ -24,6 +24,7 @@ pub enum NodeKind {
     Bp,
     Hp,
     Pulse,
+    Print,
     Noise,
     Env,
     Seq,
@@ -40,6 +41,8 @@ pub enum Op {
     Constant(f32),
     Mix(Box<Op>, Box<Op>),
     Gain(Box<Op>, Box<Op>),
+    Wrap(Box<Op>, Box<Op>),
+    Negate(Box<Op>),
     Node {
         kind: NodeKind,
         inputs: Vec<Op>,
@@ -132,6 +135,36 @@ impl KotoObject for Op {
             _ => panic!("invalid divide operation"),
         }
     }
+
+    fn remainder(&self, other: &KValue) -> Result<KValue> {
+        match (self, other) {
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(Op::Constant(lhs % f32::from(rhs)).into()))
+            }
+            (_, KValue::Number(num)) => Ok(KValue::Object(
+                Op::Wrap(
+                    Box::new(self.clone()),
+                    Box::new(Op::Constant(1.0 / f32::from(num))),
+                )
+                .into(),
+            )),
+            (_, KValue::Object(obj)) => Ok(KValue::Object(
+                Op::Wrap(
+                    Box::new(self.clone()),
+                    Box::new(obj.cast::<Op>()?.clone()).into(),
+                )
+                .into(),
+            )),
+            _ => panic!("invalid remainder operation"),
+        }
+    }
+
+    fn negate(&self) -> Result<KValue> {
+        match self {
+            Self::Constant(val) => Ok(KValue::Number((-val).into())),
+            _ => Ok(KValue::Object(Op::Negate(Box::new(self.clone())).into())),
+        }
+    }
 }
 
 // necessary to satisfy KotoEntries trait
@@ -152,22 +185,29 @@ impl Node for Op {
         match self {
             Op::Constant(val) => [*val; 2],
 
-            Op::Node { node, .. } => node.tick(inputs),
-
-            Op::Gain { .. } => {
-                if let [[l0, r0], [l1, r1]] = inputs {
-                    [l0 * l1, r0 * r1]
-                } else {
-                    panic!("Wrong input format");
+            Op::Node { kind, node, .. } => match kind {
+                NodeKind::Print => {
+                    println!("{:?}", inputs);
+                    [0.0, 0.0]
                 }
-            }
-            Op::Mix { .. } => {
-                if let [[l0, r0], [l1, r1]] = inputs {
-                    [l0 + l1, r0 + r1]
-                } else {
-                    panic!("Wrong input format");
-                }
-            }
+                _ => node.tick(inputs),
+            },
+            Op::Gain { .. } => match inputs {
+                [[l0, r0], [l1, r1]] => [l0 * l1, r0 * r1],
+                _ => panic!("Gain expects two stereo input pairs"),
+            },
+            Op::Mix { .. } => match inputs {
+                [[l0, r0], [l1, r1]] => [l0 + l1, r0 + r1],
+                _ => panic!("Mix expects two stereo input pairs"),
+            },
+            Op::Wrap { .. } => match inputs {
+                [[l0, r0], [l1, r1]] => [l0 % l1, r0 % r1],
+                _ => panic!("Wrap expects two stereo input pairs"),
+            },
+            Op::Negate { .. } => match inputs {
+                [[l, r]] => [-l, -r],
+                _ => panic!("Negate expects one stereo input pair"),
+            },
         }
     }
 }
@@ -191,14 +231,23 @@ impl Op {
                 node_type.hash(hasher);
             }
             Op::Mix(lhs, rhs) => {
-                6u8.hash(hasher);
+                1u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
             Op::Gain(lhs, rhs) => {
-                7u8.hash(hasher);
+                2u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
+            }
+            Op::Wrap(lhs, rhs) => {
+                3u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Negate(val) => {
+                4u8.hash(hasher);
+                val.hash_structure(hasher);
             }
         }
     }
@@ -371,19 +420,11 @@ impl Node for EnvNode {
 #[derive(Clone)]
 pub struct SeqNode {
     pub(crate) step: usize,
-    pub(crate) prev: f32,
 }
 
 impl SeqNode {
     pub(crate) fn new() -> Self {
-        Self { step: 0, prev: 0.0 }
-    }
-
-    fn increment(&mut self, values: &[Frame]) {
-        self.step += 1;
-        if self.step >= values.len() {
-            self.step = 0;
-        }
+        Self { step: 0 }
     }
 }
 
@@ -395,14 +436,11 @@ impl Node for SeqNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let trig = inputs.last().expect("seq: missing trigger input");
+        let ramp = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
 
-        if (*trig)[0] < self.prev {
-            self.increment(values);
-        }
-
-        self.prev = trig[0];
+        let segment = 1.0 / values.len() as f32;
+        self.step = (ramp[0] / segment).floor() as usize;
 
         values[self.step]
     }
