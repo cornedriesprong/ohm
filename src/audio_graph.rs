@@ -2,9 +2,9 @@ use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::{HashMap, HashSet};
 
-use crate::nodes::{Frame, Node, NodeKind};
+use crate::nodes::{Frame, Node, Op};
 
-type Graph = StableDiGraph<Box<NodeKind>, ()>;
+type Graph = StableDiGraph<Box<Op>, ()>;
 
 #[derive(Clone)]
 pub(crate) struct AudioGraph {
@@ -24,7 +24,7 @@ impl AudioGraph {
         }
     }
 
-    pub(crate) fn add_node(&mut self, node: NodeKind) -> NodeIndex {
+    pub(crate) fn add_node(&mut self, node: Op) -> NodeIndex {
         let index = self.graph.add_node(Box::new(node));
         self.update_processing_order();
         index
@@ -81,7 +81,7 @@ impl AudioGraph {
 
     fn find_compatible_unused_node(
         &self,
-        new_node: &NodeKind,
+        new_node: &Op,
         used_nodes: &HashSet<NodeIndex>,
     ) -> Option<NodeIndex> {
         for &old_node_idx in &self.sorted_nodes {
@@ -97,29 +97,27 @@ impl AudioGraph {
         None
     }
 
-    fn nodes_are_type_compatible(&self, old_node: &NodeKind, new_node: &NodeKind) -> bool {
+    fn nodes_are_type_compatible(&self, old_node: &Op, new_node: &Op) -> bool {
         match (old_node, new_node) {
-            (NodeKind::Node { .. }, NodeKind::Node { .. }) => true,
+            (Op::Node { .. }, Op::Node { .. }) => true,
             _ => false, // For now, only support oscillators, filters, and effects
         }
     }
 }
 
-pub(crate) fn parse_to_audio_graph(expr: NodeKind) -> AudioGraph {
+pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
     let mut graph = AudioGraph::new();
 
-    fn add_expr_to_graph(expr: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_expr_to_graph(expr: &Op, graph: &mut AudioGraph) -> NodeIndex {
         match expr {
-            NodeKind::Constant { .. } => add_node(vec![], expr, graph),
-            NodeKind::Node { inputs, .. } => {
-                add_node(inputs.iter().collect::<Vec<_>>(), expr, graph)
-            }
-            NodeKind::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
-            NodeKind::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            Op::Constant { .. } => add_node(vec![], expr, graph),
+            Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
+            Op::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            Op::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
         }
     }
 
-    fn add_node(inputs: Vec<&NodeKind>, kind: &NodeKind, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_node(inputs: Vec<&Op>, kind: &Op, graph: &mut AudioGraph) -> NodeIndex {
         let mut input_indices: Vec<_> = inputs
             .into_iter()
             .map(|input| add_expr_to_graph(&*input, graph))

@@ -13,36 +13,54 @@ use std::hash::{Hash, Hasher};
 
 pub type Frame = [f32; 2];
 
-#[derive(Clone, KotoType, KotoCopy)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NodeKind {
+    Sin,
+    Sqr,
+    Saw,
+    Tri,
+    Ramp,
+    Lp,
+    Bp,
+    Hp,
+    Pulse,
+    Noise,
+    Env,
+    Seq,
+    Pan,
+    Pluck,
+    Reverb,
+    Delay,
+    Moog,
+    Wav,
+}
+
+#[derive(Clone, KotoType, KotoCopy)]
+pub enum Op {
     Constant(f32),
-    Mix(Box<NodeKind>, Box<NodeKind>),
-    Gain(Box<NodeKind>, Box<NodeKind>),
+    Mix(Box<Op>, Box<Op>),
+    Gain(Box<Op>, Box<Op>),
     Node {
-        name: String,
-        inputs: Vec<NodeKind>,
+        kind: NodeKind,
+        inputs: Vec<Op>,
         node: Box<dyn Node>,
     },
 }
 
-impl KotoObject for NodeKind {
+impl KotoObject for Op {
     // TODO: test these
     fn add(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
-                NodeKind::Constant(lhs + f32::from(rhs)).into(),
-            )),
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(Op::Constant(lhs + f32::from(rhs)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Mix(
-                    Box::new(self.clone()),
-                    Box::new(NodeKind::Constant((num).into())),
-                )
-                .into(),
+                Op::Mix(Box::new(self.clone()), Box::new(Op::Constant((num).into()))).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Mix(
+                Op::Mix(
                     Box::new(self.clone()),
-                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                    Box::new(obj.cast::<Op>()?.clone()).into(),
                 )
                 .into(),
             )),
@@ -52,20 +70,16 @@ impl KotoObject for NodeKind {
 
     fn multiply(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
-                NodeKind::Constant(lhs * f32::from(rhs)).into(),
-            )),
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(Op::Constant(lhs * f32::from(rhs)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Gain(
-                    Box::new(self.clone()),
-                    Box::new(NodeKind::Constant(num.into())),
-                )
-                .into(),
+                Op::Gain(Box::new(self.clone()), Box::new(Op::Constant(num.into()))).into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Gain(
+                Op::Gain(
                     Box::new(self.clone()),
-                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                    Box::new(obj.cast::<Op>()?.clone()).into(),
                 )
                 .into(),
             )),
@@ -75,20 +89,20 @@ impl KotoObject for NodeKind {
 
     fn subtract(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
-                NodeKind::Constant(lhs - f32::from(-rhs)).into(),
-            )),
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(Op::Constant(lhs - f32::from(-rhs)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Mix(
+                Op::Mix(
                     Box::new(self.clone()),
-                    Box::new(NodeKind::Constant((-num).into())),
+                    Box::new(Op::Constant((-num).into())),
                 )
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Mix(
+                Op::Mix(
                     Box::new(self.clone()),
-                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                    Box::new(obj.cast::<Op>()?.clone()).into(),
                 )
                 .into(),
             )),
@@ -98,20 +112,20 @@ impl KotoObject for NodeKind {
 
     fn divide(&self, rhs: &KValue) -> Result<KValue> {
         match (self, rhs) {
-            (Self::Constant(lhs), KValue::Number(rhs)) => Ok(KValue::Object(
-                NodeKind::Constant(lhs / f32::from(rhs)).into(),
-            )),
+            (Self::Constant(lhs), KValue::Number(rhs)) => {
+                Ok(KValue::Object(Op::Constant(lhs / f32::from(rhs)).into()))
+            }
             (_, KValue::Number(num)) => Ok(KValue::Object(
-                NodeKind::Gain(
+                Op::Gain(
                     Box::new(self.clone()),
-                    Box::new(NodeKind::Constant(1.0 / f32::from(num))),
+                    Box::new(Op::Constant(1.0 / f32::from(num))),
                 )
                 .into(),
             )),
             (_, KValue::Object(obj)) => Ok(KValue::Object(
-                NodeKind::Gain(
+                Op::Gain(
                     Box::new(self.clone()),
-                    Box::new(obj.cast::<NodeKind>()?.clone()).into(),
+                    Box::new(obj.cast::<Op>()?.clone()).into(),
                 )
                 .into(),
             )),
@@ -121,13 +135,13 @@ impl KotoObject for NodeKind {
 }
 
 // necessary to satisfy KotoEntries trait
-impl KotoEntries for NodeKind {
+impl KotoEntries for Op {
     fn entries(&self) -> Option<KMap> {
         None
     }
 }
 
-impl Node for NodeKind {
+impl Node for Op {
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
     }
@@ -136,18 +150,18 @@ impl Node for NodeKind {
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
-            NodeKind::Constant(val) => [*val; 2],
+            Op::Constant(val) => [*val; 2],
 
-            NodeKind::Node { node, .. } => node.tick(inputs),
+            Op::Node { node, .. } => node.tick(inputs),
 
-            NodeKind::Gain { .. } => {
+            Op::Gain { .. } => {
                 if let [[l0, r0], [l1, r1]] = inputs {
                     [l0 * l1, r0 * r1]
                 } else {
                     panic!("Wrong input format");
                 }
             }
-            NodeKind::Mix { .. } => {
+            Op::Mix { .. } => {
                 if let [[l0, r0], [l1, r1]] = inputs {
                     [l0 + l1, r0 + r1]
                 } else {
@@ -158,7 +172,7 @@ impl Node for NodeKind {
     }
 }
 
-impl NodeKind {
+impl Op {
     pub(crate) fn compute_hash(&self) -> u64 {
         let mut hasher = SeaHasher::new();
         self.hash_structure(&mut hasher);
@@ -167,19 +181,21 @@ impl NodeKind {
 
     fn hash_structure(&self, hasher: &mut SeaHasher) {
         match self {
-            NodeKind::Constant(val) => {
+            Op::Constant(val) => {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            NodeKind::Node { name, .. } => {
-                name.hash(hasher);
+            Op::Node {
+                kind: node_type, ..
+            } => {
+                node_type.hash(hasher);
             }
-            NodeKind::Mix(lhs, rhs) => {
+            Op::Mix(lhs, rhs) => {
                 6u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            NodeKind::Gain(lhs, rhs) => {
+            Op::Gain(lhs, rhs) => {
                 7u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
@@ -187,9 +203,9 @@ impl NodeKind {
         }
     }
 
-    pub(crate) fn transfer_state_from(&mut self, other: &NodeKind) {
+    pub(crate) fn transfer_state_from(&mut self, other: &Op) {
         match (self, other) {
-            (NodeKind::Node { node: new, .. }, NodeKind::Node { node: old, .. }) => {
+            (Op::Node { node: new, .. }, Op::Node { node: old, .. }) => {
                 *new = old.clone();
             }
             _ => {}

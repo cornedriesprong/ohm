@@ -1,4 +1,4 @@
-use crate::nodes::{DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode, SeqNode};
+use crate::nodes::{DelayNode, EnvNode, FunDSPNode, NodeKind, Op, PluckNode, PulseNode, SeqNode};
 use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -76,7 +76,7 @@ where
     let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         match koto.compile_and_run(&src)? {
-            KValue::Object(obj) if obj.is_a::<NodeKind>() => match obj.cast::<NodeKind>() {
+            KValue::Object(obj) if obj.is_a::<Op>() => match obj.cast::<Op>() {
                 Ok(expr) => {
                     let new_graph = parse_to_audio_graph(expr.to_owned());
                     let mut guard = graph.lock().unwrap();
@@ -160,8 +160,8 @@ fn create_env(koto: &Koto) {
 
     koto.prelude().add_fn(
         "pulse",
-        make_expr_node(|args| NodeKind::Node {
-            name: "pulse".to_string(),
+        make_expr_node(|args| Op::Node {
+            kind: NodeKind::Pulse,
             inputs: vec![args[0].clone()],
             node: Box::new(PulseNode::new()),
         }),
@@ -169,8 +169,8 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn(
         "noise",
         make_expr_node(|_| {
-            NodeKind::Node {
-                name: "noise".to_string(),
+            Op::Node {
+                kind: NodeKind::Noise,
                 inputs: vec![],
                 node: Box::new(FunDSPNode::mono(Box::new(noise()))),
             }
@@ -193,8 +193,8 @@ fn create_env(koto: &Koto) {
         inputs.push(trig);
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "env".to_string(),
+            Op::Node {
+                kind: NodeKind::Env,
                 inputs,
                 node: Box::new(EnvNode::new()),
             }
@@ -217,8 +217,8 @@ fn create_env(koto: &Koto) {
         inputs.push(trig.clone());
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "seq".to_string(),
+            Op::Node {
+                kind: NodeKind::Seq,
                 inputs,
                 node: Box::new(SeqNode::new()),
             }
@@ -235,8 +235,8 @@ fn create_env(koto: &Koto) {
         let value = node_from_kvalue(&args[1])?;
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "pan".to_string(),
+            Op::Node {
+                kind: NodeKind::Pan,
                 inputs: vec![input, value],
                 node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
             }
@@ -255,8 +255,8 @@ fn create_env(koto: &Koto) {
         let trig = node_from_kvalue(&args[3])?;
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "pluck".to_string(),
+            Op::Node {
+                kind: NodeKind::Pluck,
                 inputs: vec![freq, tone, damping, trig],
                 node: Box::new(PluckNode::new()),
             }
@@ -268,8 +268,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "reverb".to_string(),
+            Op::Node {
+                kind: NodeKind::Reverb,
                 inputs: vec![input],
                 node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
                     10.0,
@@ -287,8 +287,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[0])?;
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "delay".to_string(),
+            Op::Node {
+                kind: NodeKind::Delay,
                 inputs: vec![input],
                 node: Box::new(DelayNode::new()),
             }
@@ -306,8 +306,8 @@ fn create_env(koto: &Koto) {
         let input = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "moog".to_string(),
+            Op::Node {
+                kind: NodeKind::Moog,
                 inputs: vec![cutoff, resonance, input],
                 node: Box::new(FunDSPNode::mono(Box::new(moog()))),
             }
@@ -325,8 +325,8 @@ fn create_env(koto: &Koto) {
         let file = Arc::new(wave);
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: "wav".to_string(),
+            Op::Node {
+                kind: NodeKind::Wav,
                 inputs: vec![],
                 node: Box::new(FunDSPNode::mono(Box::new(wavech(&file, 0, Some(0))))),
             }
@@ -337,10 +337,10 @@ fn create_env(koto: &Koto) {
 
 fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
 where
-    F: Fn(Vec<NodeKind>) -> NodeKind + 'static,
+    F: Fn(Vec<Op>) -> Op + 'static,
 {
     move |ctx| {
-        let args: Result<Vec<NodeKind>, _> = ctx.args().iter().map(node_from_kvalue).collect();
+        let args: Result<Vec<Op>, _> = ctx.args().iter().map(node_from_kvalue).collect();
         Ok(KValue::Object(node_constructor(args?).into()))
     }
 }
@@ -351,8 +351,15 @@ where
 {
     koto.prelude().add_fn(
         name.clone().as_str(),
-        make_expr_node(move |args| NodeKind::Node {
-            name: name.clone(),
+        make_expr_node(move |args| Op::Node {
+            kind: match name.as_str() {
+                "sin" => NodeKind::Sin,
+                "sqr" => NodeKind::Sqr,
+                "saw" => NodeKind::Saw,
+                "tri" => NodeKind::Tri,
+                "ramp" => NodeKind::Ramp,
+                _ => panic!("Unknown oscillator type: {}", name),
+            },
             inputs: vec![args[0].clone()],
             node: Box::new(FunDSPNode::mono(osc_fn())),
         }),
@@ -369,7 +376,7 @@ where
         let (cutoff, resonance, input) = match args {
             [cutoff_val, input_val] => (
                 node_from_kvalue(cutoff_val)?,
-                NodeKind::Constant(0.717),
+                Op::Constant(0.717),
                 node_from_kvalue(input_val)?,
             ),
             [cutoff_val, resonance_val, input_val] => (
@@ -381,8 +388,13 @@ where
         };
 
         Ok(KValue::Object(
-            NodeKind::Node {
-                name: name.clone(),
+            Op::Node {
+                kind: match name.as_str() {
+                    "lp" => NodeKind::Lp,
+                    "bp" => NodeKind::Bp,
+                    "hp" => NodeKind::Hp,
+                    _ => panic!("Unknown filter type: {}", name),
+                },
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(FunDSPNode::mono(filter_fn())),
             }
@@ -391,10 +403,10 @@ where
     });
 }
 
-fn node_from_kvalue(value: &KValue) -> Result<NodeKind, koto::runtime::Error> {
+fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {
     match value {
-        KValue::Number(n) => Ok(NodeKind::Constant(n.into())),
-        KValue::Object(obj) if obj.is_a::<NodeKind>() => Ok(obj.cast::<NodeKind>()?.to_owned()),
+        KValue::Number(n) => Ok(Op::Constant(n.into())),
+        KValue::Object(obj) if obj.is_a::<Op>() => Ok(obj.cast::<Op>()?.to_owned()),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
 }
@@ -406,7 +418,7 @@ fn str_from_kvalue(value: &KValue) -> Result<String, koto::runtime::Error> {
     }
 }
 
-fn list_from_value(value: &KValue) -> Result<Vec<NodeKind>, koto::runtime::Error> {
+fn list_from_value(value: &KValue) -> Result<Vec<Op>, koto::runtime::Error> {
     match value {
         KValue::List(list) => Ok(list
             .data()
@@ -421,9 +433,7 @@ fn list_from_value(value: &KValue) -> Result<Vec<NodeKind>, koto::runtime::Error
     }
 }
 
-fn list_of_tuples_from_value(
-    value: &KValue,
-) -> Result<Vec<(NodeKind, NodeKind)>, koto::runtime::Error> {
+fn list_of_tuples_from_value(value: &KValue) -> Result<Vec<(Op, Op)>, koto::runtime::Error> {
     match value {
         KValue::List(list) => list
             .data()
