@@ -92,9 +92,9 @@ pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
         match expr {
             Op::Constant { .. } => add_node(vec![], expr, graph),
             Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
-            Op::Gain(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
-            Op::Mix(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
-            Op::Wrap(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
+            Op::Gain(lhs, rhs) | Op::Mix(lhs, rhs) | Op::Wrap(lhs, rhs) => {
+                add_node(vec![lhs, rhs], expr, graph)
+            }
             Op::Negate(val) => add_node(vec![val], expr, graph),
         }
     }
