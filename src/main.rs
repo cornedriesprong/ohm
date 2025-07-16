@@ -22,7 +22,7 @@ mod audio_graph;
 use audio_graph::*;
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    // let args: Vec<String> = std::env::args().collect();
     // if args.len() != 2 {
     //     eprintln!("Usage: {} <filename>", args[0]);
     //     std::process::exit(1);
@@ -188,17 +188,16 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
         if args.len() != 2 {
-            return unexpected_args("expected 2 arguments: list, trig", args);
+            return unexpected_args("expected 2 arguments: trig, list", args);
         }
-        let segments = list_of_tuples_from_value(&args[0])?;
-        let trig = node_from_kvalue(&args[1])?;
+        let trig = node_from_kvalue(&args[0])?;
+        let segments = list_of_tuples_from_value(&args[1])?;
 
-        let mut inputs = Vec::new();
-        for (value, duration) in segments {
-            inputs.push(value);
-            inputs.push(duration);
-        }
-        inputs.push(trig);
+        let inputs = segments
+            .iter()
+            .flat_map(|(value, duration)| vec![value.clone(), duration.clone()])
+            .chain(std::iter::once(trig))
+            .collect::<Vec<_>>();
 
         Ok(KValue::Object(
             Op::Node {
@@ -212,17 +211,17 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
         if args.len() != 2 {
-            return unexpected_args("expected 2 arguments: list, trig", args);
+            return unexpected_args("expected 2 arguments: input, list", args);
         }
 
-        let mut values = list_from_value(&args[0])?;
-        let trig = node_from_kvalue(&args[1])?;
+        let input = node_from_kvalue(&args[0])?;
+        let values = list_from_value(&args[1])?;
 
-        let mut inputs = Vec::new();
-        for value in values.iter_mut() {
-            inputs.push(value.clone());
-        }
-        inputs.push(trig.clone());
+        let inputs = values
+            .iter()
+            .map(|value| value.clone())
+            .chain(std::iter::once(input.clone()))
+            .collect::<Vec<_>>();
 
         Ok(KValue::Object(
             Op::Node {
@@ -240,12 +239,12 @@ fn create_env(koto: &Koto) {
         }
 
         let input = node_from_kvalue(&args[0])?;
-        let value = node_from_kvalue(&args[1])?;
+        let pan = node_from_kvalue(&args[1])?;
 
         Ok(KValue::Object(
             Op::Node {
                 kind: NodeKind::Pan,
-                inputs: vec![input, value],
+                inputs: vec![input, pan],
                 node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
             }
             .into(),
@@ -257,10 +256,10 @@ fn create_env(koto: &Koto) {
             return unexpected_args("expected 4 arguments: frequency, tone, damping, trig", args);
         }
 
-        let freq = node_from_kvalue(&args[0])?;
-        let tone = node_from_kvalue(&args[1])?;
-        let damping = node_from_kvalue(&args[2])?;
-        let trig = node_from_kvalue(&args[3])?;
+        let trig = node_from_kvalue(&args[0])?;
+        let freq = node_from_kvalue(&args[1])?;
+        let tone = node_from_kvalue(&args[2])?;
+        let damping = node_from_kvalue(&args[3])?;
 
         Ok(KValue::Object(
             Op::Node {
@@ -306,12 +305,12 @@ fn create_env(koto: &Koto) {
     koto.prelude().add_fn("moog", move |ctx| {
         let args = ctx.args();
         if args.len() != 3 {
-            return unexpected_args("expected 3 arguments: cutoff, resonance, input", args);
+            return unexpected_args("expected 3 arguments: input, cutoff, resonance", args);
         }
 
-        let cutoff = node_from_kvalue(&args[0])?;
-        let resonance = node_from_kvalue(&args[1])?;
-        let input = node_from_kvalue(&args[2])?;
+        let input = node_from_kvalue(&args[0])?;
+        let cutoff = node_from_kvalue(&args[1])?;
+        let resonance = node_from_kvalue(&args[2])?;
 
         Ok(KValue::Object(
             Op::Node {
@@ -381,20 +380,9 @@ where
     koto.prelude().add_fn(name.clone().as_str(), move |ctx| {
         let args = ctx.args();
 
-        // resonance is optional, default to 0.717
-        let (cutoff, resonance, input) = match args {
-            [cutoff_val, input_val] => (
-                node_from_kvalue(cutoff_val)?,
-                Op::Constant(0.717),
-                node_from_kvalue(input_val)?,
-            ),
-            [cutoff_val, resonance_val, input_val] => (
-                node_from_kvalue(cutoff_val)?,
-                node_from_kvalue(resonance_val)?,
-                node_from_kvalue(input_val)?,
-            ),
-            _ => return unexpected_args("invalid arguments: ", args),
-        };
+        let input = node_from_kvalue(&args[0])?;
+        let cutoff = node_from_kvalue(&args[1])?;
+        let resonance = node_from_kvalue(&args[2]).unwrap_or(Op::Constant(0.717));
 
         Ok(KValue::Object(
             Op::Node {
