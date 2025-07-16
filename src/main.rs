@@ -1,5 +1,5 @@
 use crate::nodes::{
-    DelayNode, EnvNode, FunDSPNode, NodeKind, Op, PluckNode, PulseNode, SamplerNode, SeqNode,
+    DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode, SamplerNode, SeqNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -19,6 +19,9 @@ mod consts;
 mod dsp;
 mod nodes;
 mod utils;
+
+mod op;
+use crate::op::Op;
 
 mod audio_graph;
 use audio_graph::*;

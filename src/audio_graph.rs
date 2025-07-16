@@ -2,7 +2,8 @@ use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::HashMap;
 
-use crate::nodes::{Frame, Node, Op};
+use crate::nodes::{Frame, Node};
+use crate::op::Op;
 
 type Graph = StableDiGraph<Box<Op>, ()>;
 
