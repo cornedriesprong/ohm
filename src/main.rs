@@ -1,4 +1,6 @@
-use crate::nodes::{DelayNode, EnvNode, FunDSPNode, NodeKind, Op, PluckNode, PulseNode, SeqNode};
+use crate::nodes::{
+    DelayNode, EnvNode, FunDSPNode, NodeKind, Op, PluckNode, PulseNode, SamplerNode, SeqNode,
+};
 use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -124,7 +126,7 @@ where
                     }
                 }
                 EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
-                    // re watch the file
+                    // re-watch the file
                     watcher.unwatch(path).ok();
                     watcher.watch(path, RecursiveMode::NonRecursive).ok();
 
@@ -303,15 +305,26 @@ fn create_env(koto: &Koto) {
     });
     koto.prelude().add_fn("wav", move |ctx| {
         let args = ctx.args();
-        let filename = format!("samples/{}", str_from_kvalue(&args[0])?);
-        let wave = Wave::load(&filename).expect("Could not load wave.");
-        let file = Arc::new(wave);
+        let input = node_from_kvalue(&args[0])?;
+        let name = str_from_kvalue(&args[1])?;
+        let filename = if name.ends_with(".wav") {
+            format!("samples/{}", name)
+        } else {
+            format!("samples/{}.wav", name)
+        };
+
+        let wave = match Wave::load(&filename) {
+            Ok(wave) => wave,
+            Err(e) => {
+                return Err(format!("Failed to load wave file '{}': {}", filename, e).into());
+            }
+        };
 
         Ok(KValue::Object(
             Op::Node {
-                kind: NodeKind::Wav,
-                inputs: vec![],
-                node: Box::new(FunDSPNode::mono(Box::new(wavech(&file, 0, Some(0))))),
+                kind: NodeKind::Wav { filename },
+                inputs: vec![input],
+                node: Box::new(SamplerNode::new(wave)),
             }
             .into(),
         ))

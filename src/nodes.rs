@@ -3,7 +3,7 @@ use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
 use fmt::Debug;
-use fundsp::hacker32::AudioUnit;
+use fundsp::hacker32::{AudioUnit, Wave};
 use koto::{derive::*, prelude::*, runtime::Result};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
@@ -33,7 +33,7 @@ pub enum NodeKind {
     Reverb,
     Delay,
     Moog,
-    Wav,
+    Wav { filename: String },
 }
 
 #[derive(Clone, KotoType, KotoCopy)]
@@ -231,11 +231,10 @@ impl Op {
                 0u8.hash(hasher);
                 val.to_bits().hash(hasher);
             }
-            Op::Node {
-                kind: node_type, ..
-            } => {
-                node_type.hash(hasher);
-            }
+            Op::Node { kind, .. } => match kind {
+                NodeKind::Wav { filename } => filename.hash(hasher),
+                _ => kind.hash(hasher),
+            },
             Op::Mix(lhs, rhs) => {
                 1u8.hash(hasher);
                 lhs.hash_structure(hasher);
@@ -569,10 +568,6 @@ impl PluckNode {
 }
 
 impl Node for PluckNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -613,6 +608,10 @@ impl Node for PluckNode {
         let output = self.buffer[self.read_pos];
         [output, output]
     }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -629,15 +628,67 @@ impl DelayNode {
 }
 
 impl Node for DelayNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let input = inputs.get(0).expect("delay: missing input")[0];
         let output = self.delay.process(input);
         [output, output]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct SamplerNode {
+    wave: Wave,
+}
+
+impl SamplerNode {
+    pub(crate) fn new(wave: Wave) -> Self {
+        Self { wave }
+    }
+}
+
+impl Node for SamplerNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let phase = inputs.get(0).expect("sampler: missing phase")[0];
+        let len = self.wave.len() as isize;
+        let index = phase * len as f32;
+        let index_floor = index.floor() as isize;
+        let t = index - index.floor(); // fractional part
+
+        // Get four neighboring samples with wrapping.
+        let idx0 = (index_floor - 1).rem_euclid(len) as usize;
+        let idx1 = index_floor.rem_euclid(len) as usize;
+        let idx2 = (index_floor + 1).rem_euclid(len) as usize;
+        let idx3 = (index_floor + 2).rem_euclid(len) as usize;
+
+        let p0 = self.wave.at(0, idx0);
+        let p1 = self.wave.at(0, idx1);
+        let p2 = self.wave.at(0, idx2);
+        let p3 = self.wave.at(0, idx3);
+
+        // Catmull-Rom interpolation:
+        // \\[
+        // y(t) = 0.5 \\times (2P_1 + (-P_0+P_2)t + (2P_0-5P_1+4P_2-P_3)t^2 + (-P_0+3P_1-3P_2+P_3)t^3)
+        // \\]
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let sample = 0.5
+            * (2.0 * p1
+                + (-p0 + p2) * t
+                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+
+        [sample, sample]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
     }
 }
