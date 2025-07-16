@@ -294,7 +294,7 @@ fn create_env(koto: &Koto) {
         let args = ctx.args();
 
         let input = node_from_kvalue(&args[0])?;
-        let cutoff = node_from_kvalue(&args[1])?;
+        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(500.into())))?;
         let resonance = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.into())))?;
 
         Ok(KValue::Object(
