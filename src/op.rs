@@ -1,11 +1,11 @@
+use crate::nodes::{Frame, Node, NodeKind};
 use crate::KObject;
 use crate::KString;
-use std::hash::{Hash, Hasher};
 use koto::derive::{KotoCopy, KotoType};
-use crate::nodes::{NodeKind, Node, Frame};
-use koto::runtime::{KMap, KValue, KotoEntries, KotoObject, Result, KotoCopy, KotoType};
+use koto::runtime::{KMap, KValue, KotoCopy, KotoEntries, KotoObject, KotoType, Result};
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, KotoType, KotoCopy)]
 pub enum Op {
@@ -40,9 +40,7 @@ impl Op {
     // Helper to choose the operation variant for non-numeric binary operations.
     fn op_variant(&self, rhs: Op, op: BinaryOp) -> Op {
         match op {
-            BinaryOp::Add | BinaryOp::Subtract => {
-                Op::Mix(Box::new(self.clone()), Box::new(rhs))
-            }
+            BinaryOp::Add | BinaryOp::Subtract => Op::Mix(Box::new(self.clone()), Box::new(rhs)),
             BinaryOp::Multiply | BinaryOp::Divide => {
                 Op::Gain(Box::new(self.clone()), Box::new(rhs))
             }
@@ -112,7 +110,11 @@ impl Op {
             Op::Constant(val) => Some(*val),
             _ => {
                 // If self is not constant attempt to extract a constant.
-                if let Op::Constant(val) = self { Some(*val) } else { None }
+                if let Op::Constant(val) = self {
+                    Some(*val)
+                } else {
+                    None
+                }
             }
         } {
             if let Some(rhs_val) = extract_constant(other) {
@@ -222,7 +224,9 @@ impl KotoObject for Op {
                     }
                     _ => panic!("invalid remainder operation"),
                 };
-                Ok(KValue::Object(Op::Wrap(Box::new(self.clone()), Box::new(inv)).into()))
+                Ok(KValue::Object(
+                    Op::Wrap(Box::new(self.clone()), Box::new(inv)).into(),
+                ))
             }
         }
     }
