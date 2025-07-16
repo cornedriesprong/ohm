@@ -6,13 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.94"
 cpal = "0.15.3"
-crossbeam = "0.8.4"
 koto = { git = "https://github.com/koto-lang/koto.git", branch = "main" }
 notify = "8.0.0"
 petgraph = "0.6.5"
 rand = { version = "0.8.5", features = ["small_rng"] }
 rtsan-standalone = "0.1.0"
-strum = { version = "0.27.1", features = ["derive"] }
 seahash = "4.1"
 fundsp = "0.20.0"
 
