@@ -15,7 +15,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod consts;
 mod dsp;
 mod nodes;
 mod utils;
@@ -56,7 +55,7 @@ where
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
     let mut koto = Koto::default();
-    create_env(&koto);
+    create_env(&koto, config.sample_rate.0);
 
     let graph: Arc<Mutex<Option<AudioGraph>>> = Arc::new(Mutex::new(None));
     let graph_clone = Arc::clone(&graph);
@@ -150,8 +149,11 @@ where
     Ok(())
 }
 
-fn create_env(koto: &Koto) {
+fn create_env(koto: &Koto, sample_rate: u32) {
     use fundsp::hacker32::*;
+
+    koto.prelude().insert("bpm", 120.0);
+    koto.prelude().insert("sr", sample_rate);
 
     add_osc(koto, "sin".to_string(), || Box::new(sine()));
     add_osc(koto, "sqr".to_string(), || Box::new(square()));
@@ -173,10 +175,10 @@ fn create_env(koto: &Koto) {
     );
     koto.prelude().add_fn(
         "pulse",
-        make_expr_node(|args| Op::Node {
+        make_expr_node(move |args| Op::Node {
             kind: NodeKind::Pulse,
             inputs: vec![args[0].clone()],
-            node: Box::new(PulseNode::new()),
+            node: Box::new(PulseNode::new(sample_rate)),
         }),
     );
     koto.prelude().add_fn(
@@ -253,7 +255,7 @@ fn create_env(koto: &Koto) {
             Op::Node {
                 kind: NodeKind::Pluck,
                 inputs: vec![freq, tone, damping, trig],
-                node: Box::new(PluckNode::new()),
+                node: Box::new(PluckNode::new(sample_rate)),
             }
             .into(),
         ))

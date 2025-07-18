@@ -1,4 +1,3 @@
-use crate::consts::SAMPLE_RATE;
 use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
@@ -8,6 +7,7 @@ use rand::Rng;
 use rtsan_standalone::nonblocking;
 use std::f32::consts::PI;
 use std::hash::Hash;
+use cpal::SampleRate;
 
 pub type Frame = [f32; 2];
 
@@ -230,6 +230,7 @@ impl Node for SeqNode {
 pub struct PulseNode {
     phase: f32,
     prev_phase: f32,
+    sample_rate: u32,
 }
 
 impl Clone for PulseNode {
@@ -237,15 +238,17 @@ impl Clone for PulseNode {
         Self {
             phase: 0.0,
             prev_phase: 0.0,
+            sample_rate: self.sample_rate,
         }
     }
 }
 
 impl PulseNode {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         Self {
             phase: 0.,
             prev_phase: 0.,
+            sample_rate: sample_rate,
         }
     }
 }
@@ -261,7 +264,7 @@ impl Node for PulseNode {
         let freq = inputs.get(0).expect("pulse: missing freq input")[0];
 
         self.prev_phase = self.phase;
-        self.phase += 2. * PI * freq / SAMPLE_RATE;
+        self.phase += 2. * PI * freq / self.sample_rate as f32;
 
         if self.phase >= 2. * PI {
             self.phase -= 2. * PI;
@@ -291,10 +294,11 @@ pub struct PluckNode {
     read_pos: usize,
     pitch_track: f32,
     is_stopped: bool,
+    sample_rate: u32,
 }
 
 impl PluckNode {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         Self {
             // mode: Mode::String,
             buffer: [0.0; BUFFER_SIZE],
@@ -302,12 +306,13 @@ impl PluckNode {
             read_pos: 0,
             pitch_track: 0.0,
             is_stopped: true,
+            sample_rate
         }
     }
 
     fn play(&mut self, freq: f32, tone: f32) {
         self.is_stopped = false;
-        self.period = freq_to_period(SAMPLE_RATE, freq);
+        self.period = freq_to_period(self.sample_rate as f32, freq);
         self.read_pos = 0;
 
         self.pitch_track = (5.0 as f32).max(self.period / 7.0);
