@@ -176,9 +176,9 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cc"
-version = "1.2.29"
+version = "1.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1599538de2394445747c8cf7935946e3cc27e9625f889d979bfb2aaf569362"
+checksum = "deec109607ca693028562ed836a5f1c4b8bd77755c4e132fc5ce11b0b6211ae7"
 dependencies = [
  "jobserver",
  "libc",
@@ -1007,7 +1007,7 @@ dependencies = [
 [[package]]
 name = "koto"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "koto_bytecode",
  "koto_parser",
@@ -1019,7 +1019,7 @@ dependencies = [
 [[package]]
 name = "koto_bytecode"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "circular-buffer",
  "derive-name",
@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "koto_derive"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1044,7 +1044,7 @@ dependencies = [
 [[package]]
 name = "koto_lexer"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "unicode-segmentation",
  "unicode-width",
@@ -1054,12 +1054,12 @@ dependencies = [
 [[package]]
 name = "koto_memory"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 
 [[package]]
 name = "koto_parser"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "derive-name",
  "koto_lexer",
@@ -1072,7 +1072,7 @@ dependencies = [
 [[package]]
 name = "koto_runtime"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "chrono",
  "indexmap",
@@ -1093,7 +1093,7 @@ dependencies = [
 [[package]]
 name = "koto_serde"
 version = "0.16.0"
-source = "git+https://github.com/koto-lang/koto.git?branch=main#213933f98c3355d1c8938dec7cf22f369a1e82ce"
+source = "git+https://github.com/koto-lang/koto.git?branch=main#423c4bd1aa522de9238eb8e7f5ea43a8c27f95c2"
 dependencies = [
  "koto_runtime",
  "serde",
