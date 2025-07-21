@@ -31,6 +31,7 @@ pub enum NodeKind {
     Reverb,
     Delay,
     Moog,
+    Pipe,
     Wav { filename: String },
 }
 
@@ -275,8 +276,6 @@ impl Node for PulseNode {
     }
 }
 
-const BUFFER_SIZE: usize = 8192;
-
 // this is the number of samples we need to represent a full period
 // of the lowest possible MIDI pitch's frequency (A0 / 27.50 Hz)
 enum Mode {
@@ -289,7 +288,7 @@ pub struct PluckNode {
     // mode: Mode,
     // tone: f32,
     // damping: f32,
-    buffer: [f32; BUFFER_SIZE],
+    buffer: [f32; Self::BUFFER_SIZE],
     period: f32,
     read_pos: usize,
     pitch_track: f32,
@@ -298,10 +297,12 @@ pub struct PluckNode {
 }
 
 impl PluckNode {
+    const BUFFER_SIZE: usize = 2048; // 2048 samples
+
     pub(crate) fn new(sample_rate: u32) -> Self {
         Self {
             // mode: Mode::String,
-            buffer: [0.0; BUFFER_SIZE],
+            buffer: [0.0; Self::BUFFER_SIZE],
             period: 1.0,
             read_pos: 0,
             pitch_track: 0.0,
@@ -316,7 +317,7 @@ impl PluckNode {
         self.read_pos = 0;
 
         self.pitch_track = (5.0 as f32).max(self.period / 7.0);
-        assert!(self.period < BUFFER_SIZE as f32);
+        assert!(self.period < Self::BUFFER_SIZE as f32);
 
         for i in 0..self.period as usize {
             if i > self.period as usize {
@@ -467,6 +468,45 @@ impl Node for SamplerNode {
                 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
 
         [sample, sample]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+// delay line
+#[derive(Clone)]
+pub(crate) struct PipeNode {
+    buffer: [Frame; Self::BUFFER_SIZE],
+    read_pos: usize,
+    write_pos: usize,
+}
+
+impl PipeNode {
+    pub const BUFFER_SIZE: usize = 48000;
+
+    pub(crate) fn new() -> Self {
+        Self {
+            buffer: [[0.0, 0.0]; Self::BUFFER_SIZE],
+            read_pos: 0,
+            write_pos: 0,
+        }
+    }
+}
+
+impl Node for PipeNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let input = inputs.get(0).expect("pipe: missing input");
+        self.buffer[self.write_pos] = *input;
+        let delay = inputs.get(1).expect("pipe: missing delay")[0];
+        self.read_pos = (self.read_pos + 1) % Self::BUFFER_SIZE;
+        self.write_pos = (self.write_pos + 1) % Self::BUFFER_SIZE;
+
+        // Read the value at the current read position
+        self.buffer[(self.read_pos + delay as usize) % Self::BUFFER_SIZE]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

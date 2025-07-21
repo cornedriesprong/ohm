@@ -7,6 +7,7 @@ use cpal::{
     FromSample, SizedSample,
 };
 use koto::prelude::*;
+use nodes::PipeNode;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -309,6 +310,21 @@ fn create_env(koto: &Koto, sample_rate: u32) {
                 kind: NodeKind::Moog,
                 inputs: vec![input, cutoff, resonance],
                 node: Box::new(FunDSPNode::mono(Box::new(moog()))),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("pipe", move |ctx| {
+        let args = ctx.args();
+
+        let input = node_from_kvalue(&args[0])?;
+        let delay = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(1.into())))?;
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Pipe,
+                inputs: vec![input, delay],
+                node: Box::new(PipeNode::new()),
             }
             .into(),
         ))
