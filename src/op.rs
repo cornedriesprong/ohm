@@ -268,7 +268,7 @@ impl Node for Op {
 
             Op::Node { kind, node, .. } => match kind {
                 NodeKind::Print => {
-                    println!("{:?}", inputs);
+                    println!("{:?}", inputs[0][0]);
                     inputs[0]
                 }
                 _ => node.tick(inputs),

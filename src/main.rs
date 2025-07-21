@@ -100,6 +100,11 @@ where
                 }
                 Err(e) => bail!("Failed to cast to Expr: {}", e),
             },
+            KValue::Str(str) => {
+                println!("{}", str);
+
+                Ok(())
+            }
             other => bail!("Expected a Map, found '{}'", other.type_as_string(),),
         }
     };
@@ -394,9 +399,15 @@ where
 }
 
 fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {
+    use fundsp::hacker32::sink;
     match value {
         KValue::Number(n) => Ok(Op::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<Op>() => Ok(obj.cast::<Op>()?.to_owned()),
+        KValue::Str(str) => Ok(Op::Node {
+            kind: NodeKind::Print,
+            inputs: vec![],
+            node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+        }),
         unexpected => unexpected_type("number, expr, or list", unexpected)?,
     }
 }

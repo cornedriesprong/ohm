@@ -1,13 +1,13 @@
 use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
+use cpal::SampleRate;
 use fmt::Debug;
 use fundsp::hacker32::{AudioUnit, Wave};
 use rand::Rng;
 use rtsan_standalone::nonblocking;
 use std::f32::consts::PI;
 use std::hash::Hash;
-use cpal::SampleRate;
 
 pub type Frame = [f32; 2];
 
@@ -306,7 +306,7 @@ impl PluckNode {
             read_pos: 0,
             pitch_track: 0.0,
             is_stopped: true,
-            sample_rate
+            sample_rate,
         }
     }
 
