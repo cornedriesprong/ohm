@@ -1,7 +1,6 @@
 use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
-use cpal::SampleRate;
 use fmt::Debug;
 use fundsp::hacker32::{AudioUnit, Wave};
 use rand::Rng;
@@ -32,7 +31,8 @@ pub enum NodeKind {
     Delay,
     Moog,
     Pipe,
-    Wav { filename: String },
+    WavWriter,
+    WavReader { name: String },
 }
 
 pub(crate) trait Node: Send + Sync {
@@ -63,10 +63,6 @@ impl FunDSPNode {
 }
 
 impl Node for FunDSPNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -80,6 +76,10 @@ impl Node for FunDSPNode {
             self.node.tick(input.as_slice(), &mut output);
             [output[0]; 2]
         }
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
     }
 }
 
@@ -424,17 +424,17 @@ impl Node for DelayNode {
 }
 
 #[derive(Clone)]
-pub struct SamplerNode {
+pub struct WavReaderNode {
     wave: Wave,
 }
 
-impl SamplerNode {
+impl WavReaderNode {
     pub(crate) fn new(wave: Wave) -> Self {
         Self { wave }
     }
 }
 
-impl Node for SamplerNode {
+impl Node for WavReaderNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -468,6 +468,36 @@ impl Node for SamplerNode {
                 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
 
         [sample, sample]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct WavWriterNode {
+    buffer: Vec<Frame>,
+}
+
+impl WavWriterNode {
+    pub(crate) fn new(buffer: Vec<Frame>) -> Self {
+        Self { buffer }
+    }
+}
+
+impl Node for WavWriterNode {
+    #[inline(always)]
+    #[nonblocking]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let input = inputs.get(0).expect("sampler: missing phase")[0];
+
+        // Use the thread-safe operations provided by SharedRb
+        // if let Ok(_) = self.consumer.i
+        //     // Successfully wrote to buffer
+        // }
+
+        [0.0, 0.0]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

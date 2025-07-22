@@ -1,24 +1,76 @@
+use crate::nodes::{Frame, Node};
+use crate::op::Op;
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use rtsan_standalone::nonblocking;
 use std::collections::HashMap;
 
-use crate::nodes::{Frame, Node};
-use crate::op::Op;
+pub(crate) struct Container {
+    graph: Option<Graph>,
+    buffers: HashMap<String, Vec<Frame>>,
+}
 
-type Graph = StableDiGraph<Box<Op>, ()>;
+impl Container {
+    pub(crate) fn update_graph(&mut self, new: Graph) {
+        if let Some(old) = self.graph.as_mut() {
+            old.apply_diff(new)
+        } else {
+            self.graph = Some(new);
+        }
+    }
+
+    pub(crate) fn add_buffer(&mut self, name: &str) {
+        self.buffers
+            .insert(name.to_string(), Vec::with_capacity(1024));
+    }
+
+    pub(crate) fn get_buffer(&mut self, name: &str) -> Option<&Vec<Frame>> {
+        if let Some(buffer) = self.buffers.get(name) {
+            Some(&buffer)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn get_buffer_mut(&mut self, name: &str) -> Option<&mut Vec<Frame>> {
+        if let Some(buffer) = self.buffers.get_mut(name) {
+            Some(buffer)
+        } else {
+            None
+        }
+    }
+}
+
+impl Container {
+    pub(crate) fn new() -> Self {
+        Self {
+            graph: None,
+            buffers: HashMap::new(),
+        }
+    }
+
+    #[inline]
+    #[nonblocking]
+    pub(crate) fn tick(&mut self) -> Frame {
+        if let Some(mut graph) = self.graph.as_mut() {
+            graph.tick()
+        } else {
+            [0.0; 2]
+        }
+    }
+}
 
 #[derive(Clone)]
-pub(crate) struct AudioGraph {
-    graph: Graph,
+pub(crate) struct Graph {
+    graph: StableDiGraph<Box<Op>, ()>,
     sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<Frame>,
     outputs: Vec<Frame>,
 }
 
-impl AudioGraph {
+impl Graph {
     pub(crate) fn new() -> Self {
         Self {
-            graph: Graph::new(),
+            graph: StableDiGraph::new(),
             sorted_nodes: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -60,7 +112,7 @@ impl AudioGraph {
         self.outputs.resize(self.graph.node_count(), [0.0, 0.0]);
     }
 
-    pub(crate) fn apply_diff(&mut self, mut new_graph: AudioGraph) {
+    pub(crate) fn apply_diff(&mut self, mut new_graph: Graph) {
         let mut old_nodes: HashMap<u64, NodeIndex> = HashMap::new();
         for &node_idx in &self.sorted_nodes {
             let hash = self.graph[node_idx].compute_hash();
@@ -86,10 +138,10 @@ impl AudioGraph {
     }
 }
 
-pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
-    let mut graph = AudioGraph::new();
+pub(crate) fn parse_to_graph(expr: Op) -> Graph {
+    let mut graph = Graph::new();
 
-    fn add_expr_to_graph(expr: &Op, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_expr_to_graph(expr: &Op, graph: &mut Graph) -> NodeIndex {
         match expr {
             Op::Constant { .. } => add_node(vec![], expr, graph),
             Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
@@ -100,7 +152,7 @@ pub(crate) fn parse_to_audio_graph(expr: Op) -> AudioGraph {
         }
     }
 
-    fn add_node(inputs: Vec<&Op>, kind: &Op, graph: &mut AudioGraph) -> NodeIndex {
+    fn add_node(inputs: Vec<&Op>, kind: &Op, graph: &mut Graph) -> NodeIndex {
         let mut input_indices: Vec<_> = inputs
             .into_iter()
             .map(|input| add_expr_to_graph(&*input, graph))

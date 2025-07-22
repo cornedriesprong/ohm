@@ -1,5 +1,6 @@
 use crate::nodes::{
-    DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode, SamplerNode, SeqNode,
+    DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode, SeqNode, WavReaderNode,
+    WavWriterNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -55,21 +56,21 @@ where
 {
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
-    let mut koto = Koto::default();
-    create_env(&koto, config.sample_rate.0);
+    let container = Container::new();
+    let container: Arc<Mutex<Container>> = Arc::new(Mutex::new(container));
+    let container_clone1 = Arc::clone(&container);
+    let container_clone2 = Arc::clone(&container);
 
-    let graph: Arc<Mutex<Option<AudioGraph>>> = Arc::new(Mutex::new(None));
-    let graph_clone = Arc::clone(&graph);
+    let mut koto = Koto::default();
+    create_env(&koto, container_clone1, config.sample_rate.0);
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            if let Some(graph) = graph_clone.lock().unwrap().as_mut() {
-                for frame in data.chunks_mut(2) {
-                    let out = graph.tick();
-                    frame[0] = out[0];
-                    frame[1] = out[1];
-                }
+            for frame in data.chunks_mut(2) {
+                let out = container_clone2.lock().unwrap().tick();
+                frame[0] = out[0];
+                frame[1] = out[1];
             }
         },
         err_fn,
@@ -80,23 +81,19 @@ where
 
     let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
-        match koto.compile_and_run(&src)? {
+        match koto.compile_and_run(CompileArgs {
+            script: &src,
+            script_path: Some(KString::from(path.to_str().unwrap())),
+            compiler_settings: CompilerSettings {
+                export_top_level_ids: true,
+                ..Default::default()
+            },
+        })? {
             KValue::Object(obj) if obj.is_a::<Op>() => match obj.cast::<Op>() {
                 Ok(expr) => {
-                    let new_graph = parse_to_audio_graph(expr.to_owned());
-                    let mut guard = graph.lock().unwrap();
-
-                    match guard.as_mut() {
-                        Some(existing_graph) => {
-                            // Apply diff to preserve state
-                            existing_graph.apply_diff(new_graph);
-                        }
-                        None => {
-                            // First time - just set the graph
-                            *guard = Some(new_graph);
-                        }
-                    }
-
+                    let graph = parse_to_graph(expr.to_owned());
+                    let mut guard = container.lock().unwrap();
+                    guard.update_graph(graph);
                     Ok(())
                 }
                 Err(e) => bail!("Failed to cast to Expr: {}", e),
@@ -155,7 +152,7 @@ where
     Ok(())
 }
 
-fn create_env(koto: &Koto, sample_rate: u32) {
+fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     use fundsp::hacker32::*;
 
     koto.prelude().insert("bpm", 120.0);
@@ -329,6 +326,54 @@ fn create_env(koto: &Koto, sample_rate: u32) {
             .into(),
         ))
     });
+    let buffer_container = Arc::clone(&container);
+    koto.prelude().add_fn("buf", move |ctx| {
+        let args = ctx.args();
+        let name = str_from_kvalue(&args[0])?;
+        buffer_container.lock().unwrap().add_buffer(&name);
+        Ok(KValue::Null)
+    });
+
+    let rec_container = Arc::clone(&container);
+    koto.prelude().add_fn("rec", move |ctx| {
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        let name = str_from_kvalue(&args[1])?;
+        let mut container = rec_container.lock().unwrap();
+        if let Some(buffer) = container.get_buffer(&name.clone()) {
+            Ok(KValue::Object(
+                Op::Node {
+                    kind: NodeKind::WavReader { name },
+                    inputs: vec![input],
+                    node: Box::new(WavWriterNode::new(buffer.to_vec())),
+                }
+                .into(),
+            ))
+        } else {
+            Ok(KValue::Null)
+        }
+    });
+
+    let play_container = Arc::clone(&container);
+    koto.prelude().add_fn("play", move |ctx| {
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        let name = str_from_kvalue(&args[1])?;
+        let mut container = play_container.lock().unwrap();
+        if let Some(buffer) = container.get_buffer(&name.clone()) {
+            Ok(KValue::Object(
+                Op::Node {
+                    kind: NodeKind::WavReader { name },
+                    inputs: vec![input],
+                    node: Box::new(WavWriterNode::new(buffer.to_vec())),
+                }
+                .into(),
+            ))
+        } else {
+            Ok(KValue::Null)
+        }
+    });
+
     koto.prelude().add_fn("wav", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
@@ -348,9 +393,9 @@ fn create_env(koto: &Koto, sample_rate: u32) {
 
         Ok(KValue::Object(
             Op::Node {
-                kind: NodeKind::Wav { filename },
+                kind: NodeKind::WavReader { name: filename },
                 inputs: vec![input],
-                node: Box::new(SamplerNode::new(wave)),
+                node: Box::new(WavReaderNode::new(wave)),
             }
             .into(),
         ))
@@ -419,7 +464,7 @@ fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {
     match value {
         KValue::Number(n) => Ok(Op::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<Op>() => Ok(obj.cast::<Op>()?.to_owned()),
-        KValue::Str(str) => Ok(Op::Node {
+        KValue::Str(_) => Ok(Op::Node {
             kind: NodeKind::Print,
             inputs: vec![],
             node: Box::new(FunDSPNode::mono(Box::new(sink()))),
