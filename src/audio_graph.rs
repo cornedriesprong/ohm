@@ -10,6 +10,13 @@ pub(crate) struct Container {
 }
 
 impl Container {
+    pub(crate) fn new() -> Self {
+        Self {
+            graph: None,
+            buffers: HashMap::new(),
+        }
+    }
+
     pub(crate) fn update_graph(&mut self, new: Graph) {
         if let Some(old) = self.graph.as_mut() {
             old.apply_diff(new)
@@ -36,15 +43,6 @@ impl Container {
             Some(buffer)
         } else {
             None
-        }
-    }
-}
-
-impl Container {
-    pub(crate) fn new() -> Self {
-        Self {
-            graph: None,
-            buffers: HashMap::new(),
         }
     }
 
