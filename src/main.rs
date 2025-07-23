@@ -343,9 +343,9 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
         if let Some(buffer) = container.get_buffer(&name.clone()) {
             Ok(KValue::Object(
                 Op::Node {
-                    kind: NodeKind::WavReader { name },
+                    kind: NodeKind::BufferWriter { name },
                     inputs: vec![input],
-                    node: Box::new(WavWriterNode::new(buffer.to_vec())),
+                    node: Box::new(WavWriterNode::new()),
                 }
                 .into(),
             ))
@@ -363,9 +363,9 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
         if let Some(buffer) = container.get_buffer(&name.clone()) {
             Ok(KValue::Object(
                 Op::Node {
-                    kind: NodeKind::WavReader { name },
+                    kind: NodeKind::BufferReader { name },
                     inputs: vec![input],
-                    node: Box::new(WavWriterNode::new(buffer.to_vec())),
+                    node: Box::new(WavReaderNode::new()),
                 }
                 .into(),
             ))
@@ -393,9 +393,9 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
 
         Ok(KValue::Object(
             Op::Node {
-                kind: NodeKind::WavReader { name: filename },
+                kind: NodeKind::BufferReader { name: filename },
                 inputs: vec![input],
-                node: Box::new(WavReaderNode::new(wave)),
+                node: Box::new(WavReaderNode::new()),
             }
             .into(),
         ))

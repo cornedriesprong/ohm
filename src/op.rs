@@ -140,7 +140,7 @@ impl Op {
                 val.to_bits().hash(hasher);
             }
             Op::Node { kind, .. } => match kind {
-                NodeKind::WavReader { name: filename } => filename.hash(hasher),
+                NodeKind::BufferReader { name: filename } => filename.hash(hasher),
                 _ => kind.hash(hasher),
             },
             Op::Mix(lhs, rhs) => {
