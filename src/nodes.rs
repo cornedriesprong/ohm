@@ -2,7 +2,7 @@ use crate::dsp::delay::Delay;
 use crate::utils::freq_to_period;
 use core::fmt;
 use fmt::Debug;
-use fundsp::hacker32::{AudioUnit, Wave};
+use fundsp::hacker32::AudioUnit;
 use rand::Rng;
 use rtsan_standalone::nonblocking;
 use std::f32::consts::PI;
@@ -36,21 +36,19 @@ pub enum NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
-    fn tick(&mut self, inputs: &[Frame]) -> Frame;
-    fn clone_box(&self) -> Box<dyn Node>;
+    fn tick(&mut self, _: &[Frame]) -> Frame {
+        unimplemented!("This node is either a buffer reader or writer");
+    }
 
-    /// OPTIONAL: A node that reads from the shared buffer implements this.
-    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
-        // Default implementation signifies this node can't read from the buffer.
-        // Calling it would be a programmer error in graph setup.
+    fn tick_read_buffer(&mut self, _: &[Frame], _: &[Frame]) -> Frame {
         unimplemented!("This node is not a buffer reader");
     }
 
-    /// OPTIONAL: A node that writes to the shared buffer implements this.
-    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) -> Frame {
-        // Default implementation signifies this node can't write to the buffer.
+    fn tick_write_buffer(&mut self, _: &[Frame], _: &mut [Frame]) {
         unimplemented!("This node is not a buffer writer");
     }
+
+    fn clone_box(&self) -> Box<dyn Node>;
 }
 
 #[derive(Clone)]
@@ -174,10 +172,6 @@ impl EnvNode {
 }
 
 impl Node for EnvNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -210,6 +204,10 @@ impl Node for EnvNode {
 
         [self.value, self.value]
     }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -224,10 +222,6 @@ impl SeqNode {
 }
 
 impl Node for SeqNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -238,6 +232,10 @@ impl Node for SeqNode {
         self.step = (ramp[0] / segment).floor() as usize;
 
         values[self.step]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
     }
 }
 
@@ -268,10 +266,6 @@ impl PulseNode {
 }
 
 impl Node for PulseNode {
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -286,6 +280,10 @@ impl Node for PulseNode {
         } else {
             [0.0, 0.0]
         }
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
     }
 }
 
@@ -437,57 +435,46 @@ impl Node for DelayNode {
 }
 
 #[derive(Clone)]
-pub struct WavReaderNode {
-    read_pos: usize,
-}
+pub struct WavReaderNode {}
 
 impl WavReaderNode {
     pub(crate) fn new() -> Self {
-        Self {
-            read_pos: 0
-        }
+        Self {}
     }
 }
 
 impl Node for WavReaderNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        // let phase = inputs.get(0).expect("sampler: missing phase")[0];
-        // let len = self.wave.len() as isize;
-        // let index = phase * len as f32;
-        // let index_floor = index.floor() as isize;
-        // let t = index - index.floor(); // fractional part
-        //
-        // // Get four neighboring samples with wrapping.
-        // let idx0 = (index_floor - 1).rem_euclid(len) as usize;
-        // let idx1 = index_floor.rem_euclid(len) as usize;
-        // let idx2 = (index_floor + 1).rem_euclid(len) as usize;
-        // let idx3 = (index_floor + 2).rem_euclid(len) as usize;
-        //
-        // let p0 = self.wave.at(0, idx0);
-        // let p1 = self.wave.at(0, idx1);
-        // let p2 = self.wave.at(0, idx2);
-        // let p3 = self.wave.at(0, idx3);
-        //
-        // // Catmull-Rom interpolation:
-        // // \\[
-        // // y(t) = 0.5 \\times (2P_1 + (-P_0+P_2)t + (2P_0-5P_1+4P_2-P_3)t^2 + (-P_0+3P_1-3P_2+P_3)t^3)
-        // // \\]
-        // let t2 = t * t;
-        // let t3 = t2 * t;
-        // let sample = 0.5
-        //     * (2.0 * p1
-        //         + (-p0 + p2) * t
-        //         + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-        //         + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
-        //
-        // [sample, sample]
-        [0.0, 0.0]
-    }
-
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
-        buffer[self.read_pos % buffer.len()]
+        let phase = inputs.get(0).expect("sampler: missing phase")[0];
+        let len = buffer.len() as isize;
+        let index = phase * len as f32;
+        let index_floor = index.floor() as isize;
+        let t = index - index.floor(); // fractional part
+
+        // Get four neighboring samples with wrapping.
+        let idx0 = (index_floor - 1).rem_euclid(len) as usize;
+        let idx1 = index_floor.rem_euclid(len) as usize;
+        let idx2 = (index_floor + 1).rem_euclid(len) as usize;
+        let idx3 = (index_floor + 2).rem_euclid(len) as usize;
+
+        let p0 = buffer[idx0][0];
+        let p1 = buffer[idx1][0];
+        let p2 = buffer[idx2][0];
+        let p3 = buffer[idx3][0];
+
+        // Catmull-Rom interpolation:
+        // \\[
+        // y(t) = 0.5 \\times (2P_1 + (-P_0+P_2)t + (2P_0-5P_1+4P_2-P_3)t^2 + (-P_0+3P_1-3P_2+P_3)t^3)
+        // \\]
+        let t2 = t * t;
+        let t3 = t2 * t;
+        let sample = 0.5
+            * (2.0 * p1
+                + (-p0 + p2) * t
+                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+
+        [sample, sample]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -497,36 +484,20 @@ impl Node for WavReaderNode {
 
 #[derive(Clone)]
 pub struct WavWriterNode {
-    write_pos: usize
+    write_pos: usize,
 }
 
 impl WavWriterNode {
     pub(crate) fn new() -> Self {
-        Self {
-            write_pos: 0
-        }
+        Self { write_pos: 0 }
     }
 }
 
 impl Node for WavWriterNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input = inputs.get(0).expect("sampler: missing phase")[0];
-
-        // Use the thread-safe operations provided by SharedRb
-        // if let Ok(_) = self.consumer.i
-        //     // Successfully wrote to buffer
-        // }
-
-        [0.0, 0.0]
-    }
-
-    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) -> Frame {
+    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
         let input = inputs.get(0).expect("wav writer: missing input");
         buffer[self.write_pos] = *input;
         self.write_pos = (self.write_pos + 1) % buffer.len();
-        *input
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

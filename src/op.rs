@@ -140,26 +140,33 @@ impl Op {
                 val.to_bits().hash(hasher);
             }
             Op::Node { kind, .. } => match kind {
-                NodeKind::BufferReader { name: filename } => filename.hash(hasher),
+                NodeKind::BufferReader { name: filename } => {
+                    1u8.hash(hasher);
+                    filename.hash(hasher)
+                },
+                NodeKind::BufferWriter { name: filename } => {
+                    2u8.hash(hasher);
+                    filename.hash(hasher)
+                },
                 _ => kind.hash(hasher),
             },
             Op::Mix(lhs, rhs) => {
-                1u8.hash(hasher);
-                lhs.hash_structure(hasher);
-                rhs.hash_structure(hasher);
-            }
-            Op::Gain(lhs, rhs) => {
-                2u8.hash(hasher);
-                lhs.hash_structure(hasher);
-                rhs.hash_structure(hasher);
-            }
-            Op::Wrap(lhs, rhs) => {
                 3u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            Op::Negate(val) => {
+            Op::Gain(lhs, rhs) => {
                 4u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Wrap(lhs, rhs) => {
+                5u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Negate(val) => {
+                6u8.hash(hasher);
                 val.hash_structure(hasher);
             }
         }
@@ -265,7 +272,6 @@ impl Node for Op {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         match self {
             Op::Constant(val) => [*val; 2],
-
             Op::Node { kind, node, .. } => match kind {
                 NodeKind::Print => {
                     println!("{:?}", inputs[0][0]);
@@ -275,20 +281,40 @@ impl Node for Op {
             },
             Op::Gain { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 * l1, r0 * r1],
-                _ => inputs[0],
+                _ => unimplemented!(),
             },
             Op::Mix { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 + l1, r0 + r1],
-                _ => inputs[0],
+                _ => unimplemented!(),
             },
             Op::Wrap { .. } => match inputs {
                 [[l0, r0], [l1, r1]] => [l0 % l1, r0 % r1],
-                _ => inputs[0],
+                _ => unimplemented!(),
             },
             Op::Negate { .. } => match inputs {
                 [[l, r]] => [-l, -r],
-                _ => inputs[0],
+                _ => unimplemented!(),
             },
+        }
+    }
+
+    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
+        match self {
+            Op::Node { kind, node, .. } => match kind {
+                NodeKind::BufferReader { .. } => node.tick_read_buffer(inputs, buffer),
+                _ => unimplemented!(),
+            },
+            _ => unimplemented!(),
+        }
+    }
+
+    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
+        match self {
+            Op::Node { kind, node, .. } => match kind {
+                NodeKind::BufferWriter { .. } => node.tick_write_buffer(inputs, buffer),
+                _ => unimplemented!(),
+            },
+            _ => unimplemented!(),
         }
     }
 

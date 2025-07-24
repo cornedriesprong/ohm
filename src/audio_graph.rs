@@ -1,8 +1,6 @@
 use crate::nodes::{Frame, Node, NodeKind};
 use crate::op::Op;
-use petgraph::visit::IntoEdgesDirected;
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
-use rtsan_standalone::nonblocking;
 use std::collections::HashMap;
 
 pub(crate) struct Container {
@@ -26,104 +24,33 @@ impl Container {
         }
     }
 
-    pub(crate) fn add_buffer(&mut self, name: &str) {
+    pub(crate) fn add_buffer(&mut self, name: &str, length: usize) {
         self.buffers
-            .insert(name.to_string(), vec![[0.0, 0.0]; 1024]);
+            .insert(name.to_string(), vec![[0.0, 0.0]; length]);
     }
-
-    pub(crate) fn get_buffer(&mut self, name: &str) -> Option<&Vec<Frame>> {
-        if let Some(buffer) = self.buffers.get(name) {
-            Some(&buffer)
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn get_buffer_mut(&mut self, name: &str) -> Option<&mut Vec<Frame>> {
-        if let Some(buffer) = self.buffers.get_mut(name) {
-            Some(buffer)
-        } else {
-            None
-        }
-    }
-
-    // #[inline]
-    // #[nonblocking]
-    // pub(crate) fn tick(&mut self) -> Frame {
-    //     if let Some(mut g) = self.graph.as_mut() {
-    //         for (&writer_idx, buffer_id) in &g.buffer_writers {
-    //             // Get mutable access to the specific buffer for this writer.
-    //             let buffer = &mut self.buffers.get(buffer_id).unwrap();
-    //
-    //             g.inputs.clear();
-    //             g.inputs.extend(
-    //                 g.graph
-    //                     .edges_directed(writer_idx, petgraph::Direction::Incoming)
-    //                     .map(|edge| g.outputs[edge.source().index()]),
-    //             );
-    //
-    //             let writer_node = &mut g.graph[writer_idx];
-    //             g.outputs[writer_idx.index()] = writer_node.tick_write_buffer(
-    //                 &g.inputs,
-    //                 buffer, // Pass the single mutable buffer slice
-    //             );
-    //         }
-    //
-    //         // graph.tick()
-    //         for &node_index in &g.sorted_nodes {
-    //             g.inputs.clear();
-    //
-    //             g.inputs.extend(
-    //                 g.graph
-    //                     .edges_directed(node_index, petgraph::Direction::Incoming)
-    //                     .map(|edge| g.outputs[edge.source().index()]),
-    //             );
-    //
-    //             g.outputs[node_index.index()] = g.graph[node_index].tick(&g.inputs);
-    //         }
-    //
-    //         g.outputs[g.sorted_nodes.len() - 1]
-    //     } else {
-    //         [0.0; 2]
-    //     }
-    // }
 
     #[inline]
     pub fn tick(&mut self) -> Frame {
-        // 1. Guard against a non-existent graph. This part is correct.
         let Some(graph) = &mut self.graph else {
             return [0.0, 0.0];
         };
 
-        // 2. Get a mutable borrow of the buffers. This is also correct.
         let buffers = &mut self.buffers;
 
-        // --- PASS 1: WRITERS ---
-
-        // 4. Now, iterate over the temporary Vec. `graph` is no longer borrowed by the loop.
-        for (writer_idx, buffer_name) in &graph.buffer_writers {
-            // Get mutable access to the specific buffer for this writer.
-            let buffer = buffers.get_mut(buffer_name).unwrap();
-
-            // Gather inputs for the writer node. This is a mutable borrow of `graph.inputs`
-            // and an immutable borrow of `graph.outputs`. This is fine.
+        for (writer_idx, buf_name) in &graph.buffer_writers {
             graph.inputs.clear();
             graph.inputs.extend(
-                graph
-                    .graph
+                graph.graph
                     .edges_directed(*writer_idx, petgraph::Direction::Incoming)
                     .map(|edge| graph.outputs[edge.source().index()]),
             );
 
-            // This is now valid! We can mutably borrow `graph.graph` because
-            // the `for` loop is no longer borrowing any part of `graph`.
-            let writer_node = &mut graph.graph[*writer_idx];
-            graph.outputs[writer_idx.index()] =
-                writer_node.tick_write_buffer(&graph.inputs, buffer);
+            if let Some(buffer) = buffers.get_mut(buf_name) {
+                let node = &mut graph.graph[*writer_idx];
+                node.tick_write_buffer(&graph.inputs, buffer);
+            }
         }
 
-        // --- PASS 2: READERS & NORMAL NODES ---
-        // This logic can remain the same, as it only requires immutable borrows.
         for &node_idx in &graph.sorted_nodes {
             if graph.buffer_writers.contains_key(&node_idx) {
                 continue;
@@ -140,15 +67,16 @@ impl Container {
             let node = &mut graph.graph[node_idx];
             let output_idx = node_idx.index();
 
-            if let Some(buffer_name) = graph.buffer_readers.get(&node_idx) {
-                let buffer = buffers.get(buffer_name).unwrap();
-                graph.outputs[output_idx] = node.tick_read_buffer(&graph.inputs, buffer);
-            } else {
-                graph.outputs[output_idx] = node.tick(&graph.inputs);
+            if let Some(buf_name) = graph.buffer_readers.get(&node_idx) {
+                if let Some(buffer) = buffers.get(buf_name) {
+                    graph.outputs[output_idx] = node.tick_read_buffer(&graph.inputs, buffer);
+                    continue;
+                }
             }
+            graph.outputs[output_idx] = node.tick(&graph.inputs);
         }
 
-        graph.outputs.last().copied().unwrap_or([0.0, 0.0])
+        *graph.outputs.last().unwrap_or(&[0.0, 0.0])
     }
 }
 
@@ -156,10 +84,8 @@ impl Container {
 pub(crate) struct Graph {
     graph: StableDiGraph<Box<Op>, ()>,
     sorted_nodes: Vec<NodeIndex>,
-    // Mappings from a node to the ID of the buffer it uses.
     buffer_writers: HashMap<NodeIndex, String>,
     buffer_readers: HashMap<NodeIndex, String>,
-
     inputs: Vec<Frame>,
     outputs: Vec<Frame>,
 }
@@ -179,12 +105,10 @@ impl Graph {
     pub(crate) fn add_node(&mut self, node: Op) -> NodeIndex {
         let index = self.graph.add_node(Box::new(node.clone()));
 
-        // if node is a buffer reader or writer,
-        // connect it to the corresponding buffer
+        // if node is a buffer reader or writer, connect it to the corresponding buffer
         match node {
             Op::Node { kind, .. } => match kind {
                 NodeKind::BufferWriter { name } => {
-                    // TODO: assert that there is only one writer per buffer
                     self.buffer_writers.insert(index, name);
                 }
                 NodeKind::BufferReader { name } => {
@@ -204,24 +128,6 @@ impl Graph {
         self.graph.add_edge(from.into(), to.into(), ());
         self.update_processing_order();
     }
-
-    // #[inline]
-    // #[nonblocking]
-    // pub(crate) fn tick(&mut self) -> Frame {
-    //     for &node_index in &self.sorted_nodes {
-    //         self.inputs.clear();
-    //
-    //         self.inputs.extend(
-    //             self.graph
-    //                 .edges_directed(node_index, petgraph::Direction::Incoming)
-    //                 .map(|edge| self.outputs[edge.source().index()]),
-    //         );
-    //
-    //         self.outputs[node_index.index()] = self.graph[node_index].tick(&self.inputs);
-    //     }
-    //
-    //     self.outputs[self.sorted_nodes.len() - 1]
-    // }
 
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
