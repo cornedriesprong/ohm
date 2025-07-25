@@ -140,13 +140,13 @@ impl Op {
                 val.to_bits().hash(hasher);
             }
             Op::Node { kind, .. } => match kind {
-                NodeKind::BufferReader { name: filename } => {
+                NodeKind::BufferReader { name } => {
                     1u8.hash(hasher);
-                    filename.hash(hasher)
+                    name.hash(hasher)
                 },
-                NodeKind::BufferWriter { name: filename } => {
+                NodeKind::BufferWriter { name } => {
                     2u8.hash(hasher);
-                    filename.hash(hasher)
+                    name.hash(hasher)
                 },
                 _ => kind.hash(hasher),
             },

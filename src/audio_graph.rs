@@ -24,9 +24,12 @@ impl Container {
         }
     }
 
-    pub(crate) fn add_buffer(&mut self, name: &str, length: usize) {
-        self.buffers
-            .insert(name.to_string(), vec![[0.0, 0.0]; length]);
+    pub(crate) fn load_frames_to_buffer(&mut self, name: String, frames: Vec<Frame>) {
+        self.buffers.insert(name, frames);
+    }
+
+    pub(crate) fn add_buffer(&mut self, name: String, length: usize) {
+        self.buffers.insert(name, vec![[0.0, 0.0]; length]);
     }
 
     #[inline]
@@ -40,7 +43,8 @@ impl Container {
         for (writer_idx, buf_name) in &graph.buffer_writers {
             graph.inputs.clear();
             graph.inputs.extend(
-                graph.graph
+                graph
+                    .graph
                     .edges_directed(*writer_idx, petgraph::Direction::Incoming)
                     .map(|edge| graph.outputs[edge.source().index()]),
             );
@@ -59,7 +63,8 @@ impl Container {
             graph.inputs.clear();
 
             graph.inputs.extend(
-                graph.graph
+                graph
+                    .graph
                     .edges_directed(node_idx, petgraph::Direction::Incoming)
                     .map(|edge| graph.outputs[edge.source().index()]),
             );
