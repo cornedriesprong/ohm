@@ -282,7 +282,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into(),
         ))
     });
-    koto.prelude().add_fn("delay", move |ctx| {
+    koto.prelude().add_fn("echo", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
 
@@ -311,7 +311,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into(),
         ))
     });
-    koto.prelude().add_fn("pipe", move |ctx| {
+    koto.prelude().add_fn("delay", move |ctx| {
         let args = ctx.args();
 
         let input = node_from_kvalue(&args[0])?;

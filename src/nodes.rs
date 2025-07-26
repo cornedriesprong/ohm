@@ -7,6 +7,7 @@ use rand::{random, Rng};
 use rtsan_standalone::nonblocking;
 use std::f32::consts::PI;
 use std::hash::Hash;
+use crate::utils::cubic_interpolate;
 
 pub type Frame = [f32; 2];
 
@@ -387,7 +388,7 @@ impl Node for PluckNode {
         let mut sum = 0.0;
         // let window = 10.0;
         let mut window = damping.powf(2.0);
-        window = (2.0 as f32).max(window * self.pitch_track);
+        window = (2.0f32).max(window * self.pitch_track);
         for i in 0..window as usize {
             let idx = (self.read_pos + i) % self.period as usize;
             sum += self.buffer[idx];
@@ -447,35 +448,10 @@ impl BufReaderNode {
 impl Node for BufReaderNode {
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
         let phase = inputs.get(0).expect("sampler: missing phase")[0];
-        let len = buffer.len() as isize;
-        let index = phase * len as f32;
-        let index_floor = index.floor() as isize;
-        let t = index - index.floor(); // fractional part
+        let phase = phase.clamp(0.0, 1.0);
+        let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
 
-        // Get four neighboring samples with wrapping.
-        let idx0 = (index_floor - 1).rem_euclid(len) as usize;
-        let idx1 = index_floor.rem_euclid(len) as usize;
-        let idx2 = (index_floor + 1).rem_euclid(len) as usize;
-        let idx3 = (index_floor + 2).rem_euclid(len) as usize;
-
-        let p0 = buffer[idx0][0];
-        let p1 = buffer[idx1][0];
-        let p2 = buffer[idx2][0];
-        let p3 = buffer[idx3][0];
-
-        // Catmull-Rom interpolation:
-        // \\[
-        // y(t) = 0.5 \\times (2P_1 + (-P_0+P_2)t + (2P_0-5P_1+4P_2-P_3)t^2 + (-P_0+3P_1-3P_2+P_3)t^3)
-        // \\]
-        let t2 = t * t;
-        let t3 = t2 * t;
-        let sample = 0.5
-            * (2.0 * p1
-                + (-p0 + p2) * t
-                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
-                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
-
-        [sample, sample]
+        cubic_interpolate(buffer, read_pos)
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -510,7 +486,6 @@ impl Node for BufWriterNode {
 #[derive(Clone)]
 pub(crate) struct PipeNode {
     buffer: [Frame; Self::BUFFER_SIZE],
-    read_pos: usize,
     write_pos: usize,
 }
 
@@ -519,8 +494,7 @@ impl PipeNode {
 
     pub(crate) fn new() -> Self {
         Self {
-            buffer: [[0.0, 0.0]; Self::BUFFER_SIZE],
-            read_pos: 0,
+            buffer: [[0.0; 2]; Self::BUFFER_SIZE],
             write_pos: 0,
         }
     }
@@ -532,15 +506,22 @@ impl Node for PipeNode {
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let input = inputs.get(0).expect("pipe: missing input");
         self.buffer[self.write_pos] = *input;
+
         let delay = inputs.get(1).expect("pipe: missing delay")[0];
-        self.read_pos = (self.read_pos + 1) % Self::BUFFER_SIZE;
+        let delay= delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
+
+        let read_pos = (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32)
+            % Self::BUFFER_SIZE as f32;
+
+        let output = cubic_interpolate(&self.buffer, read_pos);
+
         self.write_pos = (self.write_pos + 1) % Self::BUFFER_SIZE;
 
-        // Read the value at the current read position
-        self.buffer[(self.read_pos + delay as usize) % Self::BUFFER_SIZE]
+        output
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
     }
 }
+
