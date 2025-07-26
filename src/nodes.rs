@@ -410,11 +410,11 @@ impl Node for PluckNode {
 }
 
 #[derive(Clone)]
-pub struct DelayNode {
+pub struct EchoNode {
     delay: Delay,
 }
 
-impl DelayNode {
+impl EchoNode {
     pub(crate) fn new() -> Self {
         Self {
             delay: Delay::new(15000.0, 0.5),
@@ -422,7 +422,7 @@ impl DelayNode {
     }
 }
 
-impl Node for DelayNode {
+impl Node for EchoNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
@@ -484,12 +484,12 @@ impl Node for BufWriterNode {
 
 // delay line
 #[derive(Clone)]
-pub(crate) struct PipeNode {
+pub(crate) struct DelayNode {
     buffer: [Frame; Self::BUFFER_SIZE],
     write_pos: usize,
 }
 
-impl PipeNode {
+impl DelayNode {
     pub const BUFFER_SIZE: usize = 48000;
 
     pub(crate) fn new() -> Self {
@@ -500,7 +500,7 @@ impl PipeNode {
     }
 }
 
-impl Node for PipeNode {
+impl Node for DelayNode {
     #[inline(always)]
     #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {

@@ -1,5 +1,5 @@
 use crate::nodes::{
-    BufReaderNode, BufWriterNode, DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
+    BufReaderNode, BufWriterNode, EchoNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
     SeqNode,
 };
 use anyhow::bail;
@@ -8,7 +8,7 @@ use cpal::{
     FromSample, SizedSample,
 };
 use koto::prelude::*;
-use nodes::PipeNode;
+use nodes::DelayNode;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -290,7 +290,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             Op::Node {
                 kind: NodeKind::Delay,
                 inputs: vec![input],
-                node: Box::new(DelayNode::new()),
+                node: Box::new(EchoNode::new()),
             }
             .into(),
         ))
@@ -321,7 +321,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             Op::Node {
                 kind: NodeKind::Pipe,
                 inputs: vec![input, delay],
-                node: Box::new(PipeNode::new()),
+                node: Box::new(DelayNode::new()),
             }
             .into(),
         ))
