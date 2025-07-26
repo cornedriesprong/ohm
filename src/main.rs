@@ -1,6 +1,6 @@
 use crate::nodes::{
-    DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode, SeqNode, WavReaderNode,
-    WavWriterNode,
+    BufReaderNode, BufWriterNode, DelayNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
+    SeqNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -329,58 +329,102 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     let buf_container = Arc::clone(&container);
     koto.prelude().add_fn("buf", move |ctx| {
         let args = ctx.args();
+        let default_length = KValue::Number(sample_rate.into());
+        let length = num_from_kvalue(args.get(0).unwrap_or(&default_length))?;
+
+        let mut container = buf_container
+            .lock()
+            .map_err(|e| format!("Failed to lock buffer container: {e}"))?;
+
+        let id = container.add_buffer(length as usize);
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::BufferRef { id },
+                inputs: vec![],
+                node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+            }
+            .into(),
+        ))
+    });
+    let file_container = Arc::clone(&container);
+    koto.prelude().add_fn("file", move |ctx| {
+        let args = ctx.args();
         let name = str_from_kvalue(&args[0])?;
-        // default length of buffer is 1 second
-        let length = num_from_kvalue(&args.get(1).unwrap_or(&KValue::Number(sample_rate.into())))?;
 
-        if let Ok(mut container) = buf_container.lock() {
-            if name.ends_with(".wav") {
-                match Wave::load(&format!("samples/{}", name)) {
-                    Ok(wave) => {
-                        let frames = {
-                            let right_ch = if wave.channels() >= 2 { 1 } else { 0 };
-                            (0..wave.len())
-                                .map(|i| [wave.at(0, i), wave.at(right_ch, i)])
-                                .collect::<Vec<nodes::Frame>>()
-                        };
-                        container.load_frames_to_buffer(name, frames);
-                    }
-                    Err(e) => {
-                        return Err(format!("Failed to load wave file '{}': {}", name, e).into());
-                    }
-                };
-            } else {
-                container.add_buffer(name, length as usize);
-            };
-        }
+        let mut container = file_container
+            .lock()
+            .map_err(|e| format!("Failed to lock buffer container: {e}"))?;
 
-        Ok(KValue::Null)
+        let filename = if name.ends_with(".wav") {
+            format!("samples/{}", name)
+        } else {
+            format!("samples/{}.wav", name)
+        };
+
+        let wave = Wave::load(filename)
+            .map_err(|e| format!("Failed to load '{name}': {e}"))?;
+
+        let frames: Vec<nodes::Frame> = match wave.channels() {
+            1 => (0..wave.len())
+                .map(|i| {
+                    let sample = wave.at(0, i);
+                    [sample, sample]
+                })
+                .collect(),
+            _ => (0..wave.len())
+                .map(|i| [wave.at(0, i), wave.at(1, i)])
+                .collect(),
+        };
+
+        let id = container.load_frames_to_buffer(frames);
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::BufferRef { id },
+                inputs: vec![],
+                node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+            }
+            .into(),
+        ))
     });
     koto.prelude().add_fn("rec", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
-        let name = str_from_kvalue(&args[1])?;
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::BufferWriter { name },
-                inputs: vec![input],
-                node: Box::new(WavWriterNode::new()),
-            }
-            .into(),
-        ))
+        let buf = node_from_kvalue(&args[1])?;
+        return match buf {
+            Op::Node { kind, .. } => match kind {
+                NodeKind::BufferRef { id } => Ok(KValue::Object(
+                    Op::Node {
+                        kind: NodeKind::BufferWriter { id },
+                        inputs: vec![input],
+                        node: Box::new(BufWriterNode::new()),
+                    }
+                    .into(),
+                )),
+                _ => Err("Expected a buffer".into()),
+            },
+            _ => Err("Expected a buffer".into()),
+        };
     });
     koto.prelude().add_fn("play", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
-        let name = str_from_kvalue(&args[1])?;
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::BufferReader { name },
-                inputs: vec![input],
-                node: Box::new(WavReaderNode::new()),
-            }
-            .into(),
-        ))
+        let buf = node_from_kvalue(&args[1])?;
+        return match buf {
+            Op::Node { kind, .. } => match kind {
+                NodeKind::BufferRef { id } => Ok(KValue::Object(
+                    Op::Node {
+                        kind: NodeKind::BufferReader { id },
+                        inputs: vec![input],
+                        node: Box::new(BufReaderNode::new()),
+                    }
+                    .into(),
+                )),
+                _ => Err("Expected a buffer".into()),
+            },
+            _ => Err("Expected a buffer".into()),
+        };
     });
 }
 

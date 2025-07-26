@@ -3,7 +3,7 @@ use crate::utils::freq_to_period;
 use core::fmt;
 use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
-use rand::Rng;
+use rand::{random, Rng};
 use rtsan_standalone::nonblocking;
 use std::f32::consts::PI;
 use std::hash::Hash;
@@ -31,8 +31,9 @@ pub enum NodeKind {
     Delay,
     Moog,
     Pipe,
-    BufferWriter { name: String },
-    BufferReader { name: String },
+    BufferWriter { id: usize },
+    BufferReader { id: usize },
+    BufferRef { id: usize },
 }
 
 pub(crate) trait Node: Send + Sync {
@@ -260,7 +261,7 @@ impl PulseNode {
         Self {
             phase: 0.,
             prev_phase: 0.,
-            sample_rate: sample_rate,
+            sample_rate,
         }
     }
 }
@@ -338,7 +339,7 @@ impl PluckNode {
             // let sine = ((i as f32 / self.period) * (PI * 2.0)).sin();
             let tri = Self::generate_triangle_wave(i as i32, self.period);
 
-            let noise = if rand::thread_rng().gen::<bool>() {
+            let noise = if random::<bool>() {
                 1.0
             } else {
                 -1.0
@@ -435,15 +436,15 @@ impl Node for DelayNode {
 }
 
 #[derive(Clone)]
-pub struct WavReaderNode {}
+pub struct BufReaderNode {}
 
-impl WavReaderNode {
+impl BufReaderNode {
     pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
-impl Node for WavReaderNode {
+impl Node for BufReaderNode {
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
         let phase = inputs.get(0).expect("sampler: missing phase")[0];
         let len = buffer.len() as isize;
@@ -483,17 +484,17 @@ impl Node for WavReaderNode {
 }
 
 #[derive(Clone)]
-pub struct WavWriterNode {
+pub struct BufWriterNode {
     write_pos: usize,
 }
 
-impl WavWriterNode {
+impl BufWriterNode {
     pub(crate) fn new() -> Self {
         Self { write_pos: 0 }
     }
 }
 
-impl Node for WavWriterNode {
+impl Node for BufWriterNode {
     fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
         let input = inputs.get(0).expect("wav writer: missing input");
         buffer[self.write_pos] = *input;

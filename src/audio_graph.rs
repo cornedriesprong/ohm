@@ -5,14 +5,14 @@ use std::collections::HashMap;
 
 pub(crate) struct Container {
     graph: Option<Graph>,
-    buffers: HashMap<String, Vec<Frame>>,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl Container {
     pub(crate) fn new() -> Self {
         Self {
             graph: None,
-            buffers: HashMap::new(),
+            buffers: Vec::new(),
         }
     }
 
@@ -24,12 +24,14 @@ impl Container {
         }
     }
 
-    pub(crate) fn load_frames_to_buffer(&mut self, name: String, frames: Vec<Frame>) {
-        self.buffers.insert(name, frames);
+    pub(crate) fn load_frames_to_buffer(&mut self, frames: Vec<Frame>) -> usize {
+        self.buffers.push(frames);
+        self.buffers.len() - 1
     }
 
-    pub(crate) fn add_buffer(&mut self, name: String, length: usize) {
-        self.buffers.insert(name, vec![[0.0, 0.0]; length]);
+    pub(crate) fn add_buffer(&mut self, length: usize) -> usize {
+        self.buffers.push(vec![[0.0, 0.0]; length]);
+        self.buffers.len() - 1
     }
 
     #[inline]
@@ -49,7 +51,7 @@ impl Container {
                     .map(|edge| graph.outputs[edge.source().index()]),
             );
 
-            if let Some(buffer) = buffers.get_mut(buf_name) {
+            if let Some(buffer) = buffers.get_mut(*buf_name) {
                 let node = &mut graph.graph[*writer_idx];
                 node.tick_write_buffer(&graph.inputs, buffer);
             }
@@ -73,7 +75,7 @@ impl Container {
             let output_idx = node_idx.index();
 
             if let Some(buf_name) = graph.buffer_readers.get(&node_idx) {
-                if let Some(buffer) = buffers.get(buf_name) {
+                if let Some(buffer) = buffers.get(*buf_name) {
                     graph.outputs[output_idx] = node.tick_read_buffer(&graph.inputs, buffer);
                     continue;
                 }
@@ -89,8 +91,8 @@ impl Container {
 pub(crate) struct Graph {
     graph: StableDiGraph<Box<Op>, ()>,
     sorted_nodes: Vec<NodeIndex>,
-    buffer_writers: HashMap<NodeIndex, String>,
-    buffer_readers: HashMap<NodeIndex, String>,
+    buffer_writers: HashMap<NodeIndex, usize>,
+    buffer_readers: HashMap<NodeIndex, usize>,
     inputs: Vec<Frame>,
     outputs: Vec<Frame>,
 }
@@ -113,11 +115,11 @@ impl Graph {
         // if node is a buffer reader or writer, connect it to the corresponding buffer
         match node {
             Op::Node { kind, .. } => match kind {
-                NodeKind::BufferWriter { name } => {
-                    self.buffer_writers.insert(index, name);
+                NodeKind::BufferWriter { id } => {
+                    self.buffer_writers.insert(index, id);
                 }
-                NodeKind::BufferReader { name } => {
-                    self.buffer_readers.insert(index, name);
+                NodeKind::BufferReader { id } => {
+                    self.buffer_readers.insert(index, id);
                 }
                 _ => {}
             },
