@@ -508,7 +508,9 @@ impl Node for DelayNode {
         self.buffer[self.write_pos] = *input;
 
         let delay = inputs.get(1).expect("pipe: missing delay")[0];
+        // clamp delay to buffer size
         let delay= delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
+        // TODO: skip interpolation if delay is < 0
 
         let read_pos = (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32)
             % Self::BUFFER_SIZE as f32;
