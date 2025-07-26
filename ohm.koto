@@ -1,4 +1,4 @@
-from pitches import A4
+from pitches import *
 
 export A4_FREQ = 440
 
@@ -9,19 +9,17 @@ export ptof = |p| A4_FREQ * (2 ^ ((p - A4) / 12))
 export ftop = |f| ((f / A4_FREQ).log2() * 12 + A4).round()
 
 export ar = |release, trig| env([(1, 0), (0, release)], trig)
-export lfo = |hz = 0.1 | sin(hz) * 0.5 + 0.5
+export lfo = |hz = 0.1| sin(hz) * 0.5 + 0.5
 
-export mix = |nodes| 
-  nodes.fold 0, |acc, x| x * (1 / nodes.count()) + acc
+export mix = |xs| 
+  xs.fold 0, |acc, x| x * (1 / xs.count()) + acc
 
 export rev = |x, mix = 0.5 | 
   (x * (1 - mix)) + ((x -> reverb) * mix)
 
-export phaser = |x, amt = 0.5| 
-  ((x -> pipe (lfo 0.1) * (amt * 1000)) + x) * 0.5
+export flanger = |x, amt = 0.5, speed = 0.1| 
+  ((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5
 
 export bseq = |trigs, trig|
   let values = trigs.transform |x| if x == true then 1 else 0
   seq(values, trig)
-
-# export {pitches: pitches}
