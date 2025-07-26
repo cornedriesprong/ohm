@@ -1,8 +1,8 @@
-# Ohm
+# ohm
 
-Ohm is a live coding language/DSL for audio synthesis and processing. It is based on the [Koto](https://koto.dev/) scripting language, which is embedded into a realtime audio synthesis engine written in Rust, and can be used to define audio graphs and play back their output. Audio graphs can be updated and re-rendered in real-time, allowing for fast iteration and experimentation. Ohm is inspired by and similar to projects like [Faust](https://faust.grame.fr/) (but interpreted, instead of compiled) or Max's [Gen~](https://docs.cycling74.com/legacy/max8/vignettes/gen_overview) (but primarily text-based, instead of graphical). 
+ohm is a live coding language/DSL for audio synthesis and processing. It is based on the [Koto](https://koto.dev/) scripting language, which is embedded into a realtime audio synthesis engine written in Rust, and can be used to define audio graphs and play back their output. Audio graphs can be updated and re-rendered in real-time, allowing for fast iteration and experimentation. ohm is inspired by and similar to projects like [Faust](https://faust.grame.fr/) (but interpreted, instead of compiled) or Max's [Gen~](https://docs.cycling74.com/legacy/max8/vignettes/gen_overview) (but primarily text-based, instead of graphical). 
 
-The Koto language has an elegant and minimal syntax. For instance, a simple 2-operator FM synthesizer can we defined in Ohm as:
+The Koto language has an elegant and minimal syntax. For instance, a simple 2-operator FM synthesizer can we defined in ohm as:
 
 ```
 sine(sine(400) * 200 + 400)
@@ -16,9 +16,9 @@ sine(sine(400) * 200 + 400)
 
 See the `examples` directory for more examples.
 
-There is no distinction between audio- and control signals; any can modulate any other signal. Ohm functions operate on a per-sample level, which allows for creating DSP structures that require single-sample feedback loops, like filters and delay-based effects (chorus, flanger, etc.).
+There is no distinction between audio- and control signals; any can modulate any other signal. ohm functions operate on a per-sample level, which allows for creating DSP structures that require single-sample feedback loops, like filters and delay-based effects (chorus, flanger, etc.).
 
-WARNING: Ohm currently doesn't have a built-in limiter, and it's trivial to generate a signal that will massively clip the output. So watch your output levels!
+WARNING: ohm currently doesn't have a built-in limiter, and it's trivial to generate a signal that will massively clip the output. So watch your output levels!
 
 ## Usage
 
@@ -28,13 +28,13 @@ The way it works is you start the engine with the path to a koto file as an argu
 cargo run --release -- examples/sine.koto
 ```
 
-Ohm will parse the code in the file and, if it's valid, will start playing back the audio. It will listen for any changes in the file and reconstruct the audio graph on save.
+ohm will parse the code in the file and, if it's valid, will start playing back the audio. It will listen for any changes in the file and reconstruct the audio graph on save.
 
 Note that re-evaluating the code currently causes discontinuities in the audio output, since the new graph is reconstructed in place of the old one.
 
 ## Functions
 
-Ohm currently contains the following high-level synthesis functions and effects:
+ohm currently contains the following high-level synthesis functions and effects:
 
 - `sine(freq)` a sine wave
 - `square(freq)` a square wave
