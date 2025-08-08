@@ -34,7 +34,7 @@ impl Container {
         self.buffers.len() - 1
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn tick(&mut self) -> Frame {
         let Some(graph) = &mut self.graph else {
             return [0.0, 0.0];
@@ -44,12 +44,9 @@ impl Container {
 
         for (writer_idx, buf_name) in &graph.buffer_writers {
             graph.inputs.clear();
-            graph.inputs.extend(
-                graph
-                    .graph
-                    .edges_directed(*writer_idx, petgraph::Direction::Incoming)
-                    .map(|edge| graph.outputs[edge.source().index()]),
-            );
+            for edge in graph.graph.edges_directed(*writer_idx, petgraph::Direction::Incoming) {
+                graph.inputs.push(graph.outputs[edge.source().index()]);
+            }
 
             if let Some(buffer) = buffers.get_mut(*buf_name) {
                 let node = &mut graph.graph[*writer_idx];
@@ -63,13 +60,9 @@ impl Container {
             }
 
             graph.inputs.clear();
-
-            graph.inputs.extend(
-                graph
-                    .graph
-                    .edges_directed(node_idx, petgraph::Direction::Incoming)
-                    .map(|edge| graph.outputs[edge.source().index()]),
-            );
+            for edge in graph.graph.edges_directed(node_idx, petgraph::Direction::Incoming) {
+                graph.inputs.push(graph.outputs[edge.source().index()]);
+            }
 
             let node = &mut graph.graph[node_idx];
             let output_idx = node_idx.index();
@@ -138,8 +131,11 @@ impl Graph {
 
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
-        self.inputs.resize(self.graph.node_count(), [0.0, 0.0]);
         self.outputs.resize(self.graph.node_count(), [0.0, 0.0]);
+        
+        // Pre-allocate inputs vector with capacity for typical node inputs (most have 1-4)
+        self.inputs.clear();
+        self.inputs.reserve(8);
     }
 
     pub(crate) fn apply_diff(&mut self, mut new_graph: Graph) {

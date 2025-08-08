@@ -35,14 +35,17 @@ pub enum NodeKind {
 }
 
 pub(crate) trait Node: Send + Sync {
+    #[inline(always)]
     fn tick(&mut self, _: &[Frame]) -> Frame {
         unimplemented!("This node is either a buffer reader or writer");
     }
 
+    #[inline(always)]
     fn tick_read_buffer(&mut self, _: &[Frame], _: &[Frame]) -> Frame {
         unimplemented!("This node is not a buffer reader");
     }
 
+    #[inline(always)]
     fn tick_write_buffer(&mut self, _: &[Frame], _: &mut [Frame]) {
         unimplemented!("This node is not a buffer writer");
     }

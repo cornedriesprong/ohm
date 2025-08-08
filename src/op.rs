@@ -302,6 +302,7 @@ impl Node for Op {
         }
     }
 
+    #[inline(always)]
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
         match self {
             Op::Node { kind, node, .. } => match kind {
@@ -314,6 +315,7 @@ impl Node for Op {
         }
     }
 
+    #[inline(always)]
     fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
         match self {
             Op::Node { kind, node, .. } => match kind {
