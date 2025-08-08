@@ -281,9 +281,6 @@ impl Node for Op {
                     println!("{:?}", inputs[0][0]);
                     inputs[0]
                 }
-                // NodeKind::BufferRef { .. } => {
-                //     [0.0, 0.0]
-                // }
                 _ => node.tick(inputs),
             },
             Op::Gain { .. } => match inputs {
