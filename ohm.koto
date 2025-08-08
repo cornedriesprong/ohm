@@ -7,8 +7,9 @@ export C_MIN = [0, 2, 3, 5, 7, 8, 10]
 
 export ptof = |p| A4_FREQ * (2 ^ ((p - A4) / 12))
 export ftop = |f| ((f / A4_FREQ).log2() * 12 + A4).round()
+export freq_to_period = |f| sr / f
 
-export ar = |release, trig| env([(1, 0), (0, release)], trig)
+export ar = |release, trig| trig -> env [(1, 0), (0, release)]
 export lfo = |hz = 0.1| sin(hz) * 0.5 + 0.5
 
 export mix = |xs| 
@@ -43,6 +44,10 @@ export echo = |x, t = 22050, fb = 0.5, damping = 0.5|
   y = y -> onepole damping
   x = x + (y * fb) -> rec b
   x + y
+
+export pluck = |t, pitch, length = 1, damping = 0.5|
+  period = freq_to_period (ptof pitch)
+  noise() * ar 500, t -> echo period, length, damping
 
 export bseq = |trigs, trig|
   let values = trigs.transform |x| if x == true then 1 else 0

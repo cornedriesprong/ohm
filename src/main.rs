@@ -1,6 +1,5 @@
 use crate::nodes::{
-    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
-    SeqNode,
+    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PulseNode, SeqNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -242,22 +241,6 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
                 kind: NodeKind::Pan,
                 inputs: vec![input, pan],
                 node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("pluck", move |ctx| {
-        let args = ctx.args();
-        let trig = node_from_kvalue(&args[0])?;
-        let freq = node_from_kvalue(&args[1])?;
-        let tone = node_from_kvalue(&args[2])?;
-        let damping = node_from_kvalue(&args[3])?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Pluck,
-                inputs: vec![freq, tone, damping, trig],
-                node: Box::new(PluckNode::new(sample_rate)),
             }
             .into(),
         ))
