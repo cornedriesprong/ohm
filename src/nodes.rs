@@ -1,13 +1,10 @@
-use crate::dsp::delay::Delay;
-use crate::utils::freq_to_period;
+use crate::utils::{cubic_interpolate, freq_to_period};
 use core::fmt;
 use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
-use rand::{random, Rng};
-use rtsan_standalone::nonblocking;
+use rand::random;
 use std::f32::consts::PI;
 use std::hash::Hash;
-use crate::utils::cubic_interpolate;
 
 pub type Frame = [f32; 2];
 
@@ -31,7 +28,7 @@ pub enum NodeKind {
     Reverb,
     Delay,
     Moog,
-    Pipe,
+    BufferTap { id: usize },
     BufferWriter { id: usize },
     BufferReader { id: usize },
     BufferRef { id: usize },
@@ -77,7 +74,6 @@ impl FunDSPNode {
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         if self.is_stereo {
             let mut output = [0.0; 2];
@@ -175,7 +171,6 @@ impl EnvNode {
 
 impl Node for EnvNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let trig = inputs.last().expect("env: missing trigger input")[0];
         let segments = &inputs[0..inputs.len() - 1]
@@ -225,13 +220,12 @@ impl SeqNode {
 
 impl Node for SeqNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let ramp = inputs.last().expect("seq: missing trigger input");
+        let phase = inputs.last().expect("seq: missing trigger input");
         let values = &inputs[0..inputs.len() - 1];
 
         let segment = 1.0 / values.len() as f32;
-        self.step = (ramp[0] / segment).floor() as usize;
+        self.step = (phase[0] / segment).floor() as usize;
 
         values[self.step]
     }
@@ -269,7 +263,6 @@ impl PulseNode {
 
 impl Node for PulseNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let freq = inputs.get(0).expect("pulse: missing freq input")[0];
 
@@ -340,11 +333,7 @@ impl PluckNode {
             // let sine = ((i as f32 / self.period) * (PI * 2.0)).sin();
             let tri = Self::generate_triangle_wave(i as i32, self.period);
 
-            let noise = if random::<bool>() {
-                1.0
-            } else {
-                -1.0
-            };
+            let noise = if random::<bool>() { 1.0 } else { -1.0 };
             let y = (tri * tone) + (noise * (1.0 - tone));
             self.buffer[i] = y;
         }
@@ -364,7 +353,6 @@ impl PluckNode {
 
 impl Node for PluckNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let freq = inputs.get(0).map_or(0.0, |arr| arr[0]);
         let tone = inputs.get(1).map_or(0.0, |arr| arr[0]);
@@ -410,33 +398,6 @@ impl Node for PluckNode {
 }
 
 #[derive(Clone)]
-pub struct EchoNode {
-    delay: Delay,
-}
-
-impl EchoNode {
-    pub(crate) fn new() -> Self {
-        Self {
-            delay: Delay::new(15000.0, 0.5),
-        }
-    }
-}
-
-impl Node for EchoNode {
-    #[inline(always)]
-    #[nonblocking]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input = inputs.get(0).expect("delay: missing input")[0];
-        let output = self.delay.process(input);
-        [output, output]
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-}
-
-#[derive(Clone)]
 pub struct BufReaderNode {}
 
 impl BufReaderNode {
@@ -447,11 +408,42 @@ impl BufReaderNode {
 
 impl Node for BufReaderNode {
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
-        let phase = inputs.get(0).expect("sampler: missing phase")[0];
+        let phase = inputs.get(0).expect("missing phase")[0];
         let phase = phase.clamp(0.0, 1.0);
         let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
 
         cubic_interpolate(buffer, read_pos)
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+// a buf tap node is stateful in that it maintains it's own interal write position
+// which makes it usable as a delay line
+#[derive(Clone)]
+pub struct BufTapNode {
+    write_pos: usize,
+}
+
+impl BufTapNode {
+    pub(crate) fn new() -> Self {
+        Self { write_pos: 0 }
+    }
+}
+
+impl Node for BufTapNode {
+    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
+        let offset = inputs.get(0).expect("missing offset")[0];
+        let read_pos_f = self.write_pos as f32 - offset;
+        let buffer_len = buffer.len() as f32;
+        let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
+        let y = cubic_interpolate(&buffer, read_pos);
+
+        self.write_pos = (self.write_pos + 1) % buffer.len();
+
+        y
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -502,18 +494,17 @@ impl DelayNode {
 
 impl Node for DelayNode {
     #[inline(always)]
-    #[nonblocking]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
         let input = inputs.get(0).expect("pipe: missing input");
         self.buffer[self.write_pos] = *input;
 
         let delay = inputs.get(1).expect("pipe: missing delay")[0];
         // clamp delay to buffer size
-        let delay= delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
+        let delay = delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
         // TODO: skip interpolation if delay is < 0
 
-        let read_pos = (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32)
-            % Self::BUFFER_SIZE as f32;
+        let read_pos =
+            (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32) % Self::BUFFER_SIZE as f32;
 
         let output = cubic_interpolate(&self.buffer, read_pos);
 
@@ -526,4 +517,3 @@ impl Node for DelayNode {
         Box::new(self.clone())
     }
 }
-

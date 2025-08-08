@@ -143,30 +143,34 @@ impl Op {
                 NodeKind::BufferReader { id } => {
                     1u8.hash(hasher);
                     id.hash(hasher)
-                },
-                NodeKind::BufferWriter { id } => {
+                }
+                NodeKind::BufferTap { id } => {
                     2u8.hash(hasher);
                     id.hash(hasher)
-                },
+                }
+                NodeKind::BufferWriter { id } => {
+                    3u8.hash(hasher);
+                    id.hash(hasher)
+                }
                 _ => kind.hash(hasher),
             },
             Op::Mix(lhs, rhs) => {
-                3u8.hash(hasher);
-                lhs.hash_structure(hasher);
-                rhs.hash_structure(hasher);
-            }
-            Op::Gain(lhs, rhs) => {
                 4u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            Op::Wrap(lhs, rhs) => {
+            Op::Gain(lhs, rhs) => {
                 5u8.hash(hasher);
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
-            Op::Negate(val) => {
+            Op::Wrap(lhs, rhs) => {
                 6u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Negate(val) => {
+                7u8.hash(hasher);
                 val.hash_structure(hasher);
             }
         }
@@ -277,6 +281,9 @@ impl Node for Op {
                     println!("{:?}", inputs[0][0]);
                     inputs[0]
                 }
+                // NodeKind::BufferRef { .. } => {
+                //     [0.0, 0.0]
+                // }
                 _ => node.tick(inputs),
             },
             Op::Gain { .. } => match inputs {
@@ -301,7 +308,9 @@ impl Node for Op {
     fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
         match self {
             Op::Node { kind, node, .. } => match kind {
-                NodeKind::BufferReader { .. } => node.tick_read_buffer(inputs, buffer),
+                NodeKind::BufferReader { .. } | NodeKind::BufferTap { .. } => {
+                    node.tick_read_buffer(inputs, buffer)
+                }
                 _ => unimplemented!(),
             },
             _ => unimplemented!(),

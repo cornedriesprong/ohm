@@ -118,7 +118,7 @@ impl Graph {
                 NodeKind::BufferWriter { id } => {
                     self.buffer_writers.insert(index, id);
                 }
-                NodeKind::BufferReader { id } => {
+                NodeKind::BufferReader { id } | NodeKind::BufferTap { id } => {
                     self.buffer_readers.insert(index, id);
                 }
                 _ => {}

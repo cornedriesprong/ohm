@@ -1,5 +1,5 @@
 use crate::nodes::{
-    BufReaderNode, BufWriterNode, EchoNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
+    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PluckNode, PulseNode,
     SeqNode,
 };
 use anyhow::bail;
@@ -17,7 +17,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod dsp;
 mod nodes;
 mod utils;
 
@@ -282,19 +281,6 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into(),
         ))
     });
-    koto.prelude().add_fn("echo", move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(&args[0])?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Delay,
-                inputs: vec![input],
-                node: Box::new(EchoNode::new()),
-            }
-            .into(),
-        ))
-    });
     koto.prelude().add_fn("moog", move |ctx| {
         let args = ctx.args();
 
@@ -319,7 +305,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
 
         Ok(KValue::Object(
             Op::Node {
-                kind: NodeKind::Pipe,
+                kind: NodeKind::Delay,
                 inputs: vec![input, delay],
                 node: Box::new(DelayNode::new()),
             }
@@ -362,8 +348,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             format!("samples/{}.wav", name)
         };
 
-        let wave = Wave::load(filename)
-            .map_err(|e| format!("Failed to load '{name}': {e}"))?;
+        let wave = Wave::load(filename).map_err(|e| format!("Failed to load '{name}': {e}"))?;
 
         let frames: Vec<nodes::Frame> = match wave.channels() {
             1 => (0..wave.len())
@@ -418,6 +403,25 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
                         kind: NodeKind::BufferReader { id },
                         inputs: vec![input],
                         node: Box::new(BufReaderNode::new()),
+                    }
+                    .into(),
+                )),
+                _ => Err("Expected a buffer".into()),
+            },
+            _ => Err("Expected a buffer".into()),
+        };
+    });
+    koto.prelude().add_fn("tap", move |ctx| {
+        let args = ctx.args();
+        let buf = node_from_kvalue(&args[0])?;
+        let offset = node_from_kvalue(&args[1])?;
+        return match buf {
+            Op::Node { kind, .. } => match kind {
+                NodeKind::BufferRef { id } => Ok(KValue::Object(
+                    Op::Node {
+                        kind: NodeKind::BufferTap { id },
+                        inputs: vec![offset],
+                        node: Box::new(BufTapNode::new()),
                     }
                     .into(),
                 )),

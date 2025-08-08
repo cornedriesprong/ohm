@@ -20,6 +20,38 @@ export rev = |x, mix = 0.5 |
 export flanger = |x, amt = 0.5, speed = 0.1| 
   ((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5
 
+# a one pole IIR filter, useful for smoothing signals
+export onepole = |x, a = 0.5|
+  # define a single sample buffer
+  b = buf 1
+  # tap the buffer one sample ago
+  y = tap b, 1
+  # feed the input + the delayed signal back into the buffer
+  x = (x * a) + (y * (1 - a)) -> rec b
+  x + y
+
+export echo = |x, t = 22050, fb = 0.5, damping = 0.5|
+  # define a delay buffer 'b'
+  b = buf()
+  # tap the buffer at offset t
+  y = tap b, t
+  # feed the input + the delayed signal back into the buffer
+  y = y -> onepole damping
+  x = x + (y * fb) -> rec b
+  x + y
+
 export bseq = |trigs, trig|
   let values = trigs.transform |x| if x == true then 1 else 0
   seq(values, trig)
+
+# export onepole = |x, a = 0.5| 
+#   (x * (1 - a)) + ((x -> delay 1) * a)
+
+export fir = |x, a = 0.5|
+  (x * (1 - a)) + ((x -> delay 1) * a)
+
+export iir = |x, a = 0.5|
+  (x * (1 - a)) + ((x -> delay 1) * a)
+
+export boo = |x, delay = 0.5, mix = 0.5| 
+  (x * (1 - mix)) + ((x -> delay delay) * mix)
