@@ -12,6 +12,14 @@ export freq_to_period = |f| sr / f
 export ar = |release, trig| trig -> env [(1, 0), (0, release)]
 export lfo = |hz = 0.1| sin(hz) * 0.5 + 0.5
 
+export lp = |x, hz = 500, q = 0.717| x -> filter "lp", hz, q
+export bp = |x, hz = 500, q = 0.717| x -> filter "bp", hz, q
+export hp = |x, hz = 500, q = 0.717| x -> filter "hp", hz, q
+export notch = |x, hz = 500, q = 0.717| x -> filter "notch", hz, q
+export peak = |x, hz = 500, q = 0.717| x -> filter "peak", hz, q
+export allpass = |x, hz = 500, q = 0.717| x -> filter "ap", hz, q
+export moog = |x, hz = 500, q = 0.717| x -> filter "moog", hz, q
+
 export mix = |xs| 
   xs.fold 0, |acc, x| x * (1 / xs.count()) + acc
 
@@ -35,7 +43,7 @@ export onepole = |x, a = 0.5|
 export fir = |x, a = 0.5|
   (x * (1 - a)) + ((x -> delay 1) * a)
 
-export echo = |x, t = 22050, fb = 0.5, damping = 0.5|
+export echo = |x, t = sr / 3, fb = 0.5, damping = 0.5|
   # define a delay buffer 'b'
   b = buf()
   # tap the buffer at offset t

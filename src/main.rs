@@ -162,9 +162,34 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     add_osc(koto, "tri".to_string(), || Box::new(triangle()));
     add_osc(koto, "ramp".to_string(), || Box::new(ramp()));
 
-    add_filter(koto, "lp".to_string(), || Box::new(lowpass()));
-    add_filter(koto, "bp".to_string(), || Box::new(bandpass()));
-    add_filter(koto, "hp".to_string(), || Box::new(highpass()));
+    koto.prelude().add_fn("filter", move |ctx| {
+        use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, moog, notch, peak};
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        let filter_type = str_from_kvalue(&args[1])?;
+        let cutoff = node_from_kvalue(&args[2])?;
+        let resonance = node_from_kvalue(&args[3])?;
+
+        let audio_unit: Box<dyn AudioUnit + Send> = match filter_type.as_str() {
+            "lp" | "lowpass" => Box::new(lowpass()),
+            "bp" | "bandpass" => Box::new(bandpass()),
+            "hp" | "highpass" => Box::new(highpass()),
+            "notch" => Box::new(notch()),
+            "peak" => Box::new(peak()),
+            "ap" | "allpass" => Box::new(allpass()),
+            "moog" => Box::new(moog()),
+            _ => return Err("Missing filter type".into()),
+        };
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Svf,
+                inputs: vec![input, cutoff, resonance],
+                node: Box::new(FunDSPNode::mono(audio_unit)),
+            }
+            .into(),
+        ))
+    });
 
     koto.prelude().add_fn(
         "print",
@@ -260,22 +285,6 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
                     1.0,
                     lowpole_hz(18000.0),
                 )))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("moog", move |ctx| {
-        let args = ctx.args();
-
-        let input = node_from_kvalue(&args[0])?;
-        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(500.into())))?;
-        let resonance = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Moog,
-                inputs: vec![input, cutoff, resonance],
-                node: Box::new(FunDSPNode::mono(Box::new(moog()))),
             }
             .into(),
         ))
@@ -444,32 +453,6 @@ where
             node: Box::new(FunDSPNode::mono(osc_fn())),
         }),
     );
-}
-
-fn add_filter<F>(koto: &Koto, name: String, filter_fn: F)
-where
-    F: Fn() -> Box<dyn fundsp::hacker32::AudioUnit> + 'static,
-{
-    koto.prelude().add_fn(name.clone().as_str(), move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(&args[0])?;
-        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(500.into())))?;
-        let resonance = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.717.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: match name.as_str() {
-                    "lp" => NodeKind::Lp,
-                    "bp" => NodeKind::Bp,
-                    "hp" => NodeKind::Hp,
-                    _ => panic!("Unknown filter type: {}", name),
-                },
-                inputs: vec![input, cutoff, resonance],
-                node: Box::new(FunDSPNode::mono(filter_fn())),
-            }
-            .into(),
-        ))
-    });
 }
 
 fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {

@@ -1,8 +1,7 @@
-use crate::utils::{cubic_interpolate, freq_to_period};
+use crate::utils::cubic_interpolate;
 use core::fmt;
 use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
-use rand::random;
 use std::f32::consts::PI;
 use std::hash::Hash;
 
@@ -15,9 +14,7 @@ pub enum NodeKind {
     Saw,
     Tri,
     Ramp,
-    Lp,
-    Bp,
-    Hp,
+    Svf,
     Pulse,
     Print,
     Noise,
@@ -26,7 +23,6 @@ pub enum NodeKind {
     Pan,
     Reverb,
     Delay,
-    Moog,
     BufferTap { id: usize },
     BufferWriter { id: usize },
     BufferReader { id: usize },
@@ -389,10 +385,10 @@ impl DelayNode {
 impl Node for DelayNode {
     #[inline(always)]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input = inputs.get(0).expect("pipe: missing input");
+        let input = inputs.get(0).expect("delay: missing input");
         self.buffer[self.write_pos] = *input;
 
-        let delay = inputs.get(1).expect("pipe: missing delay")[0];
+        let delay = inputs.get(1).expect("delay: missing delay")[0];
         // clamp delay to buffer size
         let delay = delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
         // TODO: skip interpolation if delay is < 0
