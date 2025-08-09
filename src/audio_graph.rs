@@ -44,7 +44,10 @@ impl Container {
 
         for (writer_idx, buf_name) in &graph.buffer_writers {
             graph.inputs.clear();
-            for edge in graph.graph.edges_directed(*writer_idx, petgraph::Direction::Incoming) {
+            for edge in graph
+                .graph
+                .edges_directed(*writer_idx, petgraph::Direction::Incoming)
+            {
                 graph.inputs.push(graph.outputs[edge.source().index()]);
             }
 
@@ -60,7 +63,10 @@ impl Container {
             }
 
             graph.inputs.clear();
-            for edge in graph.graph.edges_directed(node_idx, petgraph::Direction::Incoming) {
+            for edge in graph
+                .graph
+                .edges_directed(node_idx, petgraph::Direction::Incoming)
+            {
                 graph.inputs.push(graph.outputs[edge.source().index()]);
             }
 
@@ -102,17 +108,17 @@ impl Graph {
         }
     }
 
-    pub(crate) fn add_node(&mut self, node: Op) -> NodeIndex {
+    pub(crate) fn add_node(&mut self, node: &Op) -> NodeIndex {
         let index = self.graph.add_node(Box::new(node.clone()));
 
         // if node is a buffer reader or writer, connect it to the corresponding buffer
         match node {
             Op::Node { kind, .. } => match kind {
                 NodeKind::BufferWriter { id } => {
-                    self.buffer_writers.insert(index, id);
+                    self.buffer_writers.insert(index, *id);
                 }
                 NodeKind::BufferReader { id } | NodeKind::BufferTap { id } => {
-                    self.buffer_readers.insert(index, id);
+                    self.buffer_readers.insert(index, *id);
                 }
                 _ => {}
             },
@@ -132,7 +138,7 @@ impl Graph {
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
         self.outputs.resize(self.graph.node_count(), [0.0, 0.0]);
-        
+
         // Pre-allocate inputs vector with capacity for typical node inputs (most have 1-4)
         self.inputs.clear();
         self.inputs.reserve(8);
@@ -178,13 +184,13 @@ pub(crate) fn parse_to_graph(expr: Op) -> Graph {
         }
     }
 
-    fn add_node(inputs: Vec<&Op>, kind: &Op, graph: &mut Graph) -> NodeIndex {
+    fn add_node(inputs: Vec<&Op>, node: &Op, graph: &mut Graph) -> NodeIndex {
         let mut input_indices: Vec<_> = inputs
             .into_iter()
             .map(|input| add_expr_to_graph(&*input, graph))
             .collect();
 
-        let node_idx = graph.add_node(kind.clone());
+        let node_idx = graph.add_node(node);
 
         // inputs need to be connected in reverse order
         input_indices.reverse();
