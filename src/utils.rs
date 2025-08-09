@@ -2,6 +2,30 @@
 
 use crate::nodes::Frame;
 
+const A4_FREQ: f32 = 440.0;
+
+pub fn pitch_to_freq(pitch: f32) -> f32 {
+    if pitch < -120.0 || pitch > 120.0 {
+        return 0.0; // Return 0 for out-of-range pitches
+    }
+
+    let a4 = 69.0; // MIDI note number for A4
+    let semitones_from_a4 = pitch - a4;
+    A4_FREQ * (2.0f32).powf(semitones_from_a4 / 12.0)
+}
+
+pub fn freq_to_pitch(freq: f32) -> f32 {
+    if freq <= 0.0 {
+        return -120.0; // Return -120 for invalid frequencies
+    }
+
+    let a4 = 69.0; // MIDI note number for A4
+    let semitones_from_a4 = 12.0 * (freq / A4_FREQ).log2();
+    let pitch = a4 + semitones_from_a4;
+
+    pitch.clamp(-120.0, 120.0) // Clamp to valid range
+}
+
 pub fn freq_to_period(sample_rate: f32, freq: f32) -> f32 {
     sample_rate / freq
 }
@@ -36,12 +60,11 @@ pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
         // \[
         // y(t) = 0.5 \times ( (2P_1) + (-P_0+P_2)t + (2P_0-5P_1+4P_2-P_3)t^2 + (-P_0+3P_1-3P_2+P_3)t^3 )
         // \]
-        let sample = 0.5 * (
-            (2.0 * p1) +
-                (-p0 + p2) * t +
-                (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
-                (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
-        );
+        let sample = 0.5
+            * ((2.0 * p1)
+                + (-p0 + p2) * t
+                + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
 
         output_frame[ch] = sample;
     }

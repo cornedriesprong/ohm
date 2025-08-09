@@ -1,7 +1,8 @@
-use crate::utils::cubic_interpolate;
+use crate::utils::{cubic_interpolate, freq_to_pitch};
 use core::fmt;
 use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
+use mi_plaits_dsp::engine::{additive_engine::AdditiveEngine, Engine, EngineParameters};
 use std::f32::consts::PI;
 use std::hash::Hash;
 
@@ -23,6 +24,7 @@ pub enum NodeKind {
     Pan,
     Reverb,
     Delay,
+    Plaits,
     BufferTap { id: usize },
     BufferWriter { id: usize },
     BufferReader { id: usize },
@@ -83,6 +85,54 @@ impl Node for FunDSPNode {
             self.node.tick(input.as_slice(), &mut output);
             [output[0]; 2]
         }
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct PlaitsNode {
+    engine: Box<dyn Engine>,
+    params: EngineParameters,
+}
+
+impl PlaitsNode {
+    pub fn new(engine: Box<dyn Engine>) -> Self {
+        Self {
+            engine,
+            params: EngineParameters {
+                trigger: mi_plaits_dsp::engine::TriggerState::Low,
+                note: 64.0,
+                timbre: 0.0,
+                morph: 0.0,
+                harmonics: 0.0,
+                accent: 0.0,
+            },
+        }
+    }
+}
+
+impl Node for PlaitsNode {
+    #[inline(always)]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let freq = inputs.get(0).expect("plaits: missing freq input")[0];
+        let timbre = inputs.get(1).expect("plaits: missing timbre input")[0];
+        let morph = inputs.get(2).expect("plaits: missing morph input")[0];
+        let harmonics = inputs.get(3).expect("plaits: missing harmonics input")[0];
+        self.params.note = freq_to_pitch(freq);
+        self.params.timbre = timbre;
+        self.params.morph = morph;
+        self.params.harmonics = harmonics;
+
+        let mut aux = vec![0.0; 1];
+        let mut out = vec![0.0; 1];
+        let mut x = false;
+
+        self.engine.render(&self.params, &mut aux, &mut out, &mut x);
+
+        [out[0], out[0]]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

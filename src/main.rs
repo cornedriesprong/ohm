@@ -1,5 +1,6 @@
 use crate::nodes::{
-    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PulseNode, SeqNode,
+    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PlaitsNode, PulseNode,
+    SeqNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -170,7 +171,7 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
         let cutoff = node_from_kvalue(&args[2])?;
         let resonance = node_from_kvalue(&args[3])?;
 
-        let audio_unit: Box<dyn AudioUnit + Send> = match filter_type.as_str() {
+        let audio_unit: Box<dyn AudioUnit> = match filter_type.as_str() {
             "lp" | "lowpass" => Box::new(lowpass()),
             "bp" | "bandpass" => Box::new(bandpass()),
             "hp" | "highpass" => Box::new(highpass()),
@@ -190,7 +191,6 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into(),
         ))
     });
-
     koto.prelude().add_fn(
         "print",
         make_expr_node(|args| Op::Node {
@@ -218,6 +218,53 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into()
         }),
     );
+    koto.prelude().add_fn("plaits", move |ctx| {
+        use mi_plaits_dsp::engine::{
+            additive_engine::AdditiveEngine, bass_drum_engine::BassDrumEngine,
+            chord_engine::ChordEngine, fm_engine::FmEngine, grain_engine::GrainEngine,
+            hihat_engine::HihatEngine, modal_engine::ModalEngine, noise_engine::NoiseEngine,
+            particle_engine::ParticleEngine, snare_drum_engine::SnareDrumEngine,
+            speech_engine::SpeechEngine, string_engine::StringEngine, swarm_engine::SwarmEngine,
+            virtual_analog_engine::VirtualAnalogEngine, waveshaping_engine::WaveshapingEngine,
+            wavetable_engine::WavetableEngine, Engine,
+        };
+        let args = ctx.args();
+        let freq = node_from_kvalue(&args[0])?;
+        let engine = str_from_kvalue(&args[1])?;
+        let timbre = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.5.into())))?;
+        let morph = node_from_kvalue(args.get(3).unwrap_or(&KValue::Number(0.5.into())))?;
+        let harmonics = node_from_kvalue(args.get(4).unwrap_or(&KValue::Number(0.5.into())))?;
+        let block_size = 1;
+
+        let engine: Box<dyn Engine> = match engine.as_str() {
+            "additive" => Box::new(AdditiveEngine::new()),
+            "bd" => Box::new(BassDrumEngine::new()),
+            "chord" => Box::new(ChordEngine::new()),
+            "fm" => Box::new(FmEngine::new()),
+            "grain" => Box::new(GrainEngine::new()),
+            "hihat" => Box::new(HihatEngine::new(block_size)),
+            "modal" => Box::new(ModalEngine::new(block_size)),
+            "noise" => Box::new(NoiseEngine::new(block_size)),
+            "particle" => Box::new(ParticleEngine::new(block_size)),
+            "sd" => Box::new(SnareDrumEngine::new()),
+            "speech" => Box::new(SpeechEngine::new(block_size)),
+            "string" => Box::new(StringEngine::new(block_size)),
+            "swarm" => Box::new(SwarmEngine::new()),
+            "va" => Box::new(VirtualAnalogEngine::new(block_size)),
+            "wave" => Box::new(WaveshapingEngine::new()),
+            "wt" => Box::new(WavetableEngine::new()),
+            _ => return Err("Missing or invalid engine".into()),
+        };
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Plaits,
+                inputs: vec![freq, timbre, morph, harmonics],
+                node: Box::new(PlaitsNode::new(engine)),
+            }
+            .into(),
+        ))
+    });
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
         let trig = node_from_kvalue(&args[0])?;
