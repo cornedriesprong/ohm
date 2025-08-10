@@ -15,6 +15,7 @@ pub enum Op {
     Gain(Box<Op>, Box<Op>),
     Wrap(Box<Op>, Box<Op>),
     Negate(Box<Op>),
+    Power(Box<Op>, Box<Op>),
     Node {
         kind: NodeKind,
         inputs: Vec<Op>,
@@ -27,6 +28,7 @@ enum BinaryOp {
     Multiply,
     Subtract,
     Divide,
+    Power,
 }
 
 impl Op {
@@ -37,6 +39,7 @@ impl Op {
             BinaryOp::Multiply | BinaryOp::Divide => {
                 Op::Gain(Box::new(self.clone()), Box::new(rhs))
             }
+            BinaryOp::Power => Op::Power(Box::new(self.clone()), Box::new(rhs)),
         }
     }
 
@@ -58,6 +61,7 @@ impl Op {
                     BinaryOp::Multiply => lhs * rhs_val,
                     BinaryOp::Subtract => lhs - rhs_val,
                     BinaryOp::Divide => lhs / rhs_val,
+                    BinaryOp::Power => lhs.powf(rhs_val),
                 };
                 Ok(KValue::Object(Op::Constant(result).into()))
             }
@@ -166,6 +170,11 @@ impl Op {
                 7u8.hash(hasher);
                 val.hash_structure(hasher);
             }
+            Op::Power(lhs, rhs) => {
+                8u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
         }
     }
 }
@@ -209,6 +218,10 @@ impl KotoObject for Op {
 
     fn divide_rhs(&self, rhs: &KValue) -> Result<KValue> {
         self.binary_op(rhs, BinaryOp::Divide)
+    }
+
+    fn power(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Power)
     }
 
     fn remainder(&self, other: &KValue) -> Result<KValue> {
@@ -292,6 +305,10 @@ impl Node for Op {
             },
             Op::Negate { .. } => match inputs {
                 [[l, r]] => [-l, -r],
+                _ => unimplemented!(),
+            },
+            Op::Power { .. } => match inputs {
+                [[l0, r0], [l1, r1]] => [l0.powf(*l1), r0.powf(*r1)],
                 _ => unimplemented!(),
             },
         }

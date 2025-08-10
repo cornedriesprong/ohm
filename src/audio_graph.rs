@@ -44,7 +44,10 @@ impl Container {
 
         for (writer_idx, buf_name) in &graph.buffer_writers {
             graph.inputs.clear();
-            for edge in graph.graph.edges_directed(*writer_idx, petgraph::Direction::Incoming) {
+            for edge in graph
+                .graph
+                .edges_directed(*writer_idx, petgraph::Direction::Incoming)
+            {
                 graph.inputs.push(graph.outputs[edge.source().index()]);
             }
 
@@ -60,7 +63,10 @@ impl Container {
             }
 
             graph.inputs.clear();
-            for edge in graph.graph.edges_directed(node_idx, petgraph::Direction::Incoming) {
+            for edge in graph
+                .graph
+                .edges_directed(node_idx, petgraph::Direction::Incoming)
+            {
                 graph.inputs.push(graph.outputs[edge.source().index()]);
             }
 
@@ -132,7 +138,7 @@ impl Graph {
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
         self.outputs.resize(self.graph.node_count(), [0.0, 0.0]);
-        
+
         // Pre-allocate inputs vector with capacity for typical node inputs (most have 1-4)
         self.inputs.clear();
         self.inputs.reserve(8);
@@ -171,7 +177,7 @@ pub(crate) fn parse_to_graph(expr: Op) -> Graph {
         match expr {
             Op::Constant { .. } => add_node(vec![], expr, graph),
             Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
-            Op::Gain(lhs, rhs) | Op::Mix(lhs, rhs) | Op::Wrap(lhs, rhs) => {
+            Op::Gain(lhs, rhs) | Op::Mix(lhs, rhs) | Op::Wrap(lhs, rhs) | Op::Power(lhs, rhs) => {
                 add_node(vec![lhs, rhs], expr, graph)
             }
             Op::Negate(val) => add_node(vec![val], expr, graph),

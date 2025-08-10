@@ -207,7 +207,6 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into(),
         ))
     });
-
     koto.prelude().add_fn(
         "print",
         make_expr_node(|args| Op::Node {
