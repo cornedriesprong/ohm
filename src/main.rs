@@ -162,12 +162,13 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     add_osc(koto, "tri".to_string(), || Box::new(triangle()));
     add_osc(koto, "ramp".to_string(), || Box::new(ramp()));
 
-    koto.prelude().add_fn("filter", move |ctx| {
-        use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, moog, notch, peak};
+    koto.prelude().add_fn("svf", move |ctx| {
+        use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
+
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
         let filter_type = str_from_kvalue(&args[1])?;
-        let cutoff = node_from_kvalue(&args[2])?;
+        let hz = node_from_kvalue(&args[2])?;
         let resonance = node_from_kvalue(&args[3])?;
 
         let audio_unit: Box<dyn AudioUnit + Send> = match filter_type.as_str() {
@@ -177,15 +178,31 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             "notch" => Box::new(notch()),
             "peak" => Box::new(peak()),
             "ap" | "allpass" => Box::new(allpass()),
-            "moog" => Box::new(moog()),
             _ => return Err("Missing filter type".into()),
         };
 
         Ok(KValue::Object(
             Op::Node {
                 kind: NodeKind::Svf,
-                inputs: vec![input, cutoff, resonance],
+                inputs: vec![input, hz, resonance],
                 node: Box::new(FunDSPNode::mono(audio_unit)),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("moog", move |ctx| {
+        use fundsp::hacker32::moog;
+
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(1000.0.into())))?;
+        let q = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.0.into())))?;
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Moog,
+                inputs: vec![input, cutoff, q],
+                node: Box::new(FunDSPNode::mono(Box::new(moog()))),
             }
             .into(),
         ))

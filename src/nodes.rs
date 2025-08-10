@@ -15,6 +15,7 @@ pub enum NodeKind {
     Tri,
     Ramp,
     Svf,
+    Moog,
     Pulse,
     Print,
     Noise,
