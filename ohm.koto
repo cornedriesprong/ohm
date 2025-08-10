@@ -21,8 +21,10 @@ export mix = |xs|
 export rev = |x, mix = 0.5 | 
   (x * (1 - mix)) + ((x -> reverb) * mix)
 
-export flanger = |x, amt = 0.5, speed = 0.1| 
-  ((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5
+export flanger = |x, mix = 0.5, amt = 0.5, speed = 0.1| 
+  dry = x * (1 - mix)
+  wet = (((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5) * mix
+  dry + wet
 
 # a one pole IIR svf, useful for smoothing signals
 export onepole = |x, a = 0.5|
