@@ -29,6 +29,7 @@ enum BinaryOp {
     Subtract,
     Divide,
     Power,
+    Modulo,
 }
 
 impl Op {
@@ -40,6 +41,7 @@ impl Op {
                 Op::Gain(Box::new(self.clone()), Box::new(rhs))
             }
             BinaryOp::Power => Op::Power(Box::new(self.clone()), Box::new(rhs)),
+            BinaryOp::Modulo => Op::Wrap(Box::new(self.clone()), Box::new(rhs)),
         }
     }
 
@@ -62,6 +64,7 @@ impl Op {
                     BinaryOp::Subtract => lhs - rhs_val,
                     BinaryOp::Divide => lhs / rhs_val,
                     BinaryOp::Power => lhs.powf(rhs_val),
+                    BinaryOp::Modulo => lhs % rhs_val,
                 };
                 Ok(KValue::Object(Op::Constant(result).into()))
             }
@@ -224,28 +227,16 @@ impl KotoObject for Op {
         self.binary_op(rhs, BinaryOp::Power)
     }
 
-    fn remainder(&self, other: &KValue) -> Result<KValue> {
-        match (self, other) {
-            (Op::Constant(lhs), KValue::Number(num)) => {
-                Ok(KValue::Object(Op::Constant(lhs % f32::from(num)).into()))
-            }
-            _ => {
-                let inv = match other {
-                    KValue::Number(n) => Op::Constant(1.0 / f32::from(n)),
-                    KValue::Object(obj) => {
-                        let op_val = obj.cast::<Op>()?.clone();
-                        Op::Constant(match op_val {
-                            Op::Constant(n) => 1.0 / n,
-                            _ => panic!("Invalid op for remainder"),
-                        })
-                    }
-                    _ => panic!("invalid remainder operation"),
-                };
-                Ok(KValue::Object(
-                    Op::Wrap(Box::new(self.clone()), Box::new(inv)).into(),
-                ))
-            }
-        }
+    fn power_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Power)
+    }
+
+    fn remainder(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Modulo)
+    }
+
+    fn remainder_rhs(&self, rhs: &KValue) -> Result<KValue> {
+        self.binary_op(rhs, BinaryOp::Modulo)
     }
 
     fn less(&self, other: &KValue) -> Result<bool> {
