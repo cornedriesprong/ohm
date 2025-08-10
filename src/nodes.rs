@@ -102,106 +102,55 @@ impl Clone for Box<dyn Node> {
 
 #[derive(Clone, Debug)]
 pub struct EnvSegment {
-    pub duration: usize, // Duration in samples or ms (interpreted as needed)
-    pub target: f32,     // Target value at end of this segment
+    pub duration: usize,
+    pub target: f32,
 }
 
 #[derive(Clone)]
-pub struct EnvNode {
-    pub(crate) current_idx: usize,
-    pub(crate) value: f32,
-    pub(crate) time: usize,
-    pub(crate) active: bool,
-    pub(crate) prev_trig: f32,
-}
+pub struct EnvNode;
 
 impl EnvNode {
     pub(crate) fn new() -> Self {
-        Self {
-            current_idx: 0,
-            value: 0.0,
-            time: 0,
-            active: false,
-            prev_trig: 0.0,
-        }
-    }
-
-    fn start(&mut self) {
-        self.active = true;
-        self.current_idx = 0;
-        self.time = 0;
-    }
-
-    fn advance(&mut self, segments: &[EnvSegment]) {
-        self.current_idx += 1;
-        self.time = 0;
-
-        if self.current_idx >= segments.len() {
-            self.active = false;
-            self.value = 0.0;
-        }
-    }
-
-    fn interpolate_segment(&self, segments: &[EnvSegment]) -> f32 {
-        let segment = &segments[self.current_idx];
-
-        if segment.duration == 0 {
-            return segment.target;
-        }
-
-        let pow = 3.0; // curve
-        let raw_t = (self.time as f32 / segment.duration as f32).clamp(0.0, 1.0);
-
-        // reverse the curve if we're going downward
-        let curved_t = if segment.target < self.value {
-            // ease out
-            1.0 - (1.0 - raw_t).powf(pow)
-        } else {
-            // ease in
-            raw_t.powf(pow)
-        };
-
-        let prev = if self.current_idx == 0 {
-            0.0
-        } else {
-            segments[self.current_idx - 1].target
-        };
-
-        prev + curved_t * (segment.target - prev)
+        Self
     }
 }
 
 impl Node for EnvNode {
     #[inline(always)]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let trig = inputs.last().expect("env: missing trigger input")[0];
-        let segments = &inputs[0..inputs.len() - 1]
+        let ramp = inputs.last().expect("env: missing input")[0].clamp(0.0, 1.0);
+        let segments: Vec<EnvSegment> = inputs[0..inputs.len() - 1]
             .chunks_exact(2)
             .map(|pair| EnvSegment {
                 target: pair[0][0],
                 duration: pair[1][0] as usize,
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        if trig > 0.0 && self.prev_trig <= 0.0 {
-            self.start();
+        let total_duration: f32 = segments.iter().map(|seg| seg.duration as f32).sum();
+        let time = ramp.clamp(0.0, 1.0) * total_duration;
+        let mut value = 0.0;
+
+        let mut acc = 0.0;
+        for (i, seg) in segments.iter().enumerate() {
+            let seg_start = acc;
+            let seg_end = acc + seg.duration as f32;
+            acc = seg_end;
+
+            if time <= seg_end || i == segments.len() - 1 {
+                let segment_duration = seg_end - seg_start;
+                let t = if segment_duration > 0.0 {
+                    (time - seg_start) / segment_duration
+                } else {
+                    1.0
+                };
+
+                let start_value = if i == 0 { 0.0 } else { segments[i - 1].target };
+                value = start_value + t * (seg.target - start_value);
+            }
         }
 
-        self.prev_trig = trig;
-
-        if !self.active {
-            return [0.0, 0.0];
-        }
-
-        let segment = &segments[self.current_idx];
-        self.value = self.interpolate_segment(&segments);
-        self.time += 1;
-
-        if self.time >= segment.duration {
-            self.advance(&segments);
-        }
-
-        [self.value, self.value]
+        [value, value]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -210,13 +159,11 @@ impl Node for EnvNode {
 }
 
 #[derive(Clone)]
-pub struct SeqNode {
-    pub(crate) step: usize,
-}
+pub struct SeqNode {}
 
 impl SeqNode {
     pub(crate) fn new() -> Self {
-        Self { step: 0 }
+        Self {}
     }
 }
 
@@ -227,9 +174,9 @@ impl Node for SeqNode {
         let values = &inputs[0..inputs.len() - 1];
 
         let segment = 1.0 / values.len() as f32;
-        self.step = (phase[0] / segment).floor() as usize;
+        let step = (phase[0] / segment).floor() as usize;
 
-        values[self.step]
+        values[step]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

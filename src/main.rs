@@ -261,13 +261,13 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     });
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
-        let trig = node_from_kvalue(&args[0])?;
+        let ramp = node_from_kvalue(&args[0])?;
         let segments = list_of_tuples_from_value(&args[1])?;
 
         let inputs = segments
             .iter()
             .flat_map(|(value, duration)| vec![value.clone(), duration.clone()])
-            .chain(std::iter::once(trig))
+            .chain(std::iter::once(ramp))
             .collect::<Vec<_>>();
 
         Ok(KValue::Object(
