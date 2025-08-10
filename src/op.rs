@@ -29,14 +29,6 @@ enum BinaryOp {
 }
 
 impl Op {
-    // Helper to operate on two constant values.
-    fn op_constant<F>(lhs: f32, rhs: f32, f: F) -> Op
-    where
-        F: Fn(f32, f32) -> f32,
-    {
-        Op::Constant(f(lhs, rhs))
-    }
-
     // Helper to choose the operation variant for non-numeric binary operations.
     fn op_variant(&self, rhs: Op, op: BinaryOp) -> Op {
         match op {
