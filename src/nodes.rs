@@ -74,12 +74,13 @@ impl FunDSPNode {
 impl Node for FunDSPNode {
     #[inline(always)]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
+
         if self.is_stereo {
             let mut output = [0.0; 2];
-            self.node.tick(inputs[0].as_slice(), &mut output);
+            self.node.tick(input.as_slice(), &mut output);
             output
         } else {
-            let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
             let mut output = [0.0; 1];
             self.node.tick(input.as_slice(), &mut output);
             [output[0]; 2]
