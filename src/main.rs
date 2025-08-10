@@ -235,6 +235,30 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             .into()
         }),
     );
+    koto.prelude().add_fn("ftop", move |ctx| {
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Ftop,
+                inputs: vec![input],
+                node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("ptof", move |ctx| {
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Ptof,
+                inputs: vec![input],
+                node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+            }
+            .into(),
+        ))
+    });
     koto.prelude().add_fn("env", move |ctx| {
         let args = ctx.args();
         let trig = node_from_kvalue(&args[0])?;

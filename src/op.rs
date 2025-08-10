@@ -1,4 +1,5 @@
 use crate::nodes::{Frame, Node, NodeKind};
+use crate::utils::{freq_to_period, freq_to_pitch, pitch_to_freq};
 use crate::KObject;
 use crate::KString;
 use koto::derive::{KotoCopy, KotoType};
@@ -273,6 +274,8 @@ impl Node for Op {
                     println!("{:?}", inputs[0][0]);
                     inputs[0]
                 }
+                NodeKind::Ftop => freq_to_pitch(inputs[0]),
+                NodeKind::Ptof => pitch_to_freq(inputs[0]),
                 _ => node.tick(inputs),
             },
             Op::Gain { .. } => match inputs {

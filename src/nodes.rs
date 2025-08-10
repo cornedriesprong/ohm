@@ -20,6 +20,8 @@ pub enum NodeKind {
     Print,
     Noise,
     Env,
+    Ftop,
+    Ptof,
     Seq,
     Pan,
     Reverb,
