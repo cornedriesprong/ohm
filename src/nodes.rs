@@ -103,8 +103,8 @@ impl PlaitsNode {
         Self {
             engine,
             params: EngineParameters {
-                trigger: mi_plaits_dsp::engine::TriggerState::Low,
-                note: 64.0,
+                trigger: mi_plaits_dsp::engine::TriggerState::Unpatched,
+                note: 0.0,
                 timbre: 0.0,
                 morph: 0.0,
                 harmonics: 0.0,
@@ -130,7 +130,7 @@ impl Node for PlaitsNode {
         let mut out = vec![0.0; 1];
         let mut x = false;
 
-        self.engine.render(&self.params, &mut aux, &mut out, &mut x);
+    self.engine.render(&self.params, &mut aux, &mut out, &mut x);
 
         [out[0], out[0]]
     }

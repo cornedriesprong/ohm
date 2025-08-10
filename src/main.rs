@@ -228,6 +228,14 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             virtual_analog_engine::VirtualAnalogEngine, waveshaping_engine::WaveshapingEngine,
             wavetable_engine::WavetableEngine, Engine,
         };
+        use mi_plaits_dsp::engine2::{
+            arpeggiator::Arpeggiator, chiptune_engine::ChiptuneEngine,
+            phase_distortion_engine::PhaseDistortionEngine, six_op_engine::SixOpEngine,
+            string_machine_engine::StringMachineEngine,
+            virtual_analog_vcf_engine::VirtualAnalogVcfEngine,
+            wave_terrain_engine::WaveTerrainEngine,
+        };
+
         let args = ctx.args();
         let freq = node_from_kvalue(&args[0])?;
         let engine = str_from_kvalue(&args[1])?;
@@ -236,13 +244,13 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
         let harmonics = node_from_kvalue(args.get(4).unwrap_or(&KValue::Number(0.5.into())))?;
         let block_size = 1;
 
-        let engine: Box<dyn Engine> = match engine.as_str() {
+        let mut engine: Box<dyn Engine> = match engine.as_str() {
             "additive" => Box::new(AdditiveEngine::new()),
             "bd" => Box::new(BassDrumEngine::new()),
             "chord" => Box::new(ChordEngine::new()),
             "fm" => Box::new(FmEngine::new()),
             "grain" => Box::new(GrainEngine::new()),
-            "hihat" => Box::new(HihatEngine::new(block_size)),
+            "hihat" | "hh" => Box::new(HihatEngine::new(block_size)),
             "modal" => Box::new(ModalEngine::new(block_size)),
             "noise" => Box::new(NoiseEngine::new(block_size)),
             "particle" => Box::new(ParticleEngine::new(block_size)),
@@ -251,10 +259,18 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
             "string" => Box::new(StringEngine::new(block_size)),
             "swarm" => Box::new(SwarmEngine::new()),
             "va" => Box::new(VirtualAnalogEngine::new(block_size)),
-            "wave" => Box::new(WaveshapingEngine::new()),
-            "wt" => Box::new(WavetableEngine::new()),
+            "waveshaping" => Box::new(WaveshapingEngine::new()),
+            "wavetable" => Box::new(WavetableEngine::new()),
+            "chiptune" => Box::new(ChiptuneEngine::new()),
+            "phase_dist" => Box::new(PhaseDistortionEngine::new(block_size)),
+            "6op" => Box::new(SixOpEngine::new(block_size)),
+            "string_machine" => Box::new(StringEngine::new(block_size)),
+            "va_vcf" => Box::new(VirtualAnalogVcfEngine::new()),
+            "wave_terrain" => Box::new(WaveTerrainEngine::new(block_size)),
             _ => return Err("Missing or invalid engine".into()),
         };
+
+        engine.init();
 
         Ok(KValue::Object(
             Op::Node {
