@@ -26,7 +26,7 @@ export flanger = |x, mix = 0.5, amt = 0.5, speed = 0.1|
   wet = (((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5) * mix
   dry + wet
 
-# a one pole IIR svf, useful for smoothing signals
+# a one pole IIR filter, useful for smoothing signals
 export onepole = |x, a = 0.5|
   # define a single sample buffer
   b = buf 1
@@ -41,14 +41,20 @@ export fir = |x, a = 0.5|
   (x * (1 - a)) + ((x -> delay 1) * a)
 
 export echo = |x, t = sr / 3, fb = 0.5, damping = 0.5|
-  # define a delay buffer 'b'
   b = buf()
-  # tap the buffer at offset t
   y = tap b, t
-  # feed the input + the delayed signal back into the buffer
   y = y -> onepole damping
   x = x + (y * fb) -> rec b
   x + y
+
+export echo_stereo = |x, t = sr / 3, fb = 0.5, damping = 0.5|
+  ch = |offset|
+    b = buf()
+    delayed = tap b, t + offset -> onepole damping
+    wet = x + (delayed * fb) -> rec b
+    wet + delayed
+
+  (ch 100 -> pan -1) + (ch -100 -> pan 1)
 
 export pluck = |t, pitch, length = 1, damping = 0.5|
   period = freq_to_period (ptof pitch)
