@@ -176,7 +176,12 @@ impl Node for SeqNode {
         let segment = 1.0 / values.len() as f32;
         let step = (phase[0] / segment).floor() as usize;
 
-        values[step]
+        // safety check since we once got a panic here
+        if step >= values.len() {
+            return values[values.len() - 1];
+        } else {
+            return values[0];
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
