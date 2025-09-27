@@ -1,20 +1,23 @@
-from pitches import *
-
+#
+# constants
+# 
 export A4_FREQ = 440
 
-export C_MAJ = [0, 2, 4, 5, 7, 9, 11]
-export C_MIN = [0, 2, 3, 5, 7, 8, 10]
+#
+# envelopes
+# 
+export ar = |ramp, release = 10000| ramp -> env [(1, 0), (0, release)]
 
-export add = |x, y| x + y
-export min = |x, y| x - y
-export mul = |x, y| x * y
-export div = |x, y| x / y
-export pow = |x, y| x ^ y
+#
+# sequencers
+# 
+export bseq = |trigs, trig|
+  let values = trigs.transform |x| if x == true then 1 else 0
+  seq(values, trig)
 
-export ar = |trig, release = 10000| trig -> env [(1, 0), (0, release)]
-export lfo = |hz = 0.1| sin(hz) * 0.5 + 0.5
-export subdiv = |x, ratio| x * ratio % 1 
-
+#
+# filters
+# 
 export lp = |x, hz = 500, q = 0.717| x -> svf "lp", hz, q
 export bp = |x, hz = 500, q = 0.717| x -> svf "bp", hz, q
 export hp = |x, hz = 500, q = 0.717| x -> svf "hp", hz, q
@@ -22,18 +25,7 @@ export notch = |x, hz = 500, q = 0.717| x -> svf "notch", hz, q
 export peak = |x, hz = 500, q = 0.717| x -> svf "peak", hz, q
 export allpass = |x, hz = 500, q = 0.717| x -> svf "ap", hz, q
 
-export mix = |xs| 
-  xs.fold 0, |acc, x| x * (1 / xs.count()) + acc
-
-export rev = |x, mix = 0.5 | 
-  (x * (1 - mix)) + ((x -> reverb) * mix)
-
-export flanger = |x, mix = 0.5, amt = 0.5, speed = 0.1| 
-  dry = x * (1 - mix)
-  wet = (((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5) * mix
-  dry + wet
-
-# a one pole IIR filter, useful for smoothing signals
+# one pole IIR filter, useful for smoothing signals
 export onepole = |x, a = 0.5|
   # define a single sample buffer
   b = buf 1
@@ -46,6 +38,32 @@ export onepole = |x, a = 0.5|
 # one zero FIR filter
 export fir = |x, a = 0.5|
   (x * (1 - a)) + ((x -> delay 1) * a)
+
+#
+# utilities
+#
+export add = |x, y| x + y
+export sub = |x, y| x - y
+export mul = |x, y| x * y
+export div = |x, y| x / y
+export pow = |x, y| x ^ y
+
+export ramp_rev = |x| x * -1 + 1
+export ramp_mul = |x, ratio| x * ratio % 1 
+
+export mix = |xs| 
+  xs.fold 0, |acc, x| x * (1 / xs.count()) + acc
+
+# 
+# fx
+#
+export rev = |x, mix = 0.5 | 
+  (x * (1 - mix)) + ((x -> reverb) * mix)
+
+export flanger = |x, mix = 0.5, amt = 0.5, speed = 0.1| 
+  dry = x * (1 - mix)
+  wet = (((x -> delay (lfo speed) * (amt * 1000)) + x) * 0.5) * mix
+  dry + wet
 
 export echo = |x, t = sr / 3, fb = 0.5, damping = 0.5|
   b = buf()
@@ -63,11 +81,9 @@ export echo_stereo = |x, t = sr / 3, fb = 0.5, damping = 0.5|
 
   (ch 100 -> pan -1) + (ch -100 -> pan 1)
 
+#
+# synthesis
+#
 export pluck = |t, pitch, length = 1, damping = 0.5|
   period = freq_to_period (ptof pitch)
   noise() * ar 500, t -> echo period, length, damping
-
-export bseq = |trigs, trig|
-  let values = trigs.transform |x| if x == true then 1 else 0
-  seq(values, trig)
-
