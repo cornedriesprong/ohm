@@ -4,6 +4,7 @@ use crate::nodes::Frame;
 
 const A4_FREQ: f32 = 440.0;
 
+#[inline(always)]
 pub fn pitch_to_freq(pitch: Frame) -> Frame {
     pitch
         .into_iter()
@@ -13,6 +14,7 @@ pub fn pitch_to_freq(pitch: Frame) -> Frame {
         .unwrap()
 }
 
+#[inline(always)]
 pub fn freq_to_pitch(freq: Frame) -> Frame {
     freq.into_iter()
         .map(|ch| 69.0 + (12.0 * (ch / A4_FREQ).log2()))
@@ -21,10 +23,7 @@ pub fn freq_to_pitch(freq: Frame) -> Frame {
         .unwrap()
 }
 
-pub fn freq_to_period(sample_rate: f32, freq: f32) -> f32 {
-    sample_rate / freq
-}
-
+#[inline(always)]
 pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
     let len = buffer.len() as isize;
     if len == 0 {
@@ -65,4 +64,15 @@ pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
     }
 
     output_frame
+}
+
+#[inline(always)]
+pub fn hard_clip(x: f32) -> f32 {
+    x.max(-1.0).min(1.0)
+}
+
+#[inline(always)]
+pub fn soft_limit_poly(x: f32) -> f32 {
+    let x2 = x * x;
+    x * (27.0 + x2 * (-27.0 + 9.0 * x2)) / 27.0
 }

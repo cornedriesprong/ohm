@@ -1,5 +1,5 @@
 use crate::nodes::{Frame, Node, NodeKind};
-use crate::utils::{freq_to_period, freq_to_pitch, pitch_to_freq};
+use crate::utils::{freq_to_pitch, pitch_to_freq};
 use crate::KObject;
 use crate::KString;
 use koto::derive::{KotoCopy, KotoType};

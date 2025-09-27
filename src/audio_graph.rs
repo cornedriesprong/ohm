@@ -1,5 +1,6 @@
 use crate::nodes::{Frame, Node, NodeKind};
 use crate::op::Op;
+use crate::utils::{hard_clip, soft_limit_poly};
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use std::collections::HashMap;
 
@@ -82,7 +83,18 @@ impl Container {
             graph.outputs[output_idx] = node.tick(&graph.inputs);
         }
 
-        *graph.outputs.last().unwrap_or(&[0.0, 0.0])
+        let mut out = *graph.outputs.last().unwrap_or(&[0.0, 0.0]);
+
+        out[0] = out[0] * 0.2;
+        out[1] = out[1] * 0.2;
+
+        out[0] = soft_limit_poly(out[0]);
+        out[1] = soft_limit_poly(out[1]);
+
+        out[0] = hard_clip(out[0]);
+        out[1] = hard_clip(out[1]);
+
+        out
     }
 }
 
