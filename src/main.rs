@@ -501,7 +501,7 @@ where
                 "ramp" => NodeKind::Ramp,
                 _ => panic!("Unknown oscillator type: {}", name),
             },
-            inputs: vec![args[0].clone()],
+            inputs: vec![args.get(0).cloned().unwrap_or(Op::Constant(100.0))],
             node: Box::new(FunDSPNode::mono(osc_fn())),
         }),
     );
