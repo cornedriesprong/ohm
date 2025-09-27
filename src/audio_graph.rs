@@ -216,5 +216,10 @@ pub(crate) fn parse_to_graph(expr: Op) -> Graph {
 
     add_expr_to_graph(&expr, &mut graph);
 
+    println!(
+        "running audio graph with {} nodes",
+        graph.graph.node_count()
+    );
+
     graph
 }
