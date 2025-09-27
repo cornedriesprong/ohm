@@ -1,5 +1,6 @@
 use crate::nodes::{
-    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, NodeKind, PulseNode, SeqNode,
+    BufReaderNode, BufTapNode, BufWriterNode, EnvNode, FunDSPNode, LFONode, NodeKind, PulseNode,
+    SeqNode,
 };
 use anyhow::bail;
 use cpal::{
@@ -162,6 +163,17 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     add_osc(koto, "tri".to_string(), || Box::new(triangle()));
     add_osc(koto, "ramp".to_string(), || Box::new(ramp()));
 
+    koto.prelude().add_fn("lfo", move |ctx| {
+        let freq = node_from_kvalue(ctx.args().get(0).unwrap_or(&KValue::Number(1000.0.into())))?;
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Lfo,
+                inputs: vec![freq],
+                node: Box::new(LFONode::new(sample_rate)),
+            }
+            .into(),
+        ))
+    });
     koto.prelude().add_fn("svf", move |ctx| {
         use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
 

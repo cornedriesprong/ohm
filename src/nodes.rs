@@ -14,6 +14,7 @@ pub enum NodeKind {
     Saw,
     Tri,
     Ramp,
+    Lfo,
     Svf,
     Moog,
     Pulse,
@@ -49,6 +50,43 @@ pub(crate) trait Node: Send + Sync {
     }
 
     fn clone_box(&self) -> Box<dyn Node>;
+}
+
+#[derive(Clone)]
+pub struct LFONode {
+    phase: f32,
+    sample_rate: u32,
+}
+
+impl LFONode {
+    pub fn new(sample_rate: u32) -> Self {
+        Self {
+            phase: PI,
+            sample_rate,
+        }
+    }
+}
+
+impl Node for LFONode {
+    #[inline(always)]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let freq = inputs.get(0).map(|[l, _]| *l).unwrap_or(440.0_f32);
+
+        self.phase += 2.0 * PI * freq / self.sample_rate as f32;
+
+        if self.phase >= 2.0 * PI {
+            self.phase = self.phase % (2.0 * PI);
+        }
+
+        let y = self.phase.cos();
+        let y = (y + 1.0) * 0.5; // map to unipolar
+
+        [y; 2]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
 }
 
 #[derive(Clone)]
