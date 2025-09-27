@@ -208,15 +208,15 @@ impl SeqNode {
 impl Node for SeqNode {
     #[inline(always)]
     fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let phase = inputs.last().expect("seq: missing trigger input");
+        let ramp = inputs.last().expect("seq: missing ramp input");
         let values = &inputs[0..inputs.len() - 1];
 
         let segment = 1.0 / values.len() as f32;
-        let step = (phase[0] / segment).floor() as usize;
+        let step = (ramp[0] / segment).floor() as usize;
 
         // safety check since we once got a panic here
-        if step >= values.len() {
-            return values[values.len() - 1];
+        if step <= values.len() {
+            return values[step];
         } else {
             return values[0];
         }
@@ -272,13 +272,6 @@ impl Node for PulseNode {
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
     }
-}
-
-// this is the number of samples we need to represent a full period
-// of the lowest possible MIDI pitch's frequency (A0 / 27.50 Hz)
-enum Mode {
-    String,
-    Drum,
 }
 
 #[derive(Clone)]
