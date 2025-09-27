@@ -1,11 +1,4 @@
 from ohm import *
+from pitches import *
+from scales import *
 
-buf "test"
-
-a = saw 100 -> rec "test"
-
-b = ramp 1 -> play "test"
-
-a + b
-
-# saw 100
