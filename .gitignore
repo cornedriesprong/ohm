@@ -1,4 +1,6 @@
 /target
+/samples
+/sketches
 .DS_Store
 .idea/**
 .zed/**
