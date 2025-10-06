@@ -36,17 +36,22 @@ pub enum NodeKind {
 
 pub(crate) trait Node: Send + Sync {
     #[inline(always)]
-    fn tick(&mut self, _: &[Frame]) -> Frame {
+    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {
         unimplemented!("This node is either a buffer reader or writer");
     }
 
     #[inline(always)]
-    fn tick_read_buffer(&mut self, _: &[Frame], _: &[Frame]) -> Frame {
+    fn process_read_buffer(
+        &mut self,
+        _inputs: &[&[Frame]],
+        _buffer: &[Frame],
+        _outputs: &mut [Frame],
+    ) {
         unimplemented!("This node is not a buffer reader");
     }
 
     #[inline(always)]
-    fn tick_write_buffer(&mut self, _: &[Frame], _: &mut [Frame]) {
+    fn process_write_buffer(&mut self, _inputs: &[&[Frame]], _buffer: &mut [Frame]) {
         unimplemented!("This node is not a buffer writer");
     }
 
@@ -70,19 +75,25 @@ impl LFONode {
 
 impl Node for LFONode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let freq = inputs.get(0).map(|[l, _]| *l).unwrap_or(440.0_f32);
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let freq = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(440.0_f32);
 
-        self.phase += 2.0 * PI * freq / self.sample_rate as f32;
+            self.phase += 2.0 * PI * freq / self.sample_rate as f32;
 
-        if self.phase >= 2.0 * PI {
-            self.phase = self.phase % (2.0 * PI);
+            if self.phase >= 2.0 * PI {
+                self.phase = self.phase % (2.0 * PI);
+            }
+
+            let y = self.phase.cos();
+            let y = (y + 1.0) * 0.5; // map to unipolar
+
+            outputs[i] = [y; 2];
         }
-
-        let y = self.phase.cos();
-        let y = (y + 1.0) * 0.5; // map to unipolar
-
-        [y; 2]
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -107,17 +118,27 @@ impl SampleAndHoldNode {
 
 impl Node for SampleAndHoldNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input = inputs.get(0).map(|f| *f).unwrap_or([0.0; 2]);
-        let ramp = inputs.get(1).map(|[l, _]| *l).unwrap_or(0.0);
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let input = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .copied()
+                .unwrap_or([0.0; 2]);
+            let ramp = inputs
+                .get(1)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0);
 
-        // sample when ramp wraps around (decreases)
-        if ramp < self.prev {
-            self.value = input;
+            // sample when ramp wraps around (decreases)
+            if ramp < self.prev {
+                self.value = input;
+            }
+
+            self.prev = ramp;
+            outputs[i] = self.value;
         }
-
-        self.prev = ramp;
-        self.value
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -129,37 +150,55 @@ impl Node for SampleAndHoldNode {
 pub struct FunDSPNode {
     node: Box<dyn AudioUnit>,
     is_stereo: bool,
+    input_buffer: Vec<f32>,
 }
 
 impl FunDSPNode {
     pub fn mono(node: Box<dyn AudioUnit>) -> Self {
+        let num_inputs = node.inputs();
         Self {
             node,
             is_stereo: false,
+            input_buffer: vec![0.0; num_inputs],
         }
     }
 
     pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
+        let num_inputs = node.inputs();
         Self {
             node,
             is_stereo: true,
+            input_buffer: vec![0.0; num_inputs],
         }
     }
 }
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input: Vec<f32> = inputs.iter().map(|[l, _]| *l).collect();
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        let chunk_size = outputs.len();
+        let num_inputs = self.node.inputs();
 
         if self.is_stereo {
-            let mut output = [0.0; 2];
-            self.node.tick(input.as_slice(), &mut output);
-            output
+            for i in 0..chunk_size {
+                for (input_idx, input_frames) in inputs.iter().enumerate().take(num_inputs) {
+                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                }
+
+                let mut output_sample = [0.0; 2];
+                self.node.tick(&self.input_buffer, &mut output_sample);
+                outputs[i] = output_sample;
+            }
         } else {
-            let mut output = [0.0; 1];
-            self.node.tick(input.as_slice(), &mut output);
-            [output[0]; 2]
+            for i in 0..chunk_size {
+                for (input_idx, input_frames) in inputs.iter().enumerate().take(num_inputs) {
+                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                }
+
+                let mut output_sample = [0.0; 1];
+                self.node.tick(&self.input_buffer, &mut output_sample);
+                outputs[i] = [output_sample[0]; 2];
+            }
         }
     }
 
@@ -191,40 +230,53 @@ impl EnvNode {
 
 impl Node for EnvNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let ramp = inputs.last().expect("env: missing input")[0].clamp(0.0, 1.0);
-        let segments: Vec<EnvSegment> = inputs[0..inputs.len() - 1]
-            .chunks_exact(2)
-            .map(|pair| EnvSegment {
-                target: pair[0][0],
-                duration: pair[1][0] as usize,
-            })
-            .collect();
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let ramp = inputs
+                .last()
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
 
-        let total_duration: f32 = segments.iter().map(|seg| seg.duration as f32).sum();
-        let time = ramp.clamp(0.0, 1.0) * total_duration;
-        let mut value = 0.0;
+            let segments: Vec<EnvSegment> = inputs[0..inputs.len() - 1]
+                .chunks_exact(2)
+                .map(|pair| EnvSegment {
+                    target: pair[0].get(i).map(|[l, _]| *l).unwrap_or(0.0),
+                    duration: pair[1].get(i).map(|[l, _]| *l).unwrap_or(0.0) as usize,
+                })
+                .collect();
 
-        let mut acc = 0.0;
-        for (i, seg) in segments.iter().enumerate() {
-            let seg_start = acc;
-            let seg_end = acc + seg.duration as f32;
-            acc = seg_end;
+            let total_duration: f32 = segments.iter().map(|seg| seg.duration as f32).sum();
+            let time = ramp.clamp(0.0, 1.0) * total_duration;
+            let mut value = 0.0;
 
-            if time <= seg_end || i == segments.len() - 1 {
-                let segment_duration = seg_end - seg_start;
-                let t = if segment_duration > 0.0 {
-                    (time - seg_start) / segment_duration
-                } else {
-                    1.0
-                };
+            let mut acc = 0.0;
+            for (seg_idx, seg) in segments.iter().enumerate() {
+                let seg_start = acc;
+                let seg_end = acc + seg.duration as f32;
+                acc = seg_end;
 
-                let start_value = if i == 0 { 0.0 } else { segments[i - 1].target };
-                value = start_value + t * (seg.target - start_value);
+                if time <= seg_end || seg_idx == segments.len() - 1 {
+                    let segment_duration = seg_end - seg_start;
+                    let t = if segment_duration > 0.0 {
+                        (time - seg_start) / segment_duration
+                    } else {
+                        1.0
+                    };
+
+                    let start_value = if seg_idx == 0 {
+                        0.0
+                    } else {
+                        segments[seg_idx - 1].target
+                    };
+                    value = start_value + t * (seg.target - start_value);
+                    break;
+                }
             }
-        }
 
-        [value, value]
+            outputs[i] = [value, value];
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -243,18 +295,24 @@ impl SeqNode {
 
 impl Node for SeqNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let ramp = inputs.last().expect("seq: missing ramp input");
-        let values = &inputs[0..inputs.len() - 1];
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let ramp = inputs
+                .last()
+                .and_then(|inp| inp.get(i))
+                .copied()
+                .unwrap_or([0.0; 2]);
+            let values = &inputs[0..inputs.len() - 1];
 
-        let segment = 1.0 / values.len() as f32;
-        let step = (ramp[0] / segment).floor() as usize;
+            let segment = 1.0 / values.len() as f32;
+            let step = (ramp[0] / segment).floor() as usize;
 
-        // safety check since we once got a panic here
-        if step <= values.len() {
-            return values[step];
-        } else {
-            return values[0];
+            // safety check since we once got a panic here
+            if step < values.len() {
+                outputs[i] = values[step].get(i).copied().unwrap_or([0.0; 2]);
+            } else {
+                outputs[i] = values[0].get(i).copied().unwrap_or([0.0; 2]);
+            }
         }
     }
 
@@ -291,17 +349,23 @@ impl PulseNode {
 
 impl Node for PulseNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let freq = inputs.get(0).expect("pulse: missing freq input")[0];
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let freq = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(440.0);
 
-        self.prev_phase = self.phase;
-        self.phase += 2. * PI * freq / self.sample_rate as f32;
+            self.prev_phase = self.phase;
+            self.phase += 2. * PI * freq / self.sample_rate as f32;
 
-        if self.phase >= 2. * PI {
-            self.phase -= 2. * PI;
-            [1.0, 1.0]
-        } else {
-            [0.0, 0.0]
+            if self.phase >= 2. * PI {
+                self.phase -= 2. * PI;
+                outputs[i] = [1.0, 1.0];
+            } else {
+                outputs[i] = [0.0, 0.0];
+            }
         }
     }
 
@@ -320,12 +384,23 @@ impl BufReaderNode {
 }
 
 impl Node for BufReaderNode {
-    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
-        let phase = inputs.get(0).expect("missing phase")[0];
-        let phase = phase.clamp(0.0, 1.0);
-        let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
+    fn process_read_buffer(
+        &mut self,
+        inputs: &[&[Frame]],
+        buffer: &[Frame],
+        outputs: &mut [Frame],
+    ) {
+        for i in 0..outputs.len() {
+            let phase = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0);
+            let phase = phase.clamp(0.0, 1.0);
+            let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
 
-        cubic_interpolate(buffer, read_pos)
+            outputs[i] = cubic_interpolate(buffer, read_pos);
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -347,16 +422,25 @@ impl BufTapNode {
 }
 
 impl Node for BufTapNode {
-    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
-        let offset = inputs.get(0).expect("missing offset")[0];
-        let read_pos_f = self.write_pos as f32 - offset;
-        let buffer_len = buffer.len() as f32;
-        let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
-        let y = cubic_interpolate(&buffer, read_pos);
+    fn process_read_buffer(
+        &mut self,
+        inputs: &[&[Frame]],
+        buffer: &[Frame],
+        outputs: &mut [Frame],
+    ) {
+        for i in 0..outputs.len() {
+            let offset = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0);
+            let read_pos_f = self.write_pos as f32 - offset;
+            let buffer_len = buffer.len() as f32;
+            let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
+            outputs[i] = cubic_interpolate(&buffer, read_pos);
 
-        self.write_pos = (self.write_pos + 1) % buffer.len();
-
-        y
+            self.write_pos = (self.write_pos + 1) % buffer.len();
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -376,10 +460,16 @@ impl BufWriterNode {
 }
 
 impl Node for BufWriterNode {
-    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
-        let input = inputs.get(0).expect("wav writer: missing input");
-        buffer[self.write_pos] = *input;
-        self.write_pos = (self.write_pos + 1) % buffer.len();
+    fn process_write_buffer(&mut self, inputs: &[&[Frame]], buffer: &mut [Frame]) {
+        for i in 0..inputs.get(0).map(|inp| inp.len()).unwrap_or(0) {
+            let input = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .copied()
+                .unwrap_or([0.0; 2]);
+            buffer[self.write_pos] = input;
+            self.write_pos = (self.write_pos + 1) % buffer.len();
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -407,23 +497,30 @@ impl DelayNode {
 
 impl Node for DelayNode {
     #[inline(always)]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
-        let input = inputs.get(0).expect("delay: missing input");
-        self.buffer[self.write_pos] = *input;
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        for i in 0..outputs.len() {
+            let input = inputs
+                .get(0)
+                .and_then(|inp| inp.get(i))
+                .copied()
+                .unwrap_or([0.0; 2]);
+            self.buffer[self.write_pos] = input;
 
-        let delay = inputs.get(1).expect("delay: missing delay")[0];
-        // clamp delay to buffer size
-        let delay = delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
-        // TODO: skip interpolation if delay is < 0
+            let delay = inputs
+                .get(1)
+                .and_then(|inp| inp.get(i))
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0);
+            // clamp delay to buffer size
+            let delay = delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
 
-        let read_pos =
-            (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32) % Self::BUFFER_SIZE as f32;
+            let read_pos = (self.write_pos as f32 - delay + Self::BUFFER_SIZE as f32)
+                % Self::BUFFER_SIZE as f32;
 
-        let output = cubic_interpolate(&self.buffer, read_pos);
+            outputs[i] = cubic_interpolate(&self.buffer, read_pos);
 
-        self.write_pos = (self.write_pos + 1) % Self::BUFFER_SIZE;
-
-        output
+            self.write_pos = (self.write_pos + 1) % Self::BUFFER_SIZE;
+        }
     }
 
     fn clone_box(&self) -> Box<dyn Node> {

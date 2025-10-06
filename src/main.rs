@@ -64,11 +64,7 @@ where
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            for frame in data.chunks_mut(2) {
-                let out = container_clone2.lock().unwrap().tick();
-                frame[0] = out[0];
-                frame[1] = out[1];
-            }
+            container_clone2.lock().unwrap().process_interleaved(data);
         },
         err_fn,
         None,

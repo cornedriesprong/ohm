@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub(crate) struct Container {
     graph: Option<Graph>,
     buffers: Vec<Vec<Frame>>,
+    output_buffer: Vec<Frame>,
 }
 
 impl Container {
@@ -14,6 +15,7 @@ impl Container {
         Self {
             graph: None,
             buffers: Vec::new(),
+            output_buffer: Vec::new(),
         }
     }
 
@@ -36,65 +38,129 @@ impl Container {
     }
 
     #[inline(always)]
-    pub fn tick(&mut self) -> Frame {
-        let Some(graph) = &mut self.graph else {
-            return [0.0, 0.0];
-        };
+    pub fn process_interleaved(&mut self, data: &mut [f32]) {
+        let num_frames = data.len() / 2;
 
-        let buffers = &mut self.buffers;
-
-        for (writer_idx, buf_name) in &graph.buffer_writers {
-            graph.inputs.clear();
-            for edge in graph
-                .graph
-                .edges_directed(*writer_idx, petgraph::Direction::Incoming)
-            {
-                graph.inputs.push(graph.outputs[edge.source().index()]);
-            }
-
-            if let Some(buffer) = buffers.get_mut(*buf_name) {
-                let node = &mut graph.graph[*writer_idx];
-                node.tick_write_buffer(&graph.inputs, buffer);
-            }
+        // resize callback buffer if needed
+        if self.output_buffer.len() < num_frames {
+            self.output_buffer.resize(num_frames, [0.0; 2]);
         }
 
-        for &node_idx in &graph.sorted_nodes {
-            if graph.buffer_writers.contains_key(&node_idx) {
-                continue;
-            }
+        // split borrow to avoid lifetime issues
+        let (graph, buffers, callback_buffer) =
+            (&mut self.graph, &mut self.buffers, &mut self.output_buffer);
 
-            graph.inputs.clear();
-            for edge in graph
-                .graph
-                .edges_directed(node_idx, petgraph::Direction::Incoming)
-            {
-                graph.inputs.push(graph.outputs[edge.source().index()]);
-            }
+        if let Some(graph) = graph {
+            let output_chunk = &mut callback_buffer[..num_frames];
+            let chunk_size = output_chunk.len();
+            graph.ensure_chunk_size(chunk_size);
 
-            let node = &mut graph.graph[node_idx];
-            let output_idx = node_idx.index();
+            for (writer_idx, buf_name) in &graph.buffer_writers {
+                graph.input_indices.clear();
+                for edge in graph
+                    .graph
+                    .edges_directed(*writer_idx, petgraph::Direction::Incoming)
+                {
+                    graph.input_indices.push(edge.source().index());
+                }
 
-            if let Some(buf_name) = graph.buffer_readers.get(&node_idx) {
-                if let Some(buffer) = buffers.get(*buf_name) {
-                    graph.outputs[output_idx] = node.tick_read_buffer(&graph.inputs, buffer);
-                    continue;
+                if let Some(buffer) = buffers.get_mut(*buf_name) {
+                    let node = &mut graph.graph[*writer_idx];
+
+                    // SAFETY: We construct slices from raw pointers that are valid and won't alias
+                    // with the buffer being written to (different memory regions)
+                    unsafe {
+                        let buffers_ptr = graph.output_buffers.as_ptr();
+                        let mut input_slices = Vec::with_capacity(graph.max_inputs);
+                        for &idx in &graph.input_indices {
+                            let buf_ptr = buffers_ptr.add(idx);
+                            input_slices
+                                .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
+                        }
+                        node.process_write_buffer(&input_slices, buffer);
+                    }
                 }
             }
-            graph.outputs[output_idx] = node.tick(&graph.inputs);
+
+            // process all nodes in topological order
+            let sorted_nodes = graph.sorted_nodes.clone();
+            for &node_idx in &sorted_nodes {
+                if graph.buffer_writers.contains_key(&node_idx) {
+                    continue;
+                }
+
+                graph.input_indices.clear();
+                for edge in graph
+                    .graph
+                    .edges_directed(node_idx, petgraph::Direction::Incoming)
+                {
+                    graph.input_indices.push(edge.source().index());
+                }
+
+                let output_idx = node_idx.index();
+
+                // SAFETY: We use unsafe here to work around borrow checker limitations.
+                // The topological sort guarantees that input nodes are processed before
+                // this node, and that no node writes to its own input buffers.
+                // Therefore, the input slices and output slice never alias.
+                unsafe {
+                    let buffers_ptr = graph.output_buffers.as_ptr();
+                    let mut input_slices = Vec::with_capacity(graph.max_inputs);
+                    for &idx in &graph.input_indices {
+                        let buf_ptr = buffers_ptr.add(idx);
+                        input_slices
+                            .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
+                    }
+
+                    let output_buffer = &mut graph.output_buffers[output_idx][..chunk_size];
+
+                    if let Some(buf_name) = graph.buffer_readers.get(&node_idx) {
+                        if let Some(buffer) = buffers.get(*buf_name) {
+                            let node = &mut graph.graph[node_idx];
+                            node.process_read_buffer(&input_slices, buffer, output_buffer);
+                            continue;
+                        }
+                    }
+
+                    let node = &mut graph.graph[node_idx];
+                    node.process(&input_slices, output_buffer);
+                }
+            }
+
+            let final_output = if let Some(last_node_idx) = graph.sorted_nodes.last() {
+                &graph.output_buffers[last_node_idx.index()][..chunk_size]
+            } else {
+                // if no nodes, return silence
+                output_chunk.fill([0.0, 0.0]);
+                for i in 0..num_frames {
+                    data[i * 2] = 0.0;
+                    data[i * 2 + 1] = 0.0;
+                }
+                return;
+            };
+
+            for i in 0..chunk_size {
+                let mut out = final_output[i];
+
+                out[0] = out[0] * 0.5;
+                out[1] = out[1] * 0.5;
+
+                out[0] = soft_limit_poly(out[0]);
+                out[1] = soft_limit_poly(out[1]);
+
+                out[0] = hard_clip(out[0]);
+                out[1] = hard_clip(out[1]);
+
+                output_chunk[i] = out;
+            }
         }
 
-        let mut out = *graph.outputs.last().unwrap_or(&[0.0, 0.0]);
-
-        out[0] = out[0] * 0.2;
-        out[1] = out[1] * 0.2;
-
-        out[0] = soft_limit_poly(out[0]);
-        out[1] = soft_limit_poly(out[1]);
-
-        out[0] = hard_clip(out[0]);
-        out[1] = hard_clip(out[1]);
-
-        out
+        // convert back to interleaved
+        let frames = &self.output_buffer[..num_frames];
+        for i in 0..num_frames {
+            data[i * 2] = frames[i][0];
+            data[i * 2 + 1] = frames[i][1];
+        }
     }
 }
 
@@ -104,8 +170,10 @@ pub(crate) struct Graph {
     sorted_nodes: Vec<NodeIndex>,
     buffer_writers: HashMap<NodeIndex, usize>,
     buffer_readers: HashMap<NodeIndex, usize>,
-    inputs: Vec<Frame>,
-    outputs: Vec<Frame>,
+    input_indices: Vec<usize>,
+    output_buffers: Vec<Vec<Frame>>,
+    max_chunk_size: usize,
+    max_inputs: usize,
 }
 
 impl Graph {
@@ -115,8 +183,19 @@ impl Graph {
             sorted_nodes: Vec::new(),
             buffer_writers: HashMap::new(),
             buffer_readers: HashMap::new(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            input_indices: Vec::new(),
+            output_buffers: Vec::new(),
+            max_chunk_size: 0,
+            max_inputs: 8,
+        }
+    }
+
+    fn ensure_chunk_size(&mut self, chunk_size: usize) {
+        if chunk_size > self.max_chunk_size {
+            self.max_chunk_size = chunk_size;
+            for buffer in &mut self.output_buffers {
+                buffer.resize(chunk_size, [0.0, 0.0]);
+            }
         }
     }
 
@@ -149,11 +228,34 @@ impl Graph {
 
     fn update_processing_order(&mut self) {
         self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
-        self.outputs.resize(self.graph.node_count(), [0.0, 0.0]);
 
-        // Pre-allocate inputs vector with capacity for typical node inputs (most have 1-4)
-        self.inputs.clear();
-        self.inputs.reserve(8);
+        // resize output_buffers to match node count
+        let node_count = self.graph.node_count();
+        if self.output_buffers.len() < node_count {
+            self.output_buffers.resize(node_count, Vec::new());
+        }
+
+        // ensure each buffer has at least max_chunk_size capacity
+        for buffer in &mut self.output_buffers {
+            if buffer.len() < self.max_chunk_size {
+                buffer.resize(self.max_chunk_size, [0.0, 0.0]);
+            }
+        }
+
+        // track maximum number of inputs across all nodes for pre-allocation
+        for &node_idx in &self.sorted_nodes {
+            let input_count = self
+                .graph
+                .edges_directed(node_idx, petgraph::Direction::Incoming)
+                .count();
+            if input_count > self.max_inputs {
+                self.max_inputs = input_count;
+            }
+        }
+
+        // pre-allocate input_indices vector
+        self.input_indices.clear();
+        self.input_indices.reserve(self.max_inputs);
     }
 
     pub(crate) fn apply_diff(&mut self, mut new_graph: Graph) {
@@ -177,7 +279,7 @@ impl Graph {
             }
         }
 
-        // Replace current graph with the state-transferred new graph
+        // replace current graph with the state-transferred new graph
         *self = new_graph;
     }
 }

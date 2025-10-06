@@ -270,47 +270,97 @@ impl KotoEntries for Op {
 impl Node for Op {
     #[inline(always)]
     #[nonblocking]
-    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        const EMPTY: &[Frame] = &[];
+        let chunk_size = outputs.len();
+
         match self {
-            Op::Constant(val) => [*val; 2],
+            Op::Constant(val) => {
+                let frame = [*val; 2];
+                outputs.fill(frame);
+            }
             Op::Node { kind, node, .. } => match kind {
                 NodeKind::Log => {
-                    println!("{:?}", inputs[0][0]);
-                    inputs[0]
+                    let input = inputs.get(0).unwrap_or(&EMPTY);
+                    for i in 0..chunk_size {
+                        let frame = input.get(i).copied().unwrap_or([0.0; 2]);
+                        println!("{:?}", frame[0]);
+                        outputs[i] = frame;
+                    }
                 }
-                NodeKind::Ftop => freq_to_pitch(inputs[0]),
-                NodeKind::Ptof => pitch_to_freq(inputs[0]),
-                _ => node.tick(inputs),
+                NodeKind::Ftop => {
+                    let input = inputs.get(0).unwrap_or(&EMPTY);
+                    for i in 0..chunk_size {
+                        outputs[i] = freq_to_pitch(input.get(i).copied().unwrap_or([0.0; 2]));
+                    }
+                }
+                NodeKind::Ptof => {
+                    let input = inputs.get(0).unwrap_or(&EMPTY);
+                    for i in 0..chunk_size {
+                        outputs[i] = pitch_to_freq(input.get(i).copied().unwrap_or([0.0; 2]));
+                    }
+                }
+                _ => {
+                    node.process(inputs, outputs);
+                }
             },
-            Op::Gain { .. } => match inputs {
-                [[l0, r0], [l1, r1]] => [l0 * l1, r0 * r1],
-                _ => unimplemented!(),
-            },
-            Op::Mix { .. } => match inputs {
-                [[l0, r0], [l1, r1]] => [l0 + l1, r0 + r1],
-                _ => unimplemented!(),
-            },
-            Op::Wrap { .. } => match inputs {
-                [[l0, r0], [l1, r1]] => [l0 % l1, r0 % r1],
-                _ => unimplemented!(),
-            },
-            Op::Negate { .. } => match inputs {
-                [[l, r]] => [-l, -r],
-                _ => unimplemented!(),
-            },
-            Op::Power { .. } => match inputs {
-                [[l0, r0], [l1, r1]] => [l0.powf(*l1), r0.powf(*r1)],
-                _ => unimplemented!(),
-            },
+            Op::Gain { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [l0 * l1, r0 * r1];
+                }
+            }
+            Op::Mix { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [l0 + l1, r0 + r1];
+                }
+            }
+            Op::Wrap { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [l0 % l1, r0 % r1];
+                }
+            }
+            Op::Negate { .. } => {
+                let input = inputs.get(0).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l, r] = input.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [-l, -r];
+                }
+            }
+            Op::Power { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [l0.powf(l1), r0.powf(r1)];
+                }
+            }
         }
     }
 
     #[inline(always)]
-    fn tick_read_buffer(&mut self, inputs: &[Frame], buffer: &[Frame]) -> Frame {
+    fn process_read_buffer(
+        &mut self,
+        inputs: &[&[Frame]],
+        buffer: &[Frame],
+        outputs: &mut [Frame],
+    ) {
         match self {
             Op::Node { kind, node, .. } => match kind {
                 NodeKind::BufferReader { .. } | NodeKind::BufferTap { .. } => {
-                    node.tick_read_buffer(inputs, buffer)
+                    node.process_read_buffer(inputs, buffer, outputs)
                 }
                 _ => unimplemented!(),
             },
@@ -319,10 +369,10 @@ impl Node for Op {
     }
 
     #[inline(always)]
-    fn tick_write_buffer(&mut self, inputs: &[Frame], buffer: &mut [Frame]) {
+    fn process_write_buffer(&mut self, inputs: &[&[Frame]], buffer: &mut [Frame]) {
         match self {
             Op::Node { kind, node, .. } => match kind {
-                NodeKind::BufferWriter { .. } => node.tick_write_buffer(inputs, buffer),
+                NodeKind::BufferWriter { .. } => node.process_write_buffer(inputs, buffer),
                 _ => unimplemented!(),
             },
             _ => unimplemented!(),
