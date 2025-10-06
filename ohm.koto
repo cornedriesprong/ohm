@@ -6,11 +6,6 @@ from bjorklund import *
 export A4_FREQ = 440
 
 #
-# envelopes
-# 
-export ar = |ramp, release = 10000| ramp -> env [(1, 0), (0, release)]
-
-#
 # sequencers
 # 
 
