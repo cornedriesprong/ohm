@@ -21,7 +21,6 @@ pub enum NodeKind {
     Pulse,
     Log,
     Noise,
-    Env,
     Ftop,
     Ptof,
     Seq,
@@ -210,77 +209,6 @@ impl Node for FunDSPNode {
 impl Clone for Box<dyn Node> {
     fn clone(&self) -> Self {
         self.clone_box()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct EnvSegment {
-    pub duration: usize,
-    pub target: f32,
-}
-
-#[derive(Clone)]
-pub struct EnvNode;
-
-impl EnvNode {
-    pub(crate) fn new() -> Self {
-        Self
-    }
-}
-
-impl Node for EnvNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        for i in 0..outputs.len() {
-            let ramp = inputs
-                .last()
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(0.0)
-                .clamp(0.0, 1.0);
-
-            let segments: Vec<EnvSegment> = inputs[0..inputs.len() - 1]
-                .chunks_exact(2)
-                .map(|pair| EnvSegment {
-                    target: pair[0].get(i).map(|[l, _]| *l).unwrap_or(0.0),
-                    duration: pair[1].get(i).map(|[l, _]| *l).unwrap_or(0.0) as usize,
-                })
-                .collect();
-
-            let total_duration: f32 = segments.iter().map(|seg| seg.duration as f32).sum();
-            let time = ramp.clamp(0.0, 1.0) * total_duration;
-            let mut value = 0.0;
-
-            let mut acc = 0.0;
-            for (seg_idx, seg) in segments.iter().enumerate() {
-                let seg_start = acc;
-                let seg_end = acc + seg.duration as f32;
-                acc = seg_end;
-
-                if time <= seg_end || seg_idx == segments.len() - 1 {
-                    let segment_duration = seg_end - seg_start;
-                    let t = if segment_duration > 0.0 {
-                        (time - seg_start) / segment_duration
-                    } else {
-                        1.0
-                    };
-
-                    let start_value = if seg_idx == 0 {
-                        0.0
-                    } else {
-                        segments[seg_idx - 1].target
-                    };
-                    value = start_value + t * (seg.target - start_value);
-                    break;
-                }
-            }
-
-            outputs[i] = [value, value];
-        }
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
     }
 }
 

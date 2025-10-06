@@ -1,7 +1,7 @@
 use crate::audio_graph::Container;
 use crate::nodes::{
-    self, BufReaderNode, BufTapNode, BufWriterNode, DelayNode, EnvNode, FunDSPNode, LFONode,
-    NodeKind, PulseNode, SampleAndHoldNode, SeqNode,
+    self, BufReaderNode, BufTapNode, BufWriterNode, DelayNode, FunDSPNode, LFONode, NodeKind,
+    PulseNode, SampleAndHoldNode, SeqNode,
 };
 use crate::op::Op;
 use koto::{
@@ -136,26 +136,6 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
                 kind: NodeKind::Ptof,
                 inputs: vec![input],
                 node: Box::new(FunDSPNode::mono(Box::new(sink()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("env", move |ctx| {
-        let args = ctx.args();
-        let ramp = node_from_kvalue(&args[0])?;
-        let segments = list_of_tuples_from_value(&args[1])?;
-
-        let inputs = segments
-            .iter()
-            .flat_map(|(value, duration)| vec![value.clone(), duration.clone()])
-            .chain(std::iter::once(ramp))
-            .collect::<Vec<_>>();
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Env,
-                inputs,
-                node: Box::new(EnvNode::new()),
             }
             .into(),
         ))
@@ -416,24 +396,6 @@ fn list_from_value(value: &KValue) -> Result<Vec<Op>, koto::runtime::Error> {
             .iter()
             .map(node_from_kvalue)
             .collect::<Result<Vec<_>, _>>()?),
-        unexpected => unexpected_type("list", unexpected),
-    }
-}
-
-fn list_of_tuples_from_value(value: &KValue) -> Result<Vec<(Op, Op)>, koto::runtime::Error> {
-    match value {
-        KValue::List(list) => list
-            .data()
-            .iter()
-            .map(|item| match item {
-                KValue::Tuple(t) => {
-                    let target = node_from_kvalue(&t[0])?;
-                    let duration = node_from_kvalue(&t[1])?;
-                    Ok((target, duration))
-                }
-                unexpected => unexpected_type("tuple", unexpected),
-            })
-            .collect(),
         unexpected => unexpected_type("list", unexpected),
     }
 }
