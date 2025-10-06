@@ -1,9 +1,0 @@
-export A4_FREQ = 440
-
-export C_MAJ = [0, 2, 4, 5, 7, 9, 11]
-export C_MIN = [0, 2, 3, 5, 7, 8, 10]
-
-export ptof = |p| A4_FREQ * (2 ^ ((p - A4) / 12))
-export ftop = |f| ((f / A4_FREQ).log2() * 12 + A4).round()
-
-export ar = |release, trig| env([(1, 0), (0, release)], trig)
