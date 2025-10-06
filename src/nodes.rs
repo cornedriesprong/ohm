@@ -15,6 +15,7 @@ pub enum NodeKind {
     Tri,
     Ramp,
     Lfo,
+    SampleAndHold,
     Svf,
     Moog,
     Pulse,
@@ -82,6 +83,41 @@ impl Node for LFONode {
         let y = (y + 1.0) * 0.5; // map to unipolar
 
         [y; 2]
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct SampleAndHoldNode {
+    value: Frame,
+    prev: f32,
+}
+
+impl SampleAndHoldNode {
+    pub fn new() -> Self {
+        Self {
+            value: [0.0; 2],
+            prev: 1.0,
+        }
+    }
+}
+
+impl Node for SampleAndHoldNode {
+    #[inline(always)]
+    fn tick(&mut self, inputs: &[Frame]) -> Frame {
+        let input = inputs.get(0).map(|f| *f).unwrap_or([0.0; 2]);
+        let ramp = inputs.get(1).map(|[l, _]| *l).unwrap_or(0.0);
+
+        // sample when ramp wraps around (decreases)
+        if ramp < self.prev {
+            self.value = input;
+        }
+
+        self.prev = ramp;
+        self.value
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
