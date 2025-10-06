@@ -18,7 +18,7 @@ pub enum NodeKind {
     Svf,
     Moog,
     Pulse,
-    Print,
+    Log,
     Noise,
     Env,
     Ftop,

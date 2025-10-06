@@ -274,7 +274,7 @@ impl Node for Op {
         match self {
             Op::Constant(val) => [*val; 2],
             Op::Node { kind, node, .. } => match kind {
-                NodeKind::Print => {
+                NodeKind::Log => {
                     println!("{:?}", inputs[0][0]);
                     inputs[0]
                 }

@@ -220,9 +220,9 @@ fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
         ))
     });
     koto.prelude().add_fn(
-        "print",
+        "log",
         make_expr_node(|args| Op::Node {
-            kind: NodeKind::Print,
+            kind: NodeKind::Log,
             inputs: vec![args[0].clone()],
             node: Box::new(FunDSPNode::mono(Box::new(sink()))),
         }),
@@ -513,7 +513,7 @@ fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {
         KValue::Number(n) => Ok(Op::Constant(n.into())),
         KValue::Object(obj) if obj.is_a::<Op>() => Ok(obj.cast::<Op>()?.to_owned()),
         KValue::Str(_) => Ok(Op::Node {
-            kind: NodeKind::Print,
+            kind: NodeKind::Log,
             inputs: vec![],
             node: Box::new(FunDSPNode::mono(Box::new(sink()))),
         }),
