@@ -67,12 +67,29 @@ pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
 }
 
 #[inline(always)]
-pub fn hard_clip(x: f32) -> f32 {
-    x.max(-1.0).min(1.0)
+pub fn soft_limit_poly(frames: &mut [Frame]) {
+    for frame in frames.iter_mut() {
+        let x0 = frame[0];
+        let x1 = frame[1];
+        let x0_2 = x0 * x0;
+        let x1_2 = x1 * x1;
+        frame[0] = x0 * (27.0 + x0_2 * (-27.0 + 9.0 * x0_2)) / 27.0;
+        frame[1] = x1 * (27.0 + x1_2 * (-27.0 + 9.0 * x1_2)) / 27.0;
+    }
 }
 
 #[inline(always)]
-pub fn soft_limit_poly(x: f32) -> f32 {
-    let x2 = x * x;
-    x * (27.0 + x2 * (-27.0 + 9.0 * x2)) / 27.0
+pub fn hard_clip(frames: &mut [Frame]) {
+    for frame in frames.iter_mut() {
+        frame[0] = frame[0].max(-1.0).min(1.0);
+        frame[1] = frame[1].max(-1.0).min(1.0);
+    }
+}
+
+#[inline(always)]
+pub fn scale_buffer(frames: &mut [Frame], gain: f32) {
+    for frame in frames.iter_mut() {
+        frame[0] *= gain;
+        frame[1] *= gain;
+    }
 }

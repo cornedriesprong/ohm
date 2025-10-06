@@ -1,6 +1,6 @@
 use crate::nodes::{Frame, Node, NodeKind};
 use crate::op::Op;
-use crate::utils::{hard_clip, soft_limit_poly};
+use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use std::collections::HashMap;
 
@@ -127,8 +127,13 @@ impl Container {
                 }
             }
 
-            let final_output = if let Some(last_node_idx) = graph.sorted_nodes.last() {
-                &graph.output_buffers[last_node_idx.index()][..chunk_size]
+            if let Some(last_node_idx) = graph.sorted_nodes.last() {
+                let final_output = &graph.output_buffers[last_node_idx.index()][..chunk_size];
+                output_chunk.copy_from_slice(final_output);
+
+                scale_buffer(output_chunk, 0.5);
+                soft_limit_poly(output_chunk);
+                hard_clip(output_chunk);
             } else {
                 // if no nodes, return silence
                 output_chunk.fill([0.0, 0.0]);
@@ -137,21 +142,6 @@ impl Container {
                     data[i * 2 + 1] = 0.0;
                 }
                 return;
-            };
-
-            for i in 0..chunk_size {
-                let mut out = final_output[i];
-
-                out[0] = out[0] * 0.5;
-                out[1] = out[1] * 0.5;
-
-                out[0] = soft_limit_poly(out[0]);
-                out[1] = soft_limit_poly(out[1]);
-
-                out[0] = hard_clip(out[0]);
-                out[1] = hard_clip(out[1]);
-
-                output_chunk[i] = out;
             }
         }
 
