@@ -1,0 +1,54 @@
+export euclid = |pulses, steps|
+  if steps <= 0
+    []
+  if pulses <= 0
+    pattern = []
+    i = 0
+    while i < steps
+      pattern.push 0
+      i += 1
+    pattern
+  if pulses >= steps
+    pattern = []
+    i = 0
+    while i < steps
+      pattern.push 1
+      i += 1
+    pattern
+
+  pattern = []
+  counts = []
+  remainders = [pulses]
+  divisor = steps - pulses
+  level = 0
+
+  intdiv = |a, b| (a / b).floor()
+
+  while 1
+    q = intdiv divisor, remainders[level]   # integer division
+    r = divisor % remainders[level]
+    counts.push q
+    remainders.push r
+    divisor = remainders[level]
+    level += 1
+    if remainders[level] <= 1
+      break
+
+  counts.push divisor
+
+  build = |lvl|
+    if lvl > -1
+      times = counts[lvl]
+      i = 0
+      while i < times
+        build lvl - 1
+        i += 1
+      if remainders[lvl] != 0
+        build lvl - 2
+    else if lvl == -1
+      pattern.push 0
+    else if lvl == -2
+      pattern.push 1
+
+  build level
+  pattern

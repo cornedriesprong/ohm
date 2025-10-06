@@ -1,3 +1,5 @@
+from bjorklund import *
+
 #
 # constants
 # 
@@ -11,9 +13,9 @@ export ar = |ramp, release = 10000| ramp -> env [(1, 0), (0, release)]
 #
 # sequencers
 # 
-export bseq = |trigs, trig|
-  let values = trigs.transform |x| if x == true then 1 else 0
-  seq(values, trig)
+
+# euclidean sequencer
+export eseq = |x, pulses, steps| x -> seq euclid pulses, steps
 
 #
 # filters
@@ -46,10 +48,17 @@ export add = |x, y| x + y
 export sub = |x, y| x - y
 export mul = |x, y| x * y
 export div = |x, y| x / y
-export pow = |x, y| x ^ y
+export pow = |x, y = 2| x ^ y
 
+# ramp utilities
 export ramp_rev = |x| x * -1 + 1
-export ramp_mul = |x, ratio| x * ratio % 1 
+export subdiv = |x, ratio = 2| x * ratio % 1 
+
+# bipolar to unipolar
+export btou = |x| x + 1 * 0.5
+
+# unipolar to bipolar
+export utob = |x| x - 1 * 2 
 
 export mix = |xs| 
   xs.fold 0, |acc, x| x * (1 / xs.count()) + acc
