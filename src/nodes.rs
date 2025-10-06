@@ -21,8 +21,6 @@ pub enum NodeKind {
     Pulse,
     Log,
     Noise,
-    Ftop,
-    Ptof,
     Seq,
     Pan,
     Reverb,

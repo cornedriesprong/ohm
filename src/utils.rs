@@ -2,27 +2,6 @@
 
 use crate::nodes::Frame;
 
-const A4_FREQ: f32 = 440.0;
-
-#[inline(always)]
-pub fn pitch_to_freq(pitch: Frame) -> Frame {
-    pitch
-        .into_iter()
-        .map(|ch| A4_FREQ * (2.0f32).powf((ch - 69.0) / 12.0))
-        .collect::<Vec<f32>>()
-        .try_into()
-        .unwrap()
-}
-
-#[inline(always)]
-pub fn freq_to_pitch(freq: Frame) -> Frame {
-    freq.into_iter()
-        .map(|ch| 69.0 + (12.0 * (ch / A4_FREQ).log2()))
-        .collect::<Vec<f32>>()
-        .try_into()
-        .unwrap()
-}
-
 #[inline(always)]
 pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
     let len = buffer.len() as isize;

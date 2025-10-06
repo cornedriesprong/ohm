@@ -1,5 +1,4 @@
 use crate::nodes::{Frame, Node, NodeKind};
-use crate::utils::{freq_to_pitch, pitch_to_freq};
 use crate::KObject;
 use crate::KString;
 use koto::derive::{KotoCopy, KotoType};
@@ -286,18 +285,6 @@ impl Node for Op {
                         let frame = input.get(i).copied().unwrap_or([0.0; 2]);
                         println!("{:?}", frame[0]);
                         outputs[i] = frame;
-                    }
-                }
-                NodeKind::Ftop => {
-                    let input = inputs.get(0).unwrap_or(&EMPTY);
-                    for i in 0..chunk_size {
-                        outputs[i] = freq_to_pitch(input.get(i).copied().unwrap_or([0.0; 2]));
-                    }
-                }
-                NodeKind::Ptof => {
-                    let input = inputs.get(0).unwrap_or(&EMPTY);
-                    for i in 0..chunk_size {
-                        outputs[i] = pitch_to_freq(input.get(i).copied().unwrap_or([0.0; 2]));
                     }
                 }
                 _ => {
