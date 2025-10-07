@@ -128,8 +128,8 @@ impl Node for SampleAndHoldNode {
                 .map(|[l, _]| *l)
                 .unwrap_or(0.0);
 
-            // sample when ramp wraps around (decreases)
-            if ramp < self.prev {
+            // sample when ramp makes a sudden jump
+            if (ramp - self.prev).abs() > 0.5 {
                 self.value = input;
             }
 
