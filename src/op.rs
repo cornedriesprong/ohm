@@ -15,6 +15,9 @@ pub enum Op {
     Wrap(Box<Op>, Box<Op>),
     Negate(Box<Op>),
     Power(Box<Op>, Box<Op>),
+    Greater(Box<Op>, Box<Op>),
+    Less(Box<Op>, Box<Op>),
+    Equal(Box<Op>, Box<Op>),
     Node {
         kind: NodeKind,
         inputs: Vec<Op>,
@@ -177,6 +180,21 @@ impl Op {
                 lhs.hash_structure(hasher);
                 rhs.hash_structure(hasher);
             }
+            Op::Greater(lhs, rhs) => {
+                9u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Less(lhs, rhs) => {
+                10u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
+            Op::Equal(lhs, rhs) => {
+                11u8.hash(hasher);
+                lhs.hash_structure(hasher);
+                rhs.hash_structure(hasher);
+            }
         }
     }
 }
@@ -332,6 +350,42 @@ impl Node for Op {
                     let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
                     let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
                     outputs[i] = [l0.powf(l1), r0.powf(r1)];
+                }
+            }
+            Op::Greater { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [
+                        if l0 > l1 { 1.0 } else { 0.0 },
+                        if r0 > r1 { 1.0 } else { 0.0 },
+                    ];
+                }
+            }
+            Op::Less { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [
+                        if l0 < l1 { 1.0 } else { 0.0 },
+                        if r0 < r1 { 1.0 } else { 0.0 },
+                    ];
+                }
+            }
+            Op::Equal { .. } => {
+                let in0 = inputs.get(0).unwrap_or(&EMPTY);
+                let in1 = inputs.get(1).unwrap_or(&EMPTY);
+                for i in 0..chunk_size {
+                    let [l0, r0] = in0.get(i).copied().unwrap_or([0.0; 2]);
+                    let [l1, r1] = in1.get(i).copied().unwrap_or([0.0; 2]);
+                    outputs[i] = [
+                        if l0 == l1 { 1.0 } else { 0.0 },
+                        if r0 == r1 { 1.0 } else { 0.0 },
+                    ];
                 }
             }
         }

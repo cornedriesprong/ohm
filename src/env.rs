@@ -300,6 +300,31 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             _ => Err("Expected a buffer".into()),
         };
     });
+
+    koto.prelude().add_fn("gt", move |ctx| {
+        let args = ctx.args();
+        let lhs = node_from_kvalue(&args[0])?;
+        let rhs = node_from_kvalue(&args[1])?;
+        Ok(KValue::Object(
+            Op::Greater(Box::new(lhs), Box::new(rhs)).into(),
+        ))
+    });
+    koto.prelude().add_fn("lt", move |ctx| {
+        let args = ctx.args();
+        let lhs = node_from_kvalue(&args[0])?;
+        let rhs = node_from_kvalue(&args[1])?;
+        Ok(KValue::Object(
+            Op::Less(Box::new(lhs), Box::new(rhs)).into(),
+        ))
+    });
+    koto.prelude().add_fn("eq", move |ctx| {
+        let args = ctx.args();
+        let lhs = node_from_kvalue(&args[0])?;
+        let rhs = node_from_kvalue(&args[1])?;
+        Ok(KValue::Object(
+            Op::Equal(Box::new(lhs), Box::new(rhs)).into(),
+        ))
+    });
 }
 
 fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction

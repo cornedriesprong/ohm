@@ -281,9 +281,13 @@ pub(crate) fn parse_to_graph(expr: Op) -> Graph {
         match expr {
             Op::Constant { .. } => add_node(vec![], expr, graph),
             Op::Node { inputs, .. } => add_node(inputs.iter().collect::<Vec<_>>(), expr, graph),
-            Op::Gain(lhs, rhs) | Op::Mix(lhs, rhs) | Op::Wrap(lhs, rhs) | Op::Power(lhs, rhs) => {
-                add_node(vec![lhs, rhs], expr, graph)
-            }
+            Op::Gain(lhs, rhs)
+            | Op::Mix(lhs, rhs)
+            | Op::Wrap(lhs, rhs)
+            | Op::Power(lhs, rhs)
+            | Op::Greater(lhs, rhs)
+            | Op::Less(lhs, rhs)
+            | Op::Equal(lhs, rhs) => add_node(vec![lhs, rhs], expr, graph),
             Op::Negate(val) => add_node(vec![val], expr, graph),
         }
     }
