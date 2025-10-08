@@ -20,8 +20,29 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
     add_osc(koto, "sqr".to_string(), || Box::new(square()));
     add_osc(koto, "saw".to_string(), || Box::new(saw()));
     add_osc(koto, "tri".to_string(), || Box::new(triangle()));
-    add_osc(koto, "ramp".to_string(), || Box::new(ramp()));
 
+    koto.prelude().add_fn("ramp", move |ctx| {
+        let freq = node_from_kvalue(ctx.args().get(0).unwrap_or(&KValue::Number(1.0.into())))?;
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Ramp,
+                inputs: vec![freq],
+                node: Box::new(FunDSPNode::mono(Box::new(ramp()))),
+            }
+            .into(),
+        ))
+    });
+    koto.prelude().add_fn("clip", move |ctx| {
+        let freq = node_from_kvalue(ctx.args().get(0).unwrap_or(&KValue::Number(1.0.into())))?;
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Ramp,
+                inputs: vec![freq],
+                node: Box::new(FunDSPNode::mono(Box::new(clip()))),
+            }
+            .into(),
+        ))
+    });
     koto.prelude().add_fn("lfo", move |ctx| {
         let freq = node_from_kvalue(ctx.args().get(0).unwrap_or(&KValue::Number(1000.0.into())))?;
         Ok(KValue::Object(
@@ -79,7 +100,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
 
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
-        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(1000.0.into())))?;
+        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(500.0.into())))?;
         let q = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.0.into())))?;
 
         Ok(KValue::Object(
@@ -97,14 +118,6 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             kind: NodeKind::Log,
             inputs: vec![args[0].clone()],
             node: Box::new(FunDSPNode::mono(Box::new(sink()))),
-        }),
-    );
-    koto.prelude().add_fn(
-        "pulse",
-        make_expr_node(move |args| Op::Node {
-            kind: NodeKind::Pulse,
-            inputs: vec![args[0].clone()],
-            node: Box::new(PulseNode::new(sample_rate)),
         }),
     );
     koto.prelude().add_fn(
@@ -139,7 +152,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
     koto.prelude().add_fn("pan", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
-        let pan = node_from_kvalue(&args[1])?;
+        let pan = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(0.5.into())))?;
 
         Ok(KValue::Object(
             Op::Node {
