@@ -1,0 +1,100 @@
+# Tests for ptof (pitch to frequency) and ftop (frequency to pitch) functions
+#
+# To run these tests:
+#   cargo run ohm_test.koto
+
+from test import assert_eq, assert_near, run_tests
+from number import log2
+
+# Define constants directly to avoid importing from ohm
+A4_FREQ = 440
+A4 = 69  # MIDI note number for A4
+A3 = 57  # MIDI note number for A3
+A5 = 81  # MIDI note number for A5
+C3 = 48
+C4 = 60
+C5 = 72
+D3 = 50
+D4 = 62
+E3 = 52
+E4 = 64
+F3 = 53
+F4 = 65
+G3 = 55
+G4 = 67
+B3 = 59
+B4 = 71
+
+# Define the functions to test
+ptof = |pitch| A4_FREQ * 2 ^ ((pitch - A4) / 12)
+ftop = |freq| (12 * log2(freq / A4_FREQ)) + A4
+
+ptof_ftop_tests =
+  @test ptof_a4: ||
+    # A4 (MIDI note 69) should be 440 Hz
+    assert_eq ptof(A4), 440
+
+  @test ptof_a3: ||
+    # A3 (MIDI note 57) should be 220 Hz (one octave below A4)
+    assert_eq ptof(A3), 220
+
+  @test ptof_a5: ||
+    # A5 (MIDI note 81) should be 880 Hz (one octave above A4)
+    assert_eq ptof(A5), 880
+
+  @test ptof_c4: ||
+    # C4 (middle C, MIDI note 60) should be ~261.626 Hz
+    assert_near ptof(C4), 261.6255653005986, 0.0001
+
+  @test ptof_c5: ||
+    # C5 (MIDI note 72) should be ~523.251 Hz
+    assert_near ptof(C5), 523.2511306011972, 0.0001
+
+  @test ftop_440: ||
+    # 440 Hz should be A4 (MIDI note 69)
+    assert_eq ftop(440), A4
+
+  @test ftop_220: ||
+    # 220 Hz should be A3 (MIDI note 57)
+    assert_eq ftop(220), A3
+
+  @test ftop_880: ||
+    # 880 Hz should be A5 (MIDI note 81)
+    assert_eq ftop(880), A5
+
+  @test ftop_middle_c: ||
+    # ~261.626 Hz should be C4 (MIDI note 60)
+    assert_near ftop(261.6255653005986), C4, 0.0001
+
+  @test ptof_ftop_inverse: ||
+    # Test that ptof and ftop are inverses of each other
+    for pitch in [C3, D3, E3, F3, G3, A3, B3, C4, D4, E4, F4, G4, A4, B4, C5]
+      freq = ptof pitch
+      result = ftop freq
+      assert_near result, pitch, 0.0001
+
+  @test ftop_ptof_inverse: ||
+    # Test that ftop and ptof are inverses of each other
+    for freq in [110, 220, 440, 880, 1760, 100, 200, 500, 1000]
+      pitch = ftop freq
+      result = ptof pitch
+      assert_near result, freq, 0.0001
+
+  @test ptof_octave_doubling: ||
+    # Each octave should double the frequency
+    for base_pitch in [C3, C4, C5, A3, A4, A5]
+      freq = ptof base_pitch
+      freq_octave_up = ptof (base_pitch + 12)
+      assert_near freq_octave_up, freq * 2, 0.0001
+
+  @test ftop_octave_doubling: ||
+    # Doubling the frequency should add 12 semitones (one octave)
+    for base_freq in [110, 220, 440, 880]
+      pitch = ftop base_freq
+      pitch_octave_up = ftop (base_freq * 2)
+      assert_near pitch_octave_up, pitch + 12, 0.0001
+
+export @main = ||
+  run_tests ptof_ftop_tests
+  print 'All ptof/ftop tests passed!'
+  'Tests complete'
