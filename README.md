@@ -36,19 +36,80 @@ Note that re-evaluating the code currently causes discontinuities in the audio o
 
 ohm currently contains the following high-level synthesis functions and effects:
 
-- `sine(freq)` a sine wave
-- `square(freq)` a square wave
-- `saw(freq)` a bandlimited sawtooth wave
-- `pulse(freq)` a pulse wave with a single-sample impulse, primarily useful for triggering `ar`, `env` or `pluck` functions
-- `noise()` white noise, also useful as a randomization source
-- `ar(attack, release, trig)` a simple attack-release envelope, which can be triggered by a pulse function
-- `svf(mode ("lp" | "hp" | "bp"), cutoff, resonance, input)` a state-variable filter with lowpass (lp), highpass (hp) and bandpass (bp) modes.
+### Basics
+
+- `ramp(freq=100)` a ramp generator going from 0 to 1, useful for driving sequencers and envelopes
+- `lfo(freq=1)` a low-frequency sine oscillator, maintains its phase between graph evaluations
+- `mul(lhs, rhs)` multiplies two signals
+- `add(lhs, rhs)` adds two signals
+- `sub(lhs, rhs)` subtracts one signal from another
+- `div(lhs, rhs)` divides one signal by another
+- `pow(lhs, rhs=2)` raises one signal to the power of another
+- `mod(lhs, rhs=1)` modulo of one signal by another
+- `eq(lhs, rhs)` equality comparison, outputs 1 if lhs == rhs, 0 otherwise
+- `gt(lhs, rhs)` greater-than comparison, outputs 1 if lhs > rhs, 0 otherwise
+- `lt(lhs, rhs)` less-than comparison, outputs 1 if lhs < rhs, 0 otherwise
+- `clip(input)` clips a signal between -1 and 1
+- `sh(input, trig)` sample & hold, trigger is the rising or falling segment of a ramp
+- `euclid(pulses, steps)` euclidean rhythm, with 1s for pulses and 0s for rests
+- `pan(input, value(0-1)=0.5)` euclidean rhythm, with 1s for pulses and 0s for rests
+ 
+### Buffers / recording
+- `file("filename")` load a .wav file from the `samples` directory by specifying its filename (`.wav` is optional)
+- `buf(length={sample rate})` define a buffer object of a given length in samples. default length is the sample rate, i.e., 1 second
+- `rec(input, buf)` takes a reference to a buffer object and records into it. input is the signal to be recorded.
+- `play(input, buf)` takes a reference to a buffer object and plays it back. input is a ramp that control the playback position.
+- `tap(buf, offset)` plays back a buffer at a give offset in samples. playback speed is constant.
+
+### Filters
+
+- `lp(freq=500, q=7.07)` state-variable lowpass filter  
+- `bp(freq=500, q=7.07)` state-variable bandpass filter  
+- `hp(freq=500, q=7.07)` state-variable highpass filter  
+- `notch(freq=500, q=7.07)` state-variable notch filter  
+- `peak(freq=500, q=7.07)` state-variable peak filter  
+- `allpass(freq=500, q=7.07)` state-variable allpass filter  
+- `moog(freq=500, q=0.0)` moog filter
+
+### Oscillators
+
+- `sin(freq=100)` a sine wave
+- `sqr(freq=100)` a square wave
+- `saw(freq=100)` a bandlimited sawtooth wave
+- `tri(freq=100)` a triangle wave
+- `noise` white noise, also useful as a randomization source
+
+### Effects
+- `flanger(input, mix=0.5, amount=0.5, speed = 0.1)` a flanger effect
+- `rev(input, mix=0.5)` a reverb effect
+
+### Sequencers
 - `seq(list, trig)` a sequencer that outputs the next value in the list every time it receives a trigger
-- `pipe(delay, input)` delays a signal by *n* samples
-- `pluck(frequency, tone, damping, trig)` a Karplus-Strong pluck string synthesis voice
-- `reverb(input)` a FDN-reverb effect
-- `delay(input)` an echo/delay effect
-- basic arithmetic operators `+`, `-`, `*` and `/` can be applied to any signal
+- `delay(delay, input)` delays a signal by *n* samples
+
+### Drum synthesis
+- `hh(ramp, curve=3)` a hihat
+ 
+### Randomness
+- `rand(ramp)` output a random value between 0 and 1 on every trigger
+- `bernoulli(ramp, probability(0-1)=0.5)` bernoulli gate, outputs 1 or 0 with probability on every trigger
+ 
+### Utilities / conversions
+- `log(input)` print the value of a signal to stdout
+- `mix([inputs])` mix an array of signals
+- `ptof(pitch)` converts pitch to frequency
+- `fotp(freq)` converts frequency to pitch
+- `stof(samples)` samples to frequency
+- `ftos(freq)` frequency to samples
+- `mstos(ms)` milliseconds to samples
+- `stoms(samples)` samples to milliseconds
+- `btou(input)` scale a bipolar (-1 to 1) signal to unipolar (0 to 1)
+- `utob(input)` scale a unipolar (0 to 1) signal to bipolar (-1 to 1) 
+
+### Constants
+- MIDI pitches `C0` to `G#9`
+- musical scales (see `scales.koto`)
+- `sr` sample rate
 
 Of course, there is nothing stopping you from defining your own functions in Koto, and using them in your audio graph.
 
