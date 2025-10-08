@@ -33,6 +33,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             .into(),
         ))
     });
+    // sample and hold
     koto.prelude()
         .add_fn("sh", move |ctx| -> Result<KValue, _> {
             let args = ctx.args();
@@ -44,6 +45,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
                 node: Box::new(SampleAndHoldNode::new()),
             })))
         });
+    // state variable filter
     koto.prelude().add_fn("svf", move |ctx| {
         use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
 
@@ -300,7 +302,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             _ => Err("Expected a buffer".into()),
         };
     });
-
+    // greater than
     koto.prelude().add_fn("gt", move |ctx| {
         let args = ctx.args();
         let lhs = node_from_kvalue(&args[0])?;
@@ -309,6 +311,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             Op::Greater(Box::new(lhs), Box::new(rhs)).into(),
         ))
     });
+    // less than
     koto.prelude().add_fn("lt", move |ctx| {
         let args = ctx.args();
         let lhs = node_from_kvalue(&args[0])?;
@@ -317,6 +320,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             Op::Less(Box::new(lhs), Box::new(rhs)).into(),
         ))
     });
+    // equal
     koto.prelude().add_fn("eq", move |ctx| {
         let args = ctx.args();
         let lhs = node_from_kvalue(&args[0])?;
