@@ -18,7 +18,6 @@ pub enum NodeKind {
     SampleAndHold,
     Svf,
     Moog,
-    Pulse,
     Log,
     Noise,
     Seq,
@@ -238,59 +237,6 @@ impl Node for SeqNode {
                 outputs[i] = values[step].get(i).copied().unwrap_or([0.0; 2]);
             } else {
                 outputs[i] = values[0].get(i).copied().unwrap_or([0.0; 2]);
-            }
-        }
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-}
-
-pub struct PulseNode {
-    phase: f32,
-    prev_phase: f32,
-    sample_rate: u32,
-}
-
-impl Clone for PulseNode {
-    fn clone(&self) -> Self {
-        Self {
-            phase: 0.0,
-            prev_phase: 0.0,
-            sample_rate: self.sample_rate,
-        }
-    }
-}
-
-impl PulseNode {
-    pub(crate) fn new(sample_rate: u32) -> Self {
-        Self {
-            phase: 0.,
-            prev_phase: 0.,
-            sample_rate,
-        }
-    }
-}
-
-impl Node for PulseNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        for i in 0..outputs.len() {
-            let freq = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(440.0);
-
-            self.prev_phase = self.phase;
-            self.phase += 2. * PI * freq / self.sample_rate as f32;
-
-            if self.phase >= 2. * PI {
-                self.phase -= 2. * PI;
-                outputs[i] = [1.0, 1.0];
-            } else {
-                outputs[i] = [0.0, 0.0];
             }
         }
     }

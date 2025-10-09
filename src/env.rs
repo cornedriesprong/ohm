@@ -1,7 +1,7 @@
 use crate::audio_graph::Container;
 use crate::nodes::{
     self, BufReaderNode, BufTapNode, BufWriterNode, DelayNode, FunDSPNode, LFONode, NodeKind,
-    PulseNode, SampleAndHoldNode, SeqNode,
+    SampleAndHoldNode, SeqNode,
 };
 use crate::op::Op;
 use koto::{
