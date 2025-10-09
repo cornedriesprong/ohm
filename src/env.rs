@@ -66,6 +66,22 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
                 node: Box::new(SampleAndHoldNode::new()),
             })))
         });
+    koto.prelude().add_fn("onepole", move |ctx| {
+        use fundsp::hacker32::lowpole;
+
+        let args = ctx.args();
+        let input = node_from_kvalue(&args[0])?;
+        let cutoff = node_from_kvalue(&args[1])?;
+
+        Ok(KValue::Object(
+            Op::Node {
+                kind: NodeKind::Onepole,
+                inputs: vec![input, cutoff],
+                node: Box::new(FunDSPNode::mono(Box::new(lowpole()))),
+            }
+            .into(),
+        ))
+    });
     // state variable filter
     koto.prelude().add_fn("svf", move |ctx| {
         use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
@@ -73,7 +89,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
         let args = ctx.args();
         let input = node_from_kvalue(&args[0])?;
         let filter_type = str_from_kvalue(&args[1])?;
-        let hz = node_from_kvalue(&args[2])?;
+        let cutoff = node_from_kvalue(&args[2])?;
         let resonance = node_from_kvalue(&args[3])?;
 
         let audio_unit: Box<dyn AudioUnit + Send> = match filter_type.as_str() {
@@ -89,7 +105,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
         Ok(KValue::Object(
             Op::Node {
                 kind: NodeKind::Svf,
-                inputs: vec![input, hz, resonance],
+                inputs: vec![input, cutoff, resonance],
                 node: Box::new(FunDSPNode::mono(audio_unit)),
             }
             .into(),

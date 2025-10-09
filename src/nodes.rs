@@ -17,6 +17,7 @@ pub enum NodeKind {
     Lfo,
     SampleAndHold,
     Svf,
+    Onepole,
     Moog,
     Log,
     Noise,
