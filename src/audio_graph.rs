@@ -41,19 +41,17 @@ impl Container {
     pub fn process_interleaved(&mut self, data: &mut [f32]) {
         let num_frames = data.len() / 2;
 
-        // resize callback buffer if needed
         if self.output_buffer.len() < num_frames {
             self.output_buffer.resize(num_frames, [0.0; 2]);
         }
 
         // split borrow to avoid lifetime issues
-        let (graph, buffers, callback_buffer) =
+        let (graph, buffers, output_buffer) =
             (&mut self.graph, &mut self.buffers, &mut self.output_buffer);
 
         if let Some(graph) = graph {
-            let output_chunk = &mut callback_buffer[..num_frames];
-            let chunk_size = output_chunk.len();
-            graph.ensure_chunk_size(chunk_size);
+            let output_chunk = &mut output_buffer[..num_frames];
+            graph.set_chunk_size(num_frames);
 
             // process all nodes in topological order
             let sorted_nodes = graph.sorted_nodes.clone();
@@ -82,10 +80,10 @@ impl Container {
                     for &idx in &graph.input_indices {
                         let buf_ptr = buffers_ptr.add(idx);
                         input_slices
-                            .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
+                            .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames));
                     }
 
-                    let output_buffer = &mut graph.output_buffers[output_idx][..chunk_size];
+                    let output_buffer = &mut graph.output_buffers[output_idx][..num_frames];
 
                     if let Some(buf_name) = graph.buffer_readers.get(&node_idx) {
                         if let Some(buffer) = buffers.get(*buf_name) {
@@ -120,7 +118,7 @@ impl Container {
                         for &idx in &graph.input_indices {
                             let buf_ptr = buffers_ptr.add(idx);
                             input_slices
-                                .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
+                                .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames));
                         }
                         node.process_write_buffer(&input_slices, buffer);
                     }
@@ -128,7 +126,7 @@ impl Container {
             }
 
             if let Some(last_node_idx) = graph.sorted_nodes.last() {
-                let final_output = &graph.output_buffers[last_node_idx.index()][..chunk_size];
+                let final_output = &graph.output_buffers[last_node_idx.index()][..num_frames];
                 output_chunk.copy_from_slice(final_output);
 
                 scale_buffer(output_chunk, 0.5);
@@ -162,7 +160,7 @@ pub(crate) struct Graph {
     buffer_readers: HashMap<NodeIndex, usize>,
     input_indices: Vec<usize>,
     output_buffers: Vec<Vec<Frame>>,
-    max_chunk_size: usize,
+    chunk_size: usize,
     max_inputs: usize,
 }
 
@@ -175,14 +173,14 @@ impl Graph {
             buffer_readers: HashMap::new(),
             input_indices: Vec::new(),
             output_buffers: Vec::new(),
-            max_chunk_size: 0,
+            chunk_size: 0,
             max_inputs: 8,
         }
     }
 
-    fn ensure_chunk_size(&mut self, chunk_size: usize) {
-        if chunk_size > self.max_chunk_size {
-            self.max_chunk_size = chunk_size;
+    fn set_chunk_size(&mut self, chunk_size: usize) {
+        if chunk_size > self.chunk_size {
+            self.chunk_size = chunk_size;
             for buffer in &mut self.output_buffers {
                 buffer.resize(chunk_size, [0.0, 0.0]);
             }
@@ -227,8 +225,8 @@ impl Graph {
 
         // ensure each buffer has at least max_chunk_size capacity
         for buffer in &mut self.output_buffers {
-            if buffer.len() < self.max_chunk_size {
-                buffer.resize(self.max_chunk_size, [0.0, 0.0]);
+            if buffer.len() < self.chunk_size {
+                buffer.resize(self.chunk_size, [0.0, 0.0]);
             }
         }
 
