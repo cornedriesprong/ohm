@@ -55,33 +55,6 @@ impl Container {
             let chunk_size = output_chunk.len();
             graph.ensure_chunk_size(chunk_size);
 
-            for (writer_idx, buf_name) in &graph.buffer_writers {
-                graph.input_indices.clear();
-                for edge in graph
-                    .graph
-                    .edges_directed(*writer_idx, petgraph::Direction::Incoming)
-                {
-                    graph.input_indices.push(edge.source().index());
-                }
-
-                if let Some(buffer) = buffers.get_mut(*buf_name) {
-                    let node = &mut graph.graph[*writer_idx];
-
-                    // SAFETY: We construct slices from raw pointers that are valid and won't alias
-                    // with the buffer being written to (different memory regions)
-                    unsafe {
-                        let buffers_ptr = graph.output_buffers.as_ptr();
-                        let mut input_slices = Vec::with_capacity(graph.max_inputs);
-                        for &idx in &graph.input_indices {
-                            let buf_ptr = buffers_ptr.add(idx);
-                            input_slices
-                                .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
-                        }
-                        node.process_write_buffer(&input_slices, buffer);
-                    }
-                }
-            }
-
             // process all nodes in topological order
             let sorted_nodes = graph.sorted_nodes.clone();
             for &node_idx in &sorted_nodes {
@@ -124,6 +97,33 @@ impl Container {
 
                     let node = &mut graph.graph[node_idx];
                     node.process(&input_slices, output_buffer);
+                }
+            }
+
+            for (writer_idx, buf_name) in &graph.buffer_writers {
+                graph.input_indices.clear();
+                for edge in graph
+                    .graph
+                    .edges_directed(*writer_idx, petgraph::Direction::Incoming)
+                {
+                    graph.input_indices.push(edge.source().index());
+                }
+
+                if let Some(buffer) = buffers.get_mut(*buf_name) {
+                    let node = &mut graph.graph[*writer_idx];
+
+                    // SAFETY: We construct slices from raw pointers that are valid and won't alias
+                    // with the buffer being written to (different memory regions)
+                    unsafe {
+                        let buffers_ptr = graph.output_buffers.as_ptr();
+                        let mut input_slices = Vec::with_capacity(graph.max_inputs);
+                        for &idx in &graph.input_indices {
+                            let buf_ptr = buffers_ptr.add(idx);
+                            input_slices
+                                .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), chunk_size));
+                        }
+                        node.process_write_buffer(&input_slices, buffer);
+                    }
                 }
             }
 
