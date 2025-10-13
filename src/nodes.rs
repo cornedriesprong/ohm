@@ -14,6 +14,7 @@ pub enum NodeKind {
     Saw,
     Tri,
     Ramp,
+    Clip,
     Lfo,
     SampleAndHold,
     Svf,
