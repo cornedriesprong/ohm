@@ -136,7 +136,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
         "log",
         make_expr_node(|args| Op::Node {
             kind: NodeKind::Log,
-            inputs: vec![args[0].clone()],
+            inputs: vec![args.get(0).cloned().unwrap_or(Op::Constant(0.0))],
             node: Box::new(FunDSPNode::mono(Box::new(sink()))),
         }),
     );
