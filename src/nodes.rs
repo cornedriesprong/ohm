@@ -78,7 +78,8 @@ impl Node for LFONode {
                 .get(0)
                 .and_then(|inp| inp.get(i))
                 .map(|[l, _]| *l)
-                .unwrap_or(440.0_f32);
+                .unwrap_or(1.0_f32)
+                .clamp(0.0, self.sample_rate as f32 / 2.0);
 
             self.phase += 2.0 * PI * freq / self.sample_rate as f32;
 
@@ -126,7 +127,8 @@ impl Node for SampleAndHoldNode {
                 .get(1)
                 .and_then(|inp| inp.get(i))
                 .map(|[l, _]| *l)
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                .clamp(-1.0, 1.0);
 
             // sample when ramp makes a sudden jump
             if (ramp - self.prev).abs() > 0.5 {
@@ -224,14 +226,15 @@ impl Node for SeqNode {
     fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
         for i in 0..outputs.len() {
             let ramp = inputs
-                .last()
+                .get(1)
                 .and_then(|inp| inp.get(i))
-                .copied()
-                .unwrap_or([0.0; 2]);
+                .map(|[l, _]| *l)
+                .unwrap_or(0.0)
+                .clamp(-1.0, 1.0);
             let values = &inputs[0..inputs.len() - 1];
 
             let segment = 1.0 / values.len() as f32;
-            let step = (ramp[0] / segment).floor() as usize;
+            let step = (ramp / segment).floor() as usize;
 
             // safety check since we once got a panic here
             if step < values.len() {
@@ -267,9 +270,11 @@ impl Node for BufReaderNode {
             let phase = inputs
                 .get(0)
                 .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
+                .map(|[l, _]| {
+                    let val = *l;
+                    ((val % 1.0) + 1.0) % 1.0 // wrap to 0.0, 1.0)
+                })
                 .unwrap_or(0.0);
-            let phase = phase.clamp(0.0, 1.0);
             let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
 
             outputs[i] = cubic_interpolate(buffer, read_pos);
@@ -306,7 +311,8 @@ impl Node for BufTapNode {
                 .get(0)
                 .and_then(|inp| inp.get(i))
                 .map(|[l, _]| *l)
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
             let read_pos_f = self.write_pos as f32 - offset;
             let buffer_len = buffer.len() as f32;
             let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
