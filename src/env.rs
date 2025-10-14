@@ -1,15 +1,27 @@
 use crate::audio_graph::Container;
 use crate::nodes::{
-    self, BufReaderNode, BufTapNode, BufWriterNode, DelayNode, FunDSPNode, LFONode, NodeKind,
+    self, BufReaderNode, BufTapNode, BufWriterNode, DelayNode, FunDSPNode, LFONode, Node, NodeKind,
     SampleAndHoldNode, SeqNode,
 };
 use crate::op::Op;
 use koto::runtime::KList;
 use koto::{
-    runtime::{unexpected_type, KValue, KotoFunction},
+    runtime::{unexpected_type, KValue},
     Koto,
 };
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Debug)]
+enum ParamType {
+    Node { default: f32 },
+}
+
+struct NodeDescriptor {
+    name: &'static str,
+    kind: NodeKind,
+    params: &'static [ParamType],
+    node: Box<dyn Node>,
+}
 
 pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u32) {
     use fundsp::hacker32::*;
@@ -17,83 +29,158 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
     koto.prelude().insert("bpm", 120.0);
     koto.prelude().insert("sr", sample_rate);
 
-    create_osc(koto, "sin".to_string(), || Box::new(sine()));
-    create_osc(koto, "sqr".to_string(), || Box::new(square()));
-    create_osc(koto, "saw".to_string(), || Box::new(saw()));
-    create_osc(koto, "tri".to_string(), || Box::new(triangle()));
+    let nodes = vec![
+        NodeDescriptor {
+            name: "ramp",
+            kind: NodeKind::Ramp,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(ramp()))),
+        },
+        NodeDescriptor {
+            name: "sin",
+            kind: NodeKind::Sin,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(sine()))),
+        },
+        NodeDescriptor {
+            name: "sqr",
+            kind: NodeKind::Sqr,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(square()))),
+        },
+        NodeDescriptor {
+            name: "saw",
+            kind: NodeKind::Saw,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(saw()))),
+        },
+        NodeDescriptor {
+            name: "tri",
+            kind: NodeKind::Tri,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(triangle()))),
+        },
+        NodeDescriptor {
+            name: "clip",
+            kind: NodeKind::Clip,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(clip()))),
+        },
+        NodeDescriptor {
+            name: "lfo",
+            kind: NodeKind::Lfo,
+            params: &[ParamType::Node { default: 100.0 }],
+            node: Box::new(LFONode::new(sample_rate)),
+        },
+        NodeDescriptor {
+            name: "sh",
+            kind: NodeKind::SampleAndHold,
+            params: &[
+                ParamType::Node { default: 0.0 },
+                ParamType::Node { default: 0.0 },
+            ],
+            node: Box::new(SampleAndHoldNode::new()),
+        },
+        NodeDescriptor {
+            name: "onepole",
+            kind: NodeKind::Onepole,
+            params: &[
+                ParamType::Node { default: 0.0 },
+                ParamType::Node { default: 20.0 },
+            ],
+            node: Box::new(FunDSPNode::mono(Box::new(lowpole()))),
+        },
+        NodeDescriptor {
+            name: "log",
+            kind: NodeKind::Log,
+            params: &[ParamType::Node { default: 0.0 }],
+            node: Box::new(FunDSPNode::mono(Box::new(sink()))),
+        },
+        NodeDescriptor {
+            name: "noise",
+            kind: NodeKind::Noise,
+            params: &[],
+            node: Box::new(FunDSPNode::mono(Box::new(noise()))),
+        },
+        NodeDescriptor {
+            name: "pan",
+            kind: NodeKind::Pan,
+            params: &[
+                ParamType::Node { default: 0.0 },
+                ParamType::Node { default: 0.5 },
+            ],
+            node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
+        },
+        NodeDescriptor {
+            name: "reverb",
+            kind: NodeKind::Reverb,
+            params: &[ParamType::Node { default: 0.0 }],
+            node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
+                10.0,
+                2.0,
+                0.9,
+                1.0,
+                lowpole_hz(18000.0),
+            )))),
+        },
+        NodeDescriptor {
+            name: "delay",
+            kind: NodeKind::Delay,
+            params: &[
+                ParamType::Node { default: 0.0 },
+                ParamType::Node { default: 1.0 },
+            ],
+            node: Box::new(DelayNode::new()),
+        },
+        NodeDescriptor {
+            name: "moog",
+            kind: NodeKind::Moog,
+            params: &[
+                ParamType::Node { default: 0.0 },
+                ParamType::Node { default: 500.0 },
+                ParamType::Node { default: 0.0 },
+            ],
+            node: Box::new(FunDSPNode::mono(Box::new(moog()))),
+        },
+    ];
 
-    koto.prelude().add_fn("ramp", move |ctx| {
-        let args = ctx.args();
-        let freq = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(1.0.into())))?;
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Ramp,
-                inputs: vec![freq],
-                node: Box::new(FunDSPNode::mono(Box::new(ramp()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("clip", move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Clip,
-                inputs: vec![input],
-                node: Box::new(FunDSPNode::mono(Box::new(clip()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("lfo", move |ctx| {
-        let args = ctx.args();
-        let freq = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(1.0.into())))?;
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Lfo,
-                inputs: vec![freq],
-                node: Box::new(LFONode::new(sample_rate)),
-            }
-            .into(),
-        ))
-    });
-    // sample and hold
-    koto.prelude()
-        .add_fn("sh", move |ctx| -> Result<KValue, _> {
+    for node in nodes {
+        let params = node.params;
+        let kind = node.kind.clone();
+        let node_impl = node.node.clone();
+
+        koto.prelude().add_fn(node.name, move |ctx| {
             let args = ctx.args();
-            let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-            let trig = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(0.0.into())))?;
-            Ok(KValue::Object(koto::prelude::KObject::from(Op::Node {
-                kind: NodeKind::SampleAndHold,
-                inputs: vec![input, trig],
-                node: Box::new(SampleAndHoldNode::new()),
-            })))
-        });
-    koto.prelude().add_fn("onepole", move |ctx| {
-        use fundsp::hacker32::lowpole;
+            let mut inputs = Vec::new();
 
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(20.0.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Onepole,
-                inputs: vec![input, cutoff],
-                node: Box::new(FunDSPNode::mono(Box::new(lowpole()))),
+            for (i, param_type) in params.iter().enumerate() {
+                match param_type {
+                    ParamType::Node { default } => {
+                        let default = KValue::Number((*default).into());
+                        let input = node_from_kvalue(args.get(i).unwrap_or(&default))?;
+                        inputs.push(input);
+                    }
+                };
             }
-            .into(),
-        ))
-    });
-    // state variable filter
+
+            Ok(KValue::Object(
+                Op::Node {
+                    kind: kind.clone(),
+                    inputs,
+                    node: node_impl.clone(),
+                }
+                .into(),
+            ))
+        });
+    }
+
     koto.prelude().add_fn("svf", move |ctx| {
         use fundsp::hacker32::{allpass, bandpass, highpass, lowpass, notch, peak};
 
         let args = ctx.args();
         let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
         let filter_type = str_from_kvalue(args.get(1).unwrap_or(&KValue::Str("lp".into())))?;
-        let cutoff = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(500.into())))?;
+        let cutoff = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(500.0.into())))?;
         let resonance = node_from_kvalue(args.get(3).unwrap_or(&KValue::Number(0.707.into())))?;
 
         let audio_unit: Box<dyn AudioUnit + Send> = match filter_type.as_str() {
@@ -115,42 +202,7 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             .into(),
         ))
     });
-    koto.prelude().add_fn("moog", move |ctx| {
-        use fundsp::hacker32::moog;
 
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-        let cutoff = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(500.0.into())))?;
-        let q = node_from_kvalue(args.get(2).unwrap_or(&KValue::Number(0.0.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Moog,
-                inputs: vec![input, cutoff, q],
-                node: Box::new(FunDSPNode::mono(Box::new(moog()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn(
-        "log",
-        make_expr_node(|args| Op::Node {
-            kind: NodeKind::Log,
-            inputs: vec![args.get(0).cloned().unwrap_or(Op::Constant(0.0))],
-            node: Box::new(FunDSPNode::mono(Box::new(sink()))),
-        }),
-    );
-    koto.prelude().add_fn(
-        "noise",
-        make_expr_node(|_| {
-            Op::Node {
-                kind: NodeKind::Noise,
-                inputs: vec![],
-                node: Box::new(FunDSPNode::mono(Box::new(noise()))),
-            }
-            .into()
-        }),
-    );
     koto.prelude().add_fn("seq", move |ctx| {
         let args = ctx.args();
         let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
@@ -172,53 +224,8 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             .into(),
         ))
     });
-    koto.prelude().add_fn("pan", move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-        let pan = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(0.5.into())))?;
 
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Pan,
-                inputs: vec![input, pan],
-                node: Box::new(FunDSPNode::stereo(Box::new(panner()))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("reverb", move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Reverb,
-                inputs: vec![input],
-                node: Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
-                    10.0,
-                    2.0,
-                    0.9,
-                    1.0,
-                    lowpole_hz(18000.0),
-                )))),
-            }
-            .into(),
-        ))
-    });
-    koto.prelude().add_fn("delay", move |ctx| {
-        let args = ctx.args();
-        let input = node_from_kvalue(args.get(0).unwrap_or(&KValue::Number(0.0.into())))?;
-        let delay = node_from_kvalue(args.get(1).unwrap_or(&KValue::Number(1.into())))?;
-
-        Ok(KValue::Object(
-            Op::Node {
-                kind: NodeKind::Delay,
-                inputs: vec![input, delay],
-                node: Box::new(DelayNode::new()),
-            }
-            .into(),
-        ))
-    });
+    // Special cases: Buffer operations (need container and special buffer ID handling)
     let buf_container = Arc::clone(&container);
     koto.prelude().add_fn("buf", move |ctx| {
         let args = ctx.args();
@@ -367,37 +374,6 @@ pub fn create_env(koto: &Koto, container: Arc<Mutex<Container>>, sample_rate: u3
             Op::Equal(Box::new(lhs), Box::new(rhs)).into(),
         ))
     });
-}
-
-fn make_expr_node<F>(node_constructor: F) -> impl KotoFunction
-where
-    F: Fn(Vec<Op>) -> Op + 'static,
-{
-    move |ctx| {
-        let args: Result<Vec<Op>, _> = ctx.args().iter().map(node_from_kvalue).collect();
-        Ok(KValue::Object(node_constructor(args?).into()))
-    }
-}
-
-fn create_osc<F>(koto: &Koto, name: String, osc_fn: F)
-where
-    F: Fn() -> Box<dyn fundsp::hacker32::AudioUnit> + 'static,
-{
-    koto.prelude().add_fn(
-        name.clone().as_str(),
-        make_expr_node(move |args| Op::Node {
-            kind: match name.as_str() {
-                "sin" => NodeKind::Sin,
-                "sqr" => NodeKind::Sqr,
-                "saw" => NodeKind::Saw,
-                "tri" => NodeKind::Tri,
-                "ramp" => NodeKind::Ramp,
-                _ => panic!("Unknown oscillator type: {}", name),
-            },
-            inputs: vec![args.get(0).cloned().unwrap_or(Op::Constant(100.0))],
-            node: Box::new(FunDSPNode::mono(osc_fn())),
-        }),
-    );
 }
 
 fn node_from_kvalue(value: &KValue) -> Result<Op, koto::runtime::Error> {
