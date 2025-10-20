@@ -1,40 +1,26 @@
 use crate::utils::cubic_interpolate;
-use core::fmt;
-use fmt::Debug;
 use fundsp::hacker32::AudioUnit;
 use std::f32::consts::PI;
-use std::hash::Hash;
 
 pub type Frame = [f32; 2];
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum NodeKind {
-    Sin,
-    Sqr,
-    Saw,
-    Tri,
-    Ramp,
-    Clip,
-    Lfo,
-    SampleAndHold,
-    Svf,
-    Onepole,
-    Moog,
-    Log,
-    Noise,
-    Seq,
-    Pan,
-    Reverb,
-    Delay,
-    BufferTap { id: usize },
-    BufferWriter { id: usize },
-    BufferReader { id: usize },
-    BufferRef { id: usize },
+#[inline(always)]
+fn render_inputs(inputs: &mut [Box<dyn Node>], buffers: &mut Vec<Vec<Frame>>, len: usize) {
+    if buffers.len() != inputs.len() {
+        buffers.resize_with(inputs.len(), Vec::new);
+    }
+
+    for (i, input_node) in inputs.iter_mut().enumerate() {
+        if buffers[i].len() < len {
+            buffers[i].resize(len, [0.0; 2]);
+        }
+        input_node.process(&mut buffers[i][..len]);
+    }
 }
 
-pub(crate) trait Node: Send + Sync {
+pub(crate) trait Node: Send + Sync + std::any::Any {
     #[inline(always)]
-    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {
+    fn process(&mut self, _outputs: &mut [Frame]) {
         unimplemented!("This node is either a buffer reader or writer");
     }
 
@@ -53,34 +39,390 @@ pub(crate) trait Node: Send + Sync {
         unimplemented!("This node is not a buffer writer");
     }
 
+    fn get_id(&self) -> String;
+
     fn clone_box(&self) -> Box<dyn Node>;
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &[]
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut []
+    }
+
+    fn transfer_state(&mut self, _old: &dyn Node) {}
+}
+
+#[derive(Clone)]
+pub struct MixNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl MixNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for MixNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        for i in 0..outputs.len() {
+            let mut mix = [0.0; 2];
+            for input_buffer in &self.buffers {
+                mix[0] += input_buffer[i][0];
+                mix[1] += input_buffer[i][1];
+            }
+            outputs[i] = mix;
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "MixNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct GainNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl GainNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for GainNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let signal = &self.buffers[0];
+        let gain_input = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            let gain = gain_input[i][0];
+            outputs[i] = [signal[i][0] * gain, signal[i][1] * gain];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "GainNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct WrapNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl WrapNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for WrapNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let signal = &self.buffers[0];
+        let modulo = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            outputs[i] = [signal[i][0] % modulo[i][0], signal[i][1] % modulo[i][0]];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "WrapNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct PowerNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl PowerNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for PowerNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let signal = &self.buffers[0];
+        let power = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            outputs[i] = [
+                signal[i][0].powf(power[i][0]),
+                signal[i][1].powf(power[i][0]),
+            ];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "PowerNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct GreaterNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl GreaterNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for GreaterNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let left = &self.buffers[0];
+        let right = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            outputs[i] = [
+                if left[i][0] > right[i][0] { 1.0 } else { 0.0 },
+                if left[i][1] > right[i][0] { 1.0 } else { 0.0 },
+            ];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "GreaterNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct LessNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl LessNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for LessNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let left = &self.buffers[0];
+        let right = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            outputs[i] = [
+                if left[i][0] < right[i][0] { 1.0 } else { 0.0 },
+                if left[i][1] < right[i][0] { 1.0 } else { 0.0 },
+            ];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "LessNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+}
+
+#[derive(Clone)]
+pub struct EqualNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl EqualNode {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for EqualNode {
+    #[inline(always)]
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let left = &self.buffers[0];
+        let right = &self.buffers[1];
+
+        for i in 0..outputs.len() {
+            outputs[i] = [
+                if left[i][0] == right[i][0] { 1.0 } else { 0.0 },
+                if left[i][1] == right[i][0] { 1.0 } else { 0.0 },
+            ];
+        }
+    }
+
+    fn get_id(&self) -> String {
+        "EqualNode".to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
 }
 
 #[derive(Clone)]
 pub struct LFONode {
+    inputs: Vec<Box<dyn Node>>,
     phase: f32,
     sample_rate: u32,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl LFONode {
-    pub fn new(sample_rate: u32) -> Self {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self
+    where
+        Self: Sized,
+    {
+        let num_inputs = inputs.len();
         Self {
-            phase: PI,
+            inputs,
+            phase: 0.0,
             sample_rate,
+            buffers: vec![Vec::new(); num_inputs],
         }
     }
 }
 
 impl Node for LFONode {
     #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let freq_input = &self.buffers[0];
+
         for i in 0..outputs.len() {
-            let freq = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(1.0_f32)
-                .clamp(0.0, self.sample_rate as f32 / 2.0);
+            let freq = freq_input[i][0].clamp(0.0, self.sample_rate as f32 / 2.0);
 
             self.phase += 2.0 * PI * freq / self.sample_rate as f32;
 
@@ -95,94 +437,137 @@ impl Node for LFONode {
         }
     }
 
+    fn get_id(&self) -> String {
+        "LFONode".to_string()
+    }
+
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old_lfo) = (old as &dyn std::any::Any).downcast_ref::<LFONode>() {
+            self.phase = old_lfo.phase;
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct SampleAndHoldNode {
+    inputs: Vec<Box<dyn Node>>,
     value: Frame,
     prev: f32,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl SampleAndHoldNode {
-    pub fn new() -> Self {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self {
+        _ = sample_rate;
         Self {
+            inputs,
             value: [0.0; 2],
             prev: 1.0,
+            buffers: vec![vec![], vec![]],
         }
     }
 }
 
 impl Node for SampleAndHoldNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let signal = &self.buffers[0];
+        let ramp = &self.buffers[1];
+
         for i in 0..outputs.len() {
-            let input = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .copied()
-                .unwrap_or([0.0; 2]);
-            let ramp = inputs
-                .get(1)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(0.0)
-                .clamp(-1.0, 1.0);
-
-            // sample when ramp makes a sudden jump
-            if (ramp - self.prev).abs() > 0.5 {
-                self.value = input;
+            let ramp_val = ramp[i][0];
+            if (ramp_val - self.prev).abs() > 0.5 {
+                self.value = signal[i];
             }
-
-            self.prev = ramp;
+            self.prev = ramp_val;
             outputs[i] = self.value;
         }
+    }
+
+    fn get_id(&self) -> String {
+        "SampleAndHoldNode".to_string()
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
     }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old_sh) = (old as &dyn std::any::Any).downcast_ref::<SampleAndHoldNode>() {
+            self.value = old_sh.value;
+            self.prev = old_sh.prev;
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct FunDSPNode {
+    inputs: Vec<Box<dyn Node>>,
     node: Box<dyn AudioUnit>,
     is_stereo: bool,
     input_buffer: Vec<f32>,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl FunDSPNode {
-    pub fn mono(node: Box<dyn AudioUnit>) -> Self {
-        let num_inputs = node.inputs();
+    pub fn mono(inputs: Vec<Box<dyn Node>>, node: Box<dyn AudioUnit>) -> Self {
+        let num_inputs = inputs.len();
+        let num_audio_inputs = node.inputs();
         Self {
+            inputs,
             node,
             is_stereo: false,
-            input_buffer: vec![0.0; num_inputs],
+            input_buffer: vec![0.0; num_audio_inputs],
+            buffers: vec![Vec::new(); num_inputs],
         }
     }
 
-    pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
-        let num_inputs = node.inputs();
+    pub fn stereo(inputs: Vec<Box<dyn Node>>, node: Box<dyn AudioUnit>) -> Self {
+        let num_inputs = inputs.len();
+        let num_audio_inputs = node.inputs();
         Self {
+            inputs,
             node,
             is_stereo: true,
-            input_buffer: vec![0.0; num_inputs],
+            input_buffer: vec![0.0; num_audio_inputs],
+            buffers: vec![Vec::new(); num_inputs],
         }
     }
 }
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+    fn process(&mut self, outputs: &mut [Frame]) {
         let chunk_size = outputs.len();
+        render_inputs(&mut self.inputs, &mut self.buffers, chunk_size);
+
         let num_inputs = self.node.inputs();
 
         if self.is_stereo {
             for i in 0..chunk_size {
-                for (input_idx, input_frames) in inputs.iter().enumerate().take(num_inputs) {
-                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                for (input_idx, input_frames) in self.buffers.iter().enumerate().take(num_inputs) {
+                    self.input_buffer[input_idx] = input_frames[i][0];
                 }
 
                 let mut output_sample = [0.0; 2];
@@ -191,8 +576,8 @@ impl Node for FunDSPNode {
             }
         } else {
             for i in 0..chunk_size {
-                for (input_idx, input_frames) in inputs.iter().enumerate().take(num_inputs) {
-                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                for (input_idx, input_frames) in self.buffers.iter().enumerate().take(num_inputs) {
+                    self.input_buffer[input_idx] = input_frames[i][0];
                 }
 
                 let mut output_sample = [0.0; 1];
@@ -202,8 +587,20 @@ impl Node for FunDSPNode {
         }
     }
 
+    fn get_id(&self) -> String {
+        "FunDSPNode".to_string()
+    }
+
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
     }
 }
 
@@ -214,40 +611,55 @@ impl Clone for Box<dyn Node> {
 }
 
 #[derive(Clone)]
-pub struct SeqNode {}
+pub struct SeqNode {
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
 
 impl SeqNode {
-    pub(crate) fn new() -> Self {
-        Self {}
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
     }
 }
 
 impl Node for SeqNode {
     #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        for i in 0..outputs.len() {
-            let ramp = inputs
-                .get(1)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(0.0)
-                .clamp(-1.0, 1.0);
-            let values = &inputs[0..inputs.len() - 1];
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
 
-            let segment = 1.0 / values.len() as f32;
+        let num_values = self.buffers.len() - 1;
+        let ramp_input = &self.buffers[num_values];
+
+        for i in 0..outputs.len() {
+            let ramp = ramp_input[i][0].clamp(0.0, 1.0);
+
+            let segment = 1.0 / num_values as f32;
             let step = (ramp / segment).floor() as usize;
 
-            // safety check since we once got a panic here
-            if step < values.len() {
-                outputs[i] = values[step].get(i).copied().unwrap_or([0.0; 2]);
-            } else {
-                outputs[i] = values[0].get(i).copied().unwrap_or([0.0; 2]);
-            }
+            // Safety check since we once got a panic here
+            let step = step.min(num_values - 1);
+            outputs[i] = self.buffers[step][i];
         }
+    }
+
+    fn get_id(&self) -> String {
+        "SeqNode".to_string()
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
     }
 }
 
@@ -280,6 +692,10 @@ impl Node for BufReaderNode {
 
             outputs[i] = cubic_interpolate(buffer, read_pos);
         }
+    }
+
+    fn get_id(&self) -> String {
+        "BufReaderNode".to_string()
     }
 
     fn clone_box(&self) -> Box<dyn Node> {
@@ -323,8 +739,18 @@ impl Node for BufTapNode {
         }
     }
 
+    fn get_id(&self) -> String {
+        "BufTapNode".to_string()
+    }
+
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old_tap) = (old as &dyn std::any::Any).downcast_ref::<BufTapNode>() {
+            self.write_pos = old_tap.write_pos;
+        }
     }
 }
 
@@ -352,45 +778,57 @@ impl Node for BufWriterNode {
         }
     }
 
+    fn get_id(&self) -> String {
+        "BufWriterNode".to_string()
+    }
+
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old_writer) = (old as &dyn std::any::Any).downcast_ref::<BufWriterNode>() {
+            self.write_pos = old_writer.write_pos;
+        }
     }
 }
 
 // delay line
 #[derive(Clone)]
 pub(crate) struct DelayNode {
+    inputs: Vec<Box<dyn Node>>,
     buffer: [Frame; Self::BUFFER_SIZE],
     write_pos: usize,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl DelayNode {
     pub const BUFFER_SIZE: usize = 48000;
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+        let num_inputs = inputs.len();
         Self {
+            inputs,
             buffer: [[0.0; 2]; Self::BUFFER_SIZE],
             write_pos: 0,
+            buffers: vec![Vec::new(); num_inputs],
         }
     }
 }
 
 impl Node for DelayNode {
     #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+        let signal = &self.buffers[0];
+        let delay_input = &self.buffers[1];
+
         for i in 0..outputs.len() {
-            let input = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .copied()
-                .unwrap_or([0.0; 2]);
+            let input = signal[i];
             self.buffer[self.write_pos] = input;
 
-            let delay = inputs
-                .get(1)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(0.0);
+            let delay = delay_input[i][0];
             // clamp delay to buffer size
             let delay = delay.max(0.0).min((Self::BUFFER_SIZE - 1) as f32);
 
@@ -403,7 +841,26 @@ impl Node for DelayNode {
         }
     }
 
+    fn get_id(&self) -> String {
+        "DelayNode".to_string()
+    }
+
     fn clone_box(&self) -> Box<dyn Node> {
         Box::new(self.clone())
+    }
+
+    fn get_inputs(&self) -> &[Box<dyn Node>] {
+        &self.inputs
+    }
+
+    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+        &mut self.inputs
+    }
+
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old_delay) = (old as &dyn std::any::Any).downcast_ref::<DelayNode>() {
+            self.buffer = old_delay.buffer;
+            self.write_pos = old_delay.write_pos;
+        }
     }
 }

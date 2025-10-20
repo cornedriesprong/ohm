@@ -13,7 +13,6 @@ use std::{
 
 mod audio_graph;
 mod nodes;
-mod op;
 mod utils;
 use audio_graph::*;
 
@@ -69,9 +68,8 @@ where
 
         match parser.parse() {
             Some(expr) => {
-                let graph = parse_to_graph(expr);
                 let mut guard = container.lock().unwrap();
-                guard.update_graph(graph);
+                guard.update_graph(expr);
                 Ok(())
             }
             None => bail!("Failed to parse"),
