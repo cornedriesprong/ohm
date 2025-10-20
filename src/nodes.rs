@@ -30,7 +30,6 @@ macro_rules! define_binary_op_node {
                 let left = &self.buffers[0];
                 let right = &self.buffers[1];
 
-                // Use iterator-based pattern for better auto-vectorization
                 for (out, (l, r)) in outputs.iter_mut().zip(left.iter().zip(right.iter())) {
                     *out = $op(*l, *r);
                 }
@@ -176,12 +175,10 @@ impl Node for LFONode {
         let two_pi = 2.0 * PI;
         let phase_increment_scale = two_pi / sample_rate_f32;
 
-        // Use iterator for cleaner code
         for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
             let freq = freq_frame[0].clamp(0.0, max_freq);
 
             self.phase += freq * phase_increment_scale;
-            // Branchless phase wrapping using modulo
             self.phase = self.phase % two_pi;
 
             let y = self.phase.cos();
@@ -389,7 +386,6 @@ impl Node for SeqNode {
         let ramp_input = &self.buffers[num_values];
         let segment = 1.0 / num_values as f32;
 
-        // Use iterator for better optimization potential
         for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate() {
             let ramp = ramp_frame[0].clamp(0.0, 1.0);
             let step = ((ramp / segment).floor() as usize).min(num_values - 1);
@@ -576,8 +572,10 @@ impl Node for DelayNode {
         let buffer_size_f32 = Self::BUFFER_SIZE as f32;
         let max_delay = (Self::BUFFER_SIZE - 1) as f32;
 
-        // Use iterator for cleaner code
-        for (out, (sig, delay_frame)) in outputs.iter_mut().zip(signal.iter().zip(delay_input.iter())) {
+        for (out, (sig, delay_frame)) in outputs
+            .iter_mut()
+            .zip(signal.iter().zip(delay_input.iter()))
+        {
             self.buffer[self.write_pos] = *sig;
 
             let delay = delay_frame[0].clamp(0.0, max_delay);

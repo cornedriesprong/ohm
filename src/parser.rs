@@ -22,6 +22,10 @@ pub(crate) enum Token {
     Eof,
 }
 
+fn constant_node(value: f32) -> Box<dyn Node> {
+    Box::new(FunDSPNode::mono(vec![], Box::new(dc(value))))
+}
+
 pub(crate) fn tokenize(str: String) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = str.chars().peekable();
@@ -236,33 +240,23 @@ impl Parser {
     fn parse_node(&mut self, name: &str) -> Option<Box<dyn Node>> {
         match name {
             "ramp" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(1.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(1.0));
                 Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw()))))
             }
             "sin" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(100.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
                 Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(sine()))))
             }
             "saw" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(100.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
                 Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw()))))
             }
             "sqr" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(100.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
                 Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(square()))))
             }
             "tri" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(100.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
                 Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(triangle()))))
             }
             "noise" => Some(Box::new(FunDSPNode::mono(vec![], Box::new(noise())))),
@@ -273,120 +267,78 @@ impl Parser {
                 Some(Box::new(FunDSPNode::mono(vec![input], Box::new(clip()))))
             }
             "lfo" => {
-                let freq = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(1.0)))));
+                let freq = self.parse_primary().unwrap_or_else(|| constant_node(1.0));
                 Some(Box::new(LFONode::new(vec![freq], self.sample_rate)))
             }
             "sh" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let trig = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let trig = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 Some(Box::new(SampleAndHoldNode::new(
                     vec![input, trig],
                     self.sample_rate,
                 )))
             }
             "pan" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let pan = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.5)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let pan = self.parse_primary().unwrap_or_else(|| constant_node(0.5));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, pan],
                     Box::new(panner()),
                 )))
             }
             "onepole" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(20.0)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(20.0));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, cutoff],
                     Box::new(lowpole()),
                 )))
             }
             "lp" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(500.0)))));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.707)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
+                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(lowpass()),
                 )))
             }
             "bp" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(500.0)))));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.707)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
+                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(bandpass()),
                 )))
             }
             "hp" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(500.0)))));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.707)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
+                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(highpass()),
                 )))
             }
             "moog" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(500.0)))));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
+                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 Some(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(moog()),
                 )))
             }
             "delay" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 let delay_time = self
                     .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(1000.0)))));
+                    .unwrap_or_else(|| constant_node(1000.0));
                 Some(Box::new(DelayNode::new(vec![input, delay_time])))
             }
             "reverb" => {
-                let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
+                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 Some(Box::new(FunDSPNode::stereo(
                     vec![input],
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
