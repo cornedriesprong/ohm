@@ -1,4 +1,0 @@
-from ohm import *
-from pitches import *
-from scales import *
-

@@ -3,7 +3,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
 };
-use koto::prelude::*;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::{
     fs,
@@ -12,24 +11,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod nodes;
-mod utils;
-
-mod env;
-use crate::env::create_env;
-
-mod op;
-use crate::op::Op;
-
 mod audio_graph;
+mod nodes;
+mod op;
+mod utils;
 use audio_graph::*;
+
+mod parser;
+use crate::parser::{tokenize, Parser};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let filename = if args.len() >= 2 {
         &args[1]
     } else {
-        "patch.koto"
+        "patch.ohm"
     };
 
     let host = cpal::default_host();
@@ -53,16 +49,12 @@ where
 
     let container = Container::new();
     let container: Arc<Mutex<Container>> = Arc::new(Mutex::new(container));
-    let container_clone1 = Arc::clone(&container);
-    let container_clone2 = Arc::clone(&container);
-
-    let mut koto = Koto::default();
-    create_env(&koto, container_clone1, config.sample_rate.0);
+    let container_clone = Arc::clone(&container);
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            container_clone2.lock().unwrap().process_interleaved(data);
+            container_clone.lock().unwrap().process_interleaved(data);
         },
         err_fn,
         None,
@@ -70,31 +62,19 @@ where
 
     stream.play()?;
 
-    let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
+    let update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
-        match koto.compile_and_run(CompileArgs {
-            script: &src,
-            script_path: Some(KString::from(path.to_str().unwrap())),
-            compiler_settings: CompilerSettings {
-                export_top_level_ids: true,
-                ..Default::default()
-            },
-        })? {
-            KValue::Object(obj) => match obj.cast::<Op>() {
-                Ok(expr) => {
-                    let graph = parse_to_graph(expr.to_owned());
-                    let mut guard = container.lock().unwrap();
-                    guard.update_graph(graph);
-                    Ok(())
-                }
-                Err(e) => bail!("Failed to cast to Expr: {}", e),
-            },
-            KValue::Str(str) => {
-                println!("{}", str);
+        let tokens = tokenize(src);
+        let mut parser = Parser::new(tokens, config.sample_rate.0);
 
+        match parser.parse() {
+            Some(expr) => {
+                let graph = parse_to_graph(expr);
+                let mut guard = container.lock().unwrap();
+                guard.update_graph(graph);
                 Ok(())
             }
-            other => bail!("Expected a Map, found '{}'", other.type_as_string(),),
+            None => bail!("Failed to parse"),
         }
     };
 

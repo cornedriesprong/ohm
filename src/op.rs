@@ -1,12 +1,9 @@
 use crate::nodes::{Frame, Node, NodeKind};
-use crate::KObject;
-use koto::derive::{KotoCopy, KotoType};
-use koto::runtime::{KMap, KValue, KotoCopy, KotoEntries, KotoObject, Result};
 use rtsan_standalone::nonblocking;
 use seahash::SeaHasher;
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, KotoType, KotoCopy)]
+#[derive(Clone)]
 pub enum Op {
     Constant(f32),
     Mix(Box<Op>, Box<Op>),
@@ -24,110 +21,7 @@ pub enum Op {
     },
 }
 
-enum BinaryOp {
-    Add,
-    Multiply,
-    Subtract,
-    Divide,
-    Power,
-    Modulo,
-}
-
 impl Op {
-    // Helper to choose the operation variant for non-numeric binary operations.
-    fn op_variant(&self, rhs: Op, op: BinaryOp) -> Op {
-        match op {
-            BinaryOp::Add | BinaryOp::Subtract => Op::Mix(Box::new(self.clone()), Box::new(rhs)),
-            BinaryOp::Multiply | BinaryOp::Divide => {
-                Op::Gain(Box::new(self.clone()), Box::new(rhs))
-            }
-            BinaryOp::Power => Op::Power(Box::new(self.clone()), Box::new(rhs)),
-            BinaryOp::Modulo => Op::Wrap(Box::new(self.clone()), Box::new(rhs)),
-        }
-    }
-
-    fn binary_op(&self, rhs: &KValue, op: BinaryOp) -> Result<KValue> {
-        // Convert KValue to Op.
-        let rhs_to_op = |num: &KValue| -> Result<Op> {
-            match num {
-                KValue::Number(n) => Ok(Op::Constant(f32::from(n))),
-                KValue::Object(obj) => Ok(obj.cast::<Op>()?.clone()),
-                _ => panic!("invalid type"),
-            }
-        };
-
-        match (self, rhs) {
-            (Op::Constant(lhs), KValue::Number(num)) => {
-                let rhs_val = f32::from(num);
-                let result = match op {
-                    BinaryOp::Add => lhs + rhs_val,
-                    BinaryOp::Multiply => lhs * rhs_val,
-                    BinaryOp::Subtract => lhs - rhs_val,
-                    BinaryOp::Divide => lhs / rhs_val,
-                    BinaryOp::Power => lhs.powf(rhs_val),
-                    BinaryOp::Modulo => lhs % rhs_val,
-                };
-                Ok(KValue::Object(Op::Constant(result).into()))
-            }
-            _ => {
-                let base_rhs = match op {
-                    BinaryOp::Subtract => match rhs_to_op(rhs)? {
-                        Op::Constant(n) => Op::Constant(-n),
-                        op => op,
-                    },
-                    BinaryOp::Divide => match rhs_to_op(rhs)? {
-                        Op::Constant(n) => Op::Constant(1.0 / n),
-                        op => op,
-                    },
-                    _ => rhs_to_op(rhs)?,
-                };
-                Ok(KValue::Object(self.op_variant(base_rhs, op).into()))
-            }
-        }
-    }
-
-    /// Generic helper to compare self with the other KValue by first extracting a constant value.
-    fn compare<F>(&self, other: &KValue, cmp: F) -> Result<bool>
-    where
-        F: Fn(f32, f32) -> bool,
-    {
-        // Helper to extract constant from KValue.
-        fn extract_constant(val: &KValue) -> Option<f32> {
-            match val {
-                KValue::Number(num) => Some(f32::from(num)),
-                KValue::Object(obj) => {
-                    let op = obj.cast::<Op>().ok()?;
-                    if let Op::Constant(n) = *op {
-                        Some(n)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        }
-
-        if let Some(lhs_val) = match self {
-            Op::Constant(val) => Some(*val),
-            _ => {
-                // If self is not constant attempt to extract a constant.
-                if let Op::Constant(val) = self {
-                    Some(*val)
-                } else {
-                    None
-                }
-            }
-        } {
-            if let Some(rhs_val) = extract_constant(other) {
-                Ok(cmp(lhs_val, rhs_val))
-            } else {
-                Ok(false)
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
     pub(crate) fn compute_hash(&self) -> u64 {
         let mut hasher = SeaHasher::new();
         self.hash_structure(&mut hasher);
@@ -195,91 +89,6 @@ impl Op {
                 rhs.hash_structure(hasher);
             }
         }
-    }
-}
-
-impl KotoObject for Op {
-    fn negate(&self) -> Result<KValue> {
-        if let Op::Constant(val) = self {
-            Ok(KValue::Number((-val).into()))
-        } else {
-            Ok(KValue::Object(Op::Negate(Box::new(self.clone())).into()))
-        }
-    }
-
-    fn add(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Add)
-    }
-
-    fn add_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Add)
-    }
-
-    fn subtract(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Subtract)
-    }
-
-    fn subtract_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Subtract)
-    }
-
-    fn multiply(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Multiply)
-    }
-
-    fn multiply_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Multiply)
-    }
-
-    fn divide(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Divide)
-    }
-
-    fn divide_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Divide)
-    }
-
-    fn power(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Power)
-    }
-
-    fn power_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Power)
-    }
-
-    fn remainder(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Modulo)
-    }
-
-    fn remainder_rhs(&self, rhs: &KValue) -> Result<KValue> {
-        self.binary_op(rhs, BinaryOp::Modulo)
-    }
-
-    fn less(&self, other: &KValue) -> Result<bool> {
-        self.compare(other, |a, b| a < b)
-    }
-
-    fn less_or_equal(&self, other: &KValue) -> Result<bool> {
-        self.compare(other, |a, b| a <= b)
-    }
-
-    fn greater(&self, other: &KValue) -> Result<bool> {
-        self.compare(other, |a, b| a > b)
-    }
-
-    fn greater_or_equal(&self, other: &KValue) -> Result<bool> {
-        self.compare(other, |a, b| a >= b)
-    }
-
-    fn equal(&self, other: &KValue) -> Result<bool> {
-        self.compare(other, |a, b| a == b)
-    }
-}
-
-// necessary to satisfy KotoEntries trait
-impl KotoEntries for Op {
-    fn entries(&self) -> Option<KMap> {
-        None
     }
 }
 

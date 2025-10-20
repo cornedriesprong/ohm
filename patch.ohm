@@ -1,0 +1,3 @@
+freq = lfo 0.2 * 10
+x = lfo freq > 0.5
+reverb saw 100 * x
