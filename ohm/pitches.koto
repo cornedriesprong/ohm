@@ -1,7 +1,0 @@
-pitches = (0..128).fold {}, |acc, n|
-  pitch = ['C', 'Cs', 'D', 'Ds', 'E', 'F', 'Fs', 'G', 'Gs', 'A', 'As', 'B'][n % 12]
-  octave = (n / 12).floor()
-  acc.'{pitch}{octave}' = n
-  acc
-
-export pitches

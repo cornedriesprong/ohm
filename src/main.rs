@@ -1,4 +1,3 @@
-use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     FromSample, SizedSample,
@@ -72,7 +71,7 @@ where
                 guard.update_graph(expr);
                 Ok(())
             }
-            None => bail!("Failed to parse"),
+            None => Err(anyhow::anyhow!("Parsing error")),
         }
     };
 

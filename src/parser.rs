@@ -1,6 +1,6 @@
 use crate::nodes::{
-    DelayNode, EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, Node,
-    PowerNode, SampleAndHoldNode, WrapNode,
+    DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode,
+    MixNode, Node, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SubtractNode, WrapNode,
 };
 use fundsp::hacker32::*;
 use std::collections::HashMap;
@@ -9,8 +9,10 @@ use std::collections::HashMap;
 pub(crate) enum Token {
     Number(f32),
     Identifier(String),
-    Add,
+    Plus,
+    Minus,
     Multiply,
+    Divide,
     Modulo,
     Power,
     Greater,
@@ -40,11 +42,19 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                 chars.next();
             }
             '+' => {
-                tokens.push(Token::Add);
+                tokens.push(Token::Plus);
+                chars.next();
+            }
+            '-' => {
+                tokens.push(Token::Minus);
                 chars.next();
             }
             '*' => {
                 tokens.push(Token::Multiply);
+                chars.next();
+            }
+            '/' => {
+                tokens.push(Token::Divide);
                 chars.next();
             }
             '%' => {
@@ -52,7 +62,6 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                 chars.next();
             }
             '^' => {
-                println!("Power operator found");
                 tokens.push(Token::Power);
                 chars.next();
             }
@@ -189,7 +198,7 @@ impl Parser {
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Option<Box<dyn Node>> {
-        let mut left = self.parse_primary()?;
+        let mut lhs = self.parse_primary()?;
 
         while let Some(op_prec) = self.get_precedence(self.peek()) {
             if op_prec < min_prec {
@@ -197,21 +206,23 @@ impl Parser {
             }
 
             let op = self.consume();
-            let right = self.parse_expr(op_prec + 1)?;
+            let rhs = self.parse_expr(op_prec + 1)?;
 
-            left = match op {
-                Token::Add => Box::new(MixNode::new(vec![left, right])),
-                Token::Multiply => Box::new(GainNode::new(vec![left, right])),
-                Token::Modulo => Box::new(WrapNode::new(vec![left, right])),
-                Token::Power => Box::new(PowerNode::new(vec![left, right])),
-                Token::Greater => Box::new(GreaterNode::new(vec![left, right])),
-                Token::Less => Box::new(LessNode::new(vec![left, right])),
-                Token::Equal => Box::new(EqualNode::new(vec![left, right])),
-                _ => left,
+            lhs = match op {
+                Token::Plus => Box::new(MixNode::new(vec![lhs, rhs])),
+                Token::Minus => Box::new(SubtractNode::new(vec![lhs, rhs])),
+                Token::Multiply => Box::new(GainNode::new(vec![lhs, rhs])),
+                Token::Divide => Box::new(DivideNode::new(vec![lhs, rhs])),
+                Token::Modulo => Box::new(WrapNode::new(vec![lhs, rhs])),
+                Token::Power => Box::new(PowerNode::new(vec![lhs, rhs])),
+                Token::Greater => Box::new(GreaterNode::new(vec![lhs, rhs])),
+                Token::Less => Box::new(LessNode::new(vec![lhs, rhs])),
+                Token::Equal => Box::new(EqualNode::new(vec![lhs, rhs])),
+                _ => lhs,
             };
         }
 
-        Some(left)
+        Some(lhs)
     }
 
     fn parse_primary(&mut self) -> Option<Box<dyn Node>> {
@@ -241,7 +252,7 @@ impl Parser {
         match name {
             "ramp" => {
                 let freq = self.parse_primary().unwrap_or_else(|| constant_node(1.0));
-                Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw()))))
+                Some(Box::new(RampNode::new(vec![freq], self.sample_rate)))
             }
             "sin" => {
                 let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
@@ -286,6 +297,13 @@ impl Parser {
                     Box::new(panner()),
                 )))
             }
+            "seq" => {
+                let mut args = Vec::new();
+                while let Some(arg) = self.parse_primary() {
+                    args.push(arg);
+                }
+                Some(Box::new(SeqNode::new(args)))
+            }
             "onepole" => {
                 let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(20.0));
@@ -295,7 +313,7 @@ impl Parser {
                 )))
             }
             "lp" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
                 let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
@@ -304,7 +322,7 @@ impl Parser {
                 )))
             }
             "bp" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
                 let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
@@ -313,7 +331,7 @@ impl Parser {
                 )))
             }
             "hp" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
                 let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
                 Some(Box::new(FunDSPNode::mono(
@@ -322,7 +340,7 @@ impl Parser {
                 )))
             }
             "moog" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
                 let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
                 Some(Box::new(FunDSPNode::mono(
@@ -331,14 +349,14 @@ impl Parser {
                 )))
             }
             "delay" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 let delay_time = self
                     .parse_primary()
                     .unwrap_or_else(|| constant_node(1000.0));
                 Some(Box::new(DelayNode::new(vec![input, delay_time])))
             }
             "reverb" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                let input = self.parse_primary()?;
                 Some(Box::new(FunDSPNode::stereo(
                     vec![input],
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
@@ -351,8 +369,8 @@ impl Parser {
     fn get_precedence(&self, token: &Token) -> Option<u8> {
         match token {
             Token::Power => Some(1),
-            Token::Multiply | Token::Modulo => Some(2),
-            Token::Add => Some(3),
+            Token::Multiply | Token::Divide | Token::Modulo => Some(2),
+            Token::Plus | Token::Minus => Some(3),
             Token::Greater | Token::Less | Token::Equal => Some(4),
             _ => None,
         }

@@ -4,6 +4,76 @@ use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
 
+macro_rules! define_osc_node {
+    ($name:ident, $node_name:expr, $phase_to_output:expr) => {
+        #[derive(Clone)]
+        pub struct $name {
+            inputs: Vec<Box<dyn Node>>,
+            phase: f32,
+            sample_rate: u32,
+            buffers: Vec<Vec<Frame>>,
+        }
+
+        impl $name {
+            pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self {
+                let num_inputs = inputs.len();
+                Self {
+                    inputs,
+                    phase: 0.0,
+                    sample_rate,
+                    buffers: vec![Vec::new(); num_inputs],
+                }
+            }
+        }
+
+        impl Node for $name {
+            #[inline(always)]
+            fn process(&mut self, outputs: &mut [Frame]) {
+                render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+
+                let freq_input = &self.buffers[0];
+                let sample_rate_f32 = self.sample_rate as f32;
+                let max_freq = sample_rate_f32 * 0.5;
+                let two_pi = 2.0 * PI;
+                let phase_increment_scale = two_pi / sample_rate_f32;
+
+                for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
+                    let freq = freq_frame[0].clamp(0.0, max_freq);
+
+                    self.phase += freq * phase_increment_scale;
+                    self.phase = self.phase % two_pi;
+
+                    let y = $phase_to_output(self.phase, two_pi);
+
+                    *out = [y; 2];
+                }
+            }
+
+            fn get_id(&self) -> String {
+                $node_name.to_string()
+            }
+
+            fn clone_box(&self) -> Box<dyn Node> {
+                Box::new(self.clone())
+            }
+
+            fn get_inputs(&self) -> &[Box<dyn Node>] {
+                &self.inputs
+            }
+
+            fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
+                &mut self.inputs
+            }
+
+            fn transfer_state(&mut self, old: &dyn Node) {
+                if let Some(old_osc) = (old as &dyn std::any::Any).downcast_ref::<$name>() {
+                    self.phase = old_osc.phase;
+                }
+            }
+        }
+    };
+}
+
 macro_rules! define_binary_op_node {
     ($name:ident, $node_name:expr, $op:expr) => {
         #[derive(Clone)]
@@ -54,6 +124,7 @@ macro_rules! define_binary_op_node {
     };
 }
 
+// helper function to render node inputs
 #[inline(always)]
 fn render_inputs(inputs: &mut [Box<dyn Node>], buffers: &mut Vec<Vec<Frame>>, len: usize) {
     if buffers.len() != inputs.len() {
@@ -105,11 +176,19 @@ pub(crate) trait Node: Send + Sync + std::any::Any {
 }
 
 define_binary_op_node!(MixNode, "MixNode", |lhs: Frame, rhs: Frame| {
-    [lhs[0] + rhs[0], lhs[1] * rhs[0]]
+    [lhs[0] + rhs[0], lhs[1] + rhs[0]]
+});
+
+define_binary_op_node!(SubtractNode, "SubtractNode", |lhs: Frame, rhs: Frame| {
+    [lhs[0] - rhs[0], lhs[1] - rhs[0]]
 });
 
 define_binary_op_node!(GainNode, "GainNode", |lhs: Frame, rhs: Frame| {
     [lhs[0] * rhs[0], lhs[1] * rhs[0]]
+});
+
+define_binary_op_node!(DivideNode, "DivideNode", |lhs: Frame, rhs: Frame| {
+    [lhs[0] / rhs[0], lhs[1] / rhs[0]]
 });
 
 define_binary_op_node!(WrapNode, "WrapNode", |lhs: Frame, rhs: Frame| {
@@ -141,75 +220,13 @@ define_binary_op_node!(EqualNode, "EqualNode", |lhs: Frame, rhs: Frame| {
     ]
 });
 
-#[derive(Clone)]
-pub struct LFONode {
-    inputs: Vec<Box<dyn Node>>,
-    phase: f32,
-    sample_rate: u32,
-    buffers: Vec<Vec<Frame>>,
-}
+define_osc_node!(RampNode, "RampNode", |phase: f32, two_pi: f32| {
+    phase / two_pi
+});
 
-impl LFONode {
-    pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self
-    where
-        Self: Sized,
-    {
-        let num_inputs = inputs.len();
-        Self {
-            inputs,
-            phase: 0.0,
-            sample_rate,
-            buffers: vec![Vec::new(); num_inputs],
-        }
-    }
-}
-
-impl Node for LFONode {
-    #[inline(always)]
-    fn process(&mut self, outputs: &mut [Frame]) {
-        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
-
-        let freq_input = &self.buffers[0];
-        let sample_rate_f32 = self.sample_rate as f32;
-        let max_freq = sample_rate_f32 * 0.5;
-        let two_pi = 2.0 * PI;
-        let phase_increment_scale = two_pi / sample_rate_f32;
-
-        for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
-            let freq = freq_frame[0].clamp(0.0, max_freq);
-
-            self.phase += freq * phase_increment_scale;
-            self.phase = self.phase % two_pi;
-
-            let y = self.phase.cos();
-            let y = (y + 1.0) * 0.5; // map to unipolar
-
-            *out = [y; 2];
-        }
-    }
-
-    fn get_id(&self) -> String {
-        "LFONode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
-        &self.inputs
-    }
-
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut self.inputs
-    }
-
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old_lfo) = (old as &dyn std::any::Any).downcast_ref::<LFONode>() {
-            self.phase = old_lfo.phase;
-        }
-    }
-}
+define_osc_node!(LFONode, "LFONode", |phase: f32, _two_pi: f32| {
+    (phase.cos() + 1.0) * 0.5
+});
 
 #[derive(Clone)]
 pub struct SampleAndHoldNode {
@@ -382,14 +399,13 @@ impl Node for SeqNode {
     fn process(&mut self, outputs: &mut [Frame]) {
         render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
 
-        let num_values = self.buffers.len() - 1;
-        let ramp_input = &self.buffers[num_values];
-        let segment = 1.0 / num_values as f32;
+        let num_steps = self.buffers.len() - 1;
+        let ramp_input = &self.buffers[0];
 
         for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate() {
-            let ramp = ramp_frame[0].clamp(0.0, 1.0);
-            let step = ((ramp / segment).floor() as usize).min(num_values - 1);
-            *out = self.buffers[step][i];
+            let ramp = ramp_frame[0];
+            let step = (ramp * num_steps as f32).floor() as usize;
+            *out = self.buffers[step + 1][i];
         }
     }
 
