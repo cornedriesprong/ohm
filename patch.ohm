@@ -1,3 +1,4 @@
-freq = lfo 0.2 * 10
-x = lfo freq > 0.5
-reverb saw 100 * x
+trig = ramp 0.7 ^ 8
+freq = seq trig 400 300 200
+cutoff = lfo 0.1 * 1000
+bus = lp saw freq cutoff 2.9
