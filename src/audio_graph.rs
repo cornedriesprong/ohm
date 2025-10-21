@@ -1,24 +1,17 @@
 use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 
-fn apply_diff(old: &dyn Node, new: &mut Box<dyn Node>) {
-    fn compare(old: &dyn Node, new: &mut dyn Node) {
-        if old.get_id() == new.get_id() {
-            // Transfer state without cloning inputs
-            new.transfer_state(old);
+fn apply_diff(old: &dyn Node, new: &mut dyn Node) {
+    if old.get_id() == new.get_id() {
+        new.transfer_state(old);
 
-            // Recursively compare inputs (no clones needed!)
-            let old_inputs = old.get_inputs();
-            let new_inputs = new.get_inputs_mut();
+        let old_inputs = old.get_inputs();
+        let new_inputs = new.get_inputs_mut();
 
-            for (o, n) in old_inputs.iter().zip(new_inputs.iter_mut()) {
-                compare(&**o, &mut **n);
-            }
+        for (o, n) in old_inputs.iter().zip(new_inputs.iter_mut()) {
+            apply_diff(&**o, &mut **n);
         }
     }
-    println!("Applying diff...");
-
-    compare(old, &mut **new);
 }
 
 pub(crate) struct Container {
@@ -38,7 +31,7 @@ impl Container {
 
     pub(crate) fn update_graph(&mut self, mut new: Box<dyn Node>) {
         if let Some(ref old_root) = self.root {
-            apply_diff(&**old_root, &mut new);
+            apply_diff(&**old_root, &mut *new);
         }
         self.root = Some(new);
     }
@@ -69,13 +62,11 @@ impl Container {
             soft_limit_poly(output_chunk);
             hard_clip(output_chunk);
 
-            // Convert to interleaved
             for i in 0..num_frames {
                 data[i * 2] = output_chunk[i][0];
                 data[i * 2 + 1] = output_chunk[i][1];
             }
         } else {
-            // if no nodes, return silence
             data.fill(0.0);
         }
     }

@@ -27,10 +27,10 @@ macro_rules! define_binary_op_node {
             fn process(&mut self, outputs: &mut [Frame]) {
                 render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
 
-                let left = &self.buffers[0];
-                let right = &self.buffers[1];
+                let lhs = &self.buffers[0];
+                let rhs = &self.buffers[1];
 
-                for (out, (l, r)) in outputs.iter_mut().zip(left.iter().zip(right.iter())) {
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
                     *out = $op(*l, *r);
                 }
             }
