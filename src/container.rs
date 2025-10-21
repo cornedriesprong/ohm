@@ -1,22 +1,8 @@
 use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 
-fn apply_diff(old: &dyn Node, new: &mut dyn Node) {
-    if old.get_id() == new.get_id() {
-        new.transfer_state(old);
-
-        let old_inputs = old.get_inputs();
-        let new_inputs = new.get_inputs_mut();
-
-        for (o, n) in old_inputs.iter().zip(new_inputs.iter_mut()) {
-            apply_diff(&**o, &mut **n);
-        }
-    }
-}
-
 pub(crate) struct Container {
     root: Option<Box<dyn Node>>,
-    buffers: Vec<Vec<Frame>>,
     output_buffer: Vec<Frame>,
 }
 
@@ -24,27 +10,16 @@ impl Container {
     pub(crate) fn new() -> Self {
         Self {
             root: None,
-            buffers: Vec::new(),
             output_buffer: Vec::new(),
         }
     }
 
     pub(crate) fn update_graph(&mut self, mut new: Box<dyn Node>) {
         if let Some(ref old_root) = self.root {
-            apply_diff(&**old_root, &mut *new);
+            self.apply_diff(&**old_root, &mut *new);
         }
         self.root = Some(new);
     }
-
-    // pub(crate) fn load_frames_to_buffer(&mut self, frames: Vec<Frame>) -> usize {
-    //     self.buffers.push(frames);
-    //     self.buffers.len() - 1
-    // }
-    //
-    // pub(crate) fn add_buffer(&mut self, length: usize) -> usize {
-    //     self.buffers.push(vec![[0.0, 0.0]; length]);
-    //     self.buffers.len() - 1
-    // }
 
     #[inline(always)]
     pub fn process_interleaved(&mut self, data: &mut [f32]) {
@@ -68,6 +43,19 @@ impl Container {
             }
         } else {
             data.fill(0.0);
+        }
+    }
+
+    fn apply_diff(&self, old: &dyn Node, new: &mut dyn Node) {
+        if old.get_id() == new.get_id() {
+            new.transfer_state(old);
+
+            let old_inputs = old.get_inputs();
+            let new_inputs = new.get_inputs_mut();
+
+            for (o, n) in old_inputs.iter().zip(new_inputs.iter_mut()) {
+                self.apply_diff(&**o, &mut **n);
+            }
         }
     }
 }

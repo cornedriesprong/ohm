@@ -1,5 +1,6 @@
 use crate::utils::cubic_interpolate;
 use fundsp::hacker32::AudioUnit;
+use std::any::Any;
 use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
@@ -66,8 +67,8 @@ macro_rules! define_osc_node {
             }
 
             fn transfer_state(&mut self, old: &dyn Node) {
-                if let Some(old_osc) = (old as &dyn std::any::Any).downcast_ref::<$name>() {
-                    self.phase = old_osc.phase;
+                if let Some(old) = (old as &dyn Any).downcast_ref::<$name>() {
+                    self.phase = old.phase;
                 }
             }
         }
@@ -139,26 +140,9 @@ fn render_inputs(inputs: &mut [Box<dyn Node>], buffers: &mut Vec<Vec<Frame>>, le
     }
 }
 
-pub(crate) trait Node: Send + Sync + std::any::Any {
+pub(crate) trait Node: Send + Sync + Any {
     #[inline(always)]
-    fn process(&mut self, _outputs: &mut [Frame]) {
-        unimplemented!("This node is either a buffer reader or writer");
-    }
-
-    #[inline(always)]
-    fn process_read_buffer(
-        &mut self,
-        _inputs: &[&[Frame]],
-        _buffer: &[Frame],
-        _outputs: &mut [Frame],
-    ) {
-        unimplemented!("This node is not a buffer reader");
-    }
-
-    #[inline(always)]
-    fn process_write_buffer(&mut self, _inputs: &[&[Frame]], _buffer: &mut [Frame]) {
-        unimplemented!("This node is not a buffer writer");
-    }
+    fn process(&mut self, _outputs: &mut [Frame]) {}
 
     fn get_id(&self) -> String;
 
@@ -282,9 +266,9 @@ impl Node for SampleAndHoldNode {
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old_sh) = (old as &dyn std::any::Any).downcast_ref::<SampleAndHoldNode>() {
-            self.value = old_sh.value;
-            self.prev = old_sh.prev;
+        if let Some(old) = (old as &dyn Any).downcast_ref::<SampleAndHoldNode>() {
+            self.value = old.value;
+            self.prev = old.prev;
         }
     }
 }
@@ -427,33 +411,58 @@ impl Node for SeqNode {
 }
 
 #[derive(Clone)]
-pub struct BufReaderNode {}
+pub struct BufRefNode {
+    id: String,
+    buffer: Vec<Frame>,
+}
+
+impl BufRefNode {
+    pub(crate) fn new(id: String, buffer: Vec<Frame>) -> Self {
+        Self { id, buffer }
+    }
+
+    fn get_buffer(&self) -> Vec<Frame> {
+        self.buffer.clone()
+    }
+}
+
+impl Node for BufRefNode {
+    fn get_id(&self) -> String {
+        format!("BufRefNode {}", self.id).to_string()
+    }
+
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct BufReaderNode {
+    buf_ref: BufRefNode,
+    inputs: Vec<Box<dyn Node>>,
+    buffers: Vec<Vec<Frame>>,
+}
 
 impl BufReaderNode {
-    pub(crate) fn new() -> Self {
-        Self {}
+    pub(crate) fn new(buf_ref: BufRefNode, inputs: Vec<Box<dyn Node>>) -> Self {
+        Self {
+            buf_ref,
+            inputs,
+            buffers: vec![Vec::new(); 1],
+        }
     }
 }
 
 impl Node for BufReaderNode {
-    fn process_read_buffer(
-        &mut self,
-        inputs: &[&[Frame]],
-        buffer: &[Frame],
-        outputs: &mut [Frame],
-    ) {
-        for i in 0..outputs.len() {
-            let phase = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| {
-                    let val = *l;
-                    ((val % 1.0) + 1.0) % 1.0 // wrap to 0.0, 1.0)
-                })
-                .unwrap_or(0.0);
-            let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
+    fn process(&mut self, outputs: &mut [Frame]) {
+        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+        let buffer = self.buf_ref.get_buffer();
+        let phase = self.buffers[0].as_slice();
 
-            outputs[i] = cubic_interpolate(buffer, read_pos);
+        for (i, out) in outputs.iter_mut().enumerate() {
+            let phase = phase[i][0];
+            let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
+            *out = cubic_interpolate(buffer.as_slice(), read_pos);
         }
     }
 
@@ -480,26 +489,8 @@ impl BufTapNode {
 }
 
 impl Node for BufTapNode {
-    fn process_read_buffer(
-        &mut self,
-        inputs: &[&[Frame]],
-        buffer: &[Frame],
-        outputs: &mut [Frame],
-    ) {
-        for i in 0..outputs.len() {
-            let offset = inputs
-                .get(0)
-                .and_then(|inp| inp.get(i))
-                .map(|[l, _]| *l)
-                .unwrap_or(0.0)
-                .clamp(0.0, 1.0);
-            let read_pos_f = self.write_pos as f32 - offset;
-            let buffer_len = buffer.len() as f32;
-            let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
-            outputs[i] = cubic_interpolate(&buffer, read_pos);
-
-            self.write_pos = (self.write_pos + 1) % buffer.len();
-        }
+    fn process(&mut self, _outputs: &mut [Frame]) {
+        // TODO: read from buffer at offset
     }
 
     fn get_id(&self) -> String {
@@ -511,8 +502,8 @@ impl Node for BufTapNode {
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old_tap) = (old as &dyn std::any::Any).downcast_ref::<BufTapNode>() {
-            self.write_pos = old_tap.write_pos;
+        if let Some(old) = (old as &dyn Any).downcast_ref::<BufTapNode>() {
+            self.write_pos = old.write_pos;
         }
     }
 }
@@ -529,15 +520,8 @@ impl BufWriterNode {
 }
 
 impl Node for BufWriterNode {
-    fn process_write_buffer(&mut self, inputs: &[&[Frame]], buffer: &mut [Frame]) {
-        if let Some(input_slice) = inputs.get(0) {
-            let buffer_len = buffer.len();
-            // Use iterator for cleaner code
-            for input_frame in input_slice.iter() {
-                buffer[self.write_pos] = *input_frame;
-                self.write_pos = (self.write_pos + 1) % buffer_len;
-            }
-        }
+    fn process(&mut self, _outputs: &mut [Frame]) {
+        // TODO: write to buffer
     }
 
     fn get_id(&self) -> String {
@@ -549,8 +533,8 @@ impl Node for BufWriterNode {
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old_writer) = (old as &dyn std::any::Any).downcast_ref::<BufWriterNode>() {
-            self.write_pos = old_writer.write_pos;
+        if let Some(old) = (old as &dyn Any).downcast_ref::<BufWriterNode>() {
+            self.write_pos = old.write_pos;
         }
     }
 }
@@ -620,9 +604,9 @@ impl Node for DelayNode {
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old_delay) = (old as &dyn std::any::Any).downcast_ref::<DelayNode>() {
-            self.buffer = old_delay.buffer;
-            self.write_pos = old_delay.write_pos;
+        if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
+            self.buffer = old.buffer;
+            self.write_pos = old.write_pos;
         }
     }
 }

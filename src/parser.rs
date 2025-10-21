@@ -1,14 +1,17 @@
 use crate::nodes::{
-    DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode,
-    MixNode, Node, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SubtractNode, WrapNode,
+    BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
+    LFONode, LessNode, MixNode, Node, PowerNode, RampNode, SampleAndHoldNode, SeqNode,
+    SubtractNode, WrapNode,
 };
+use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Token {
     Number(f32),
     Identifier(String),
+    String(String),
     Plus,
     Minus,
     Multiply,
@@ -101,6 +104,27 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                     panic!("Invalid number: {}", num_str);
                 }
             }
+            '"' => {
+                chars.next();
+                let mut str_content = String::new();
+                let mut terminated = false;
+
+                while let Some(&ch) = chars.peek() {
+                    if ch == '"' {
+                        chars.next();
+                        terminated = true;
+                        break;
+                    }
+                    str_content.push(ch);
+                    chars.next();
+                }
+
+                if !terminated {
+                    panic!("Unterminated string literal");
+                }
+
+                tokens.push(Token::String(str_content));
+            }
             'a'..='z' | 'A'..='Z' | '_' => {
                 let mut ident = String::new();
                 while let Some(&ch) = chars.peek() {
@@ -152,20 +176,16 @@ impl Parser {
         let mut last_expr = None;
 
         loop {
-            // Skip any leading newlines
             while matches!(self.peek(), Token::Newline) {
                 self.consume();
             }
 
-            // Check for end of input
             if matches!(self.peek(), Token::Eof) {
                 break;
             }
 
-            // Try to parse a statement
             last_expr = self.parse_statement();
 
-            // Consume trailing newlines or expect EOF
             while matches!(self.peek(), Token::Newline) {
                 self.consume();
             }
@@ -175,7 +195,6 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Option<Box<dyn Node>> {
-        // Try to parse assignment: identifier = expr
         if let Token::Identifier(name) = self.peek() {
             let name = name.clone();
             let prev_pos = self.pos;
@@ -189,11 +208,9 @@ impl Parser {
                 }
             }
 
-            // Not an assignment, backtrack
             self.pos = prev_pos;
         }
 
-        // Otherwise, parse as expression
         self.parse_expr(0)
     }
 
@@ -244,6 +261,13 @@ impl Parser {
                     _ => panic!("Expected closing parenthesis"),
                 }
             }
+            _ => None,
+        }
+    }
+
+    fn parse_str(&mut self) -> Option<String> {
+        match self.consume() {
+            Token::String(s) => Some(s),
             _ => None,
         }
     }
@@ -361,6 +385,20 @@ impl Parser {
                     vec![input],
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
                 )))
+            }
+            "file" => {
+                let name = self.parse_str()?;
+                let frames = get_audio_frames(&name);
+                Some(Box::new(BufRefNode::new(name, frames)))
+            }
+            "play" => {
+                let buf_ref = self.parse_primary()?;
+                if let Some(buf_ref) = (buf_ref.as_ref() as &dyn Any).downcast_ref::<BufRefNode>() {
+                    let phase = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
+                    Some(Box::new(BufReaderNode::new(buf_ref.clone(), vec![phase])))
+                } else {
+                    panic!("Expected a buffer reference for 'play'");
+                }
             }
             _ => None,
         }
