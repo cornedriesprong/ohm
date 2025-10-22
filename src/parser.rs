@@ -277,6 +277,13 @@ impl Parser {
         }
     }
 
+    fn parse_num(&mut self) -> Option<f32> {
+        match self.consume() {
+            Token::Number(n) => Some(n),
+            _ => None,
+        }
+    }
+
     fn parse_node(&mut self, arena: &mut Arena, name: &str) -> Option<usize> {
         match name {
             "ramp" => {
@@ -433,9 +440,7 @@ impl Parser {
             }
             "buf" => {
                 let name = self.parse_str()?;
-                let length = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, self.sample_rate as f32));
+                let length = self.parse_num().unwrap_or(self.sample_rate as f32);
                 let frames = vec![[0.0; 2]; length as usize];
                 arena.store_buffer(name.clone(), frames);
                 Some(arena.alloc(Box::new(BufRefNode::new(name))))
@@ -447,24 +452,24 @@ impl Parser {
                 Some(arena.alloc(Box::new(BufRefNode::new(name))))
             }
             "play" => {
-                let buf_ref_id = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
+                let buf_ref = self.parse_primary(arena)?;
+                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
                 let phase = self
                     .parse_primary(arena)
                     .unwrap_or_else(|| constant_node(arena, 0.0));
                 Some(arena.alloc(Box::new(BufReaderNode::new(buf_name, vec![phase]))))
             }
             "tap" => {
-                let buf_ref_id = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
+                let buf_ref = self.parse_primary(arena)?;
+                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
                 let offset = self
                     .parse_primary(arena)
                     .unwrap_or_else(|| constant_node(arena, 0.0));
                 Some(arena.alloc(Box::new(BufTapNode::new(buf_name, vec![offset]))))
             }
             "rec" => {
-                let buf_ref_id = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
+                let buf_ref = self.parse_primary(arena)?;
+                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
                 let input = self
                     .parse_primary(arena)
                     .unwrap_or_else(|| constant_node(arena, 0.0));

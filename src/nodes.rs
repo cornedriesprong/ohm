@@ -482,10 +482,10 @@ impl Node for BufWriterNode {
             return;
         };
 
-        let input = self.buffers[0].as_mut_slice();
+        let input = &self.buffers[0].as_slice();
 
-        for input in input.iter_mut() {
-            buffer[self.write_pos] = *input;
+        for frame in input.iter() {
+            buffer[self.write_pos] = *frame;
             self.write_pos = (self.write_pos + 1) % buffer.len();
         }
     }
