@@ -1,33 +1,10 @@
+use crate::container::Arena;
 use crate::utils::cubic_interpolate;
 use fundsp::hacker32::AudioUnit;
 use std::any::Any;
 use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
-
-pub struct Arena {
-    nodes: Vec<Box<dyn Node>>,
-}
-
-impl Arena {
-    pub fn new() -> Self {
-        Self { nodes: Vec::new() }
-    }
-
-    pub fn alloc(&mut self, node: Box<dyn Node>) -> usize {
-        let id = self.nodes.len();
-        self.nodes.push(node);
-        id
-    }
-
-    pub fn get(&self, id: usize) -> &dyn Node {
-        &*self.nodes[id]
-    }
-
-    pub fn get_mut(&mut self, id: usize) -> &mut dyn Node {
-        &mut *self.nodes[id]
-    }
-}
 
 macro_rules! define_osc_node {
     ($name:ident, $node_name:expr, $phase_to_output:expr) => {
@@ -166,6 +143,10 @@ pub(crate) trait Node: Send + Sync + Any {
 
     fn transfer_state(&mut self, _old: &dyn Node) {
         // stateless nodes don't transfer state, so we default to no-op
+    }
+
+    fn get_buffer_name(&self) -> Option<&str> {
+        None
     }
 }
 
@@ -375,38 +356,36 @@ impl Node for SeqNode {
     }
 }
 
-#[derive(Clone)]
 pub struct BufRefNode {
-    id: String,
-    buffer: Vec<Frame>,
+    name: String,
 }
 
 impl BufRefNode {
-    pub(crate) fn new(id: String, buffer: Vec<Frame>) -> Self {
-        Self { id, buffer }
-    }
-
-    fn get_buffer(&self) -> Vec<Frame> {
-        self.buffer.clone()
+    pub(crate) fn new(name: String) -> Self {
+        Self { name }
     }
 }
 
 impl Node for BufRefNode {
     fn get_id(&self) -> String {
-        format!("BufRefNode {}", self.id).to_string()
+        format!("BufRefNode {}", self.name)
+    }
+
+    fn get_buffer_name(&self) -> Option<&str> {
+        Some(&self.name)
     }
 }
 
 pub struct BufReaderNode {
-    buf_ref: BufRefNode,
+    buffer_name: String,
     inputs: Vec<usize>,
     buffers: Vec<Vec<Frame>>,
 }
 
 impl BufReaderNode {
-    pub(crate) fn new(buf_ref: BufRefNode, inputs: Vec<usize>) -> Self {
+    pub(crate) fn new(buffer_name: String, inputs: Vec<usize>) -> Self {
         Self {
-            buf_ref,
+            buffer_name,
             inputs,
             buffers: vec![Vec::new(); 1],
         }
@@ -416,13 +395,19 @@ impl BufReaderNode {
 impl Node for BufReaderNode {
     fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
         render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
-        let buffer = self.buf_ref.get_buffer();
+
+        let buffer = if let Some(buffer) = arena.get_buffer(&self.buffer_name) {
+            buffer
+        } else {
+            return;
+        };
+
         let phase = self.buffers[0].as_slice();
 
         for (i, out) in outputs.iter_mut().enumerate() {
             let phase = phase[i][0];
             let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
-            *out = cubic_interpolate(buffer.as_slice(), read_pos);
+            *out = cubic_interpolate(buffer, read_pos);
         }
     }
 

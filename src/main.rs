@@ -17,10 +17,7 @@ mod container;
 use container::*;
 
 mod parser;
-use crate::{
-    nodes::Arena,
-    parser::{tokenize, Parser},
-};
+use crate::parser::{tokenize, Parser};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();

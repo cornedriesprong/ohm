@@ -1,5 +1,42 @@
-use crate::nodes::{Arena, Frame};
+use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
+use std::collections::HashMap;
+
+pub struct Arena {
+    nodes: Vec<Box<dyn Node>>,
+    buffers: HashMap<String, Vec<Frame>>,
+}
+
+impl Arena {
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            buffers: HashMap::new(),
+        }
+    }
+
+    pub fn alloc(&mut self, node: Box<dyn Node>) -> usize {
+        let id = self.nodes.len();
+        self.nodes.push(node);
+        id
+    }
+
+    pub fn get(&self, id: usize) -> &dyn Node {
+        &*self.nodes[id]
+    }
+
+    pub fn get_mut(&mut self, id: usize) -> &mut dyn Node {
+        &mut *self.nodes[id]
+    }
+
+    pub fn store_buffer(&mut self, name: String, buffer: Vec<Frame>) {
+        self.buffers.insert(name, buffer);
+    }
+
+    pub fn get_buffer(&self, name: &str) -> Option<&[Frame]> {
+        self.buffers.get(name).map(|v| v.as_slice())
+    }
+}
 
 pub(crate) struct Container {
     arena: Arena,

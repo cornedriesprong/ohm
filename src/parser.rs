@@ -1,11 +1,12 @@
+use crate::container::Arena;
 use crate::nodes::{
-    Arena, BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode,
-    GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode,
-    SubtractNode, WrapNode,
+    BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
+    LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SubtractNode,
+    WrapNode,
 };
 use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
-use std::{any::Any, collections::HashMap};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Token {
@@ -431,24 +432,16 @@ impl Parser {
             "file" => {
                 let name = self.parse_str()?;
                 let frames = get_audio_frames(&name);
-                Some(arena.alloc(Box::new(BufRefNode::new(name, frames))))
+                arena.store_buffer(name.clone(), frames);
+                Some(arena.alloc(Box::new(BufRefNode::new(name))))
             }
             "play" => {
                 let buf_ref_id = self.parse_primary(arena)?;
-
-                // Clone the buf_ref before we do any more mutable borrows of arena
-                let buf_ref = if let Some(buf_ref) =
-                    (arena.get(buf_ref_id) as &dyn Any).downcast_ref::<BufRefNode>()
-                {
-                    buf_ref.clone()
-                } else {
-                    panic!("Expected a buffer reference for 'play'");
-                };
-
+                let buffer_name = arena.get(buf_ref_id).get_buffer_name()?.to_string();
                 let phase = self
                     .parse_primary(arena)
                     .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(BufReaderNode::new(buf_ref, vec![phase]))))
+                Some(arena.alloc(Box::new(BufReaderNode::new(buffer_name, vec![phase]))))
             }
             _ => None,
         }
