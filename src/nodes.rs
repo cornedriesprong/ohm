@@ -7,7 +7,7 @@ use std::f32::consts::PI;
 pub type Frame = [f32; 2];
 
 macro_rules! define_osc_node {
-    ($name:ident, $node_name:expr, $phase_to_output:expr) => {
+    ($name:ident, $phase_to_output:expr) => {
         pub struct $name {
             inputs: Vec<usize>,
             phase: f32,
@@ -50,10 +50,6 @@ macro_rules! define_osc_node {
                 }
             }
 
-            fn get_id(&self) -> String {
-                $node_name.to_string()
-            }
-
             fn get_inputs(&self) -> &[usize] {
                 &self.inputs
             }
@@ -68,7 +64,7 @@ macro_rules! define_osc_node {
 }
 
 macro_rules! define_binary_op_node {
-    ($name:ident, $node_name:expr, $op:expr) => {
+    ($name:ident, $op:expr) => {
         pub struct $name {
             inputs: Vec<usize>,
             buffers: Vec<Vec<Frame>>,
@@ -95,10 +91,6 @@ macro_rules! define_binary_op_node {
                 for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
                     *out = $op(*l, *r);
                 }
-            }
-
-            fn get_id(&self) -> String {
-                $node_name.to_string()
             }
 
             fn get_inputs(&self) -> &[usize] {
@@ -150,56 +142,54 @@ pub(crate) trait Node: Send + Sync + Any {
     }
 }
 
-define_binary_op_node!(MixNode, "MixNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(MixNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] + rhs[0], lhs[1] + rhs[0]]
 });
 
-define_binary_op_node!(SubtractNode, "SubtractNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(SubtractNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] - rhs[0], lhs[1] - rhs[0]]
 });
 
-define_binary_op_node!(GainNode, "GainNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(GainNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] * rhs[0], lhs[1] * rhs[0]]
 });
 
-define_binary_op_node!(DivideNode, "DivideNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(DivideNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] / rhs[0], lhs[1] / rhs[0]]
 });
 
-define_binary_op_node!(WrapNode, "WrapNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(WrapNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] % rhs[0], lhs[1] % rhs[0]]
 });
 
-define_binary_op_node!(PowerNode, "PowerNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(PowerNode, |lhs: Frame, rhs: Frame| {
     [lhs[0].powf(rhs[0]), lhs[1].powf(rhs[0])]
 });
 
-define_binary_op_node!(GreaterNode, "GreaterNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(GreaterNode, |lhs: Frame, rhs: Frame| {
     [
         (lhs[0] > rhs[0]) as u32 as f32,
         (lhs[1] > rhs[0]) as u32 as f32,
     ]
 });
 
-define_binary_op_node!(LessNode, "LessNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(LessNode, |lhs: Frame, rhs: Frame| {
     [
         (lhs[0] < rhs[0]) as u32 as f32,
         (lhs[1] < rhs[0]) as u32 as f32,
     ]
 });
 
-define_binary_op_node!(EqualNode, "EqualNode", |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(EqualNode, |lhs: Frame, rhs: Frame| {
     [
         (lhs[0] == rhs[0]) as u32 as f32,
         (lhs[1] == rhs[0]) as u32 as f32,
     ]
 });
 
-define_osc_node!(RampNode, "RampNode", |phase: f32, two_pi: f32| {
-    phase / two_pi
-});
+define_osc_node!(RampNode, |phase: f32, two_pi: f32| { phase / two_pi });
 
-define_osc_node!(LFONode, "LFONode", |phase: f32, _two_pi: f32| {
+define_osc_node!(LFONode, |phase: f32, _two_pi: f32| {
     (phase.cos() + 1.0) * 0.5
 });
 
