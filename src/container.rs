@@ -36,6 +36,10 @@ impl Arena {
     pub fn get_buffer(&self, name: &str) -> Option<&[Frame]> {
         self.buffers.get(name).map(|v| v.as_slice())
     }
+
+    pub fn get_buffer_mut(&mut self, name: &str) -> Option<&mut [Frame]> {
+        self.buffers.get_mut(name).map(|v| v.as_mut_slice())
+    }
 }
 
 pub(crate) struct Container {
@@ -53,16 +57,16 @@ impl Container {
         }
     }
 
-    pub(crate) fn update_graph(&mut self, new_arena: Arena, new_root: usize) {
+    pub(crate) fn update_graph(&mut self, arena: Arena, root: usize) {
         if let Some(old_id) = self.root_node {
-            self.apply_diff(old_id, &new_arena, new_root);
+            self.apply_diff(old_id, &arena, root);
         }
-        self.arena = new_arena;
-        self.root_node = Some(new_root);
+        self.arena = arena;
+        self.root_node = Some(root);
     }
 
     #[inline(always)]
-    pub fn process_interleaved(&mut self, data: &mut [f32]) {
+    pub fn process(&mut self, data: &mut [f32]) {
         let num_frames = data.len() / 2;
 
         if self.output_buffer.len() < num_frames {

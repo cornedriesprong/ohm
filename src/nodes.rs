@@ -137,7 +137,7 @@ pub(crate) trait Node: Send + Sync + Any {
         // stateless nodes don't transfer state, so we default to no-op
     }
 
-    fn get_buffer_name(&self) -> Option<&str> {
+    fn get_buf_name(&self) -> Option<&str> {
         None
     }
 }
@@ -361,21 +361,21 @@ impl Node for BufRefNode {
         format!("BufRefNode {}", self.name)
     }
 
-    fn get_buffer_name(&self) -> Option<&str> {
+    fn get_buf_name(&self) -> Option<&str> {
         Some(&self.name)
     }
 }
 
 pub struct BufReaderNode {
-    buffer_name: String,
+    buf_name: String,
     inputs: Vec<usize>,
     buffers: Vec<Vec<Frame>>,
 }
 
 impl BufReaderNode {
-    pub(crate) fn new(buffer_name: String, inputs: Vec<usize>) -> Self {
+    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
         Self {
-            buffer_name,
+            buf_name,
             inputs,
             buffers: vec![Vec::new(); 1],
         }
@@ -386,7 +386,7 @@ impl Node for BufReaderNode {
     fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
         render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
-        let buffer = if let Some(buffer) = arena.get_buffer(&self.buffer_name) {
+        let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
             buffer
         } else {
             return;
@@ -409,18 +409,41 @@ impl Node for BufReaderNode {
 // a buf tap node is stateful in that it maintains it's own interal write position
 // which makes it usable as a delay line
 pub struct BufTapNode {
+    buf_name: String,
+    inputs: Vec<usize>,
     write_pos: usize,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl BufTapNode {
-    pub(crate) fn new() -> Self {
-        Self { write_pos: 0 }
+    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
+        Self {
+            buf_name,
+            inputs,
+            write_pos: 0,
+            buffers: vec![Vec::new(); 1],
+        }
     }
 }
 
 impl Node for BufTapNode {
-    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {
-        // TODO: read from buffer at offset
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+
+        let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
+            buffer
+        } else {
+            return;
+        };
+
+        let offset = self.buffers[0].as_slice();
+
+        for (out, offset) in outputs.iter_mut().zip(offset.iter()) {
+            let read_pos_f = self.write_pos as f32 - offset[0];
+            let buffer_len = buffer.len() as f32;
+            let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
+            *out = cubic_interpolate(&buffer, read_pos);
+        }
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -432,18 +455,39 @@ impl Node for BufTapNode {
 
 #[derive(Clone)]
 pub struct BufWriterNode {
+    buf_name: String,
+    inputs: Vec<usize>,
     write_pos: usize,
+    buffers: Vec<Vec<Frame>>,
 }
 
 impl BufWriterNode {
-    pub(crate) fn new() -> Self {
-        Self { write_pos: 0 }
+    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
+        Self {
+            buf_name,
+            inputs,
+            write_pos: 0,
+            buffers: vec![Vec::new(); 1],
+        }
     }
 }
 
 impl Node for BufWriterNode {
-    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {
-        // TODO: write to buffer
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+
+        let buffer = if let Some(buffer) = arena.get_buffer_mut(&self.buf_name) {
+            buffer
+        } else {
+            return;
+        };
+
+        let input = self.buffers[0].as_mut_slice();
+
+        for input in input.iter_mut() {
+            buffer[self.write_pos] = *input;
+            self.write_pos = (self.write_pos + 1) % buffer.len();
+        }
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {

@@ -53,7 +53,7 @@ where
     let stream = device.build_output_stream(
         config,
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            container_clone.lock().unwrap().process_interleaved(data);
+            container_clone.lock().unwrap().process(data);
         },
         err_fn,
         None,

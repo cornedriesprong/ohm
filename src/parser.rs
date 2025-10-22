@@ -1,8 +1,8 @@
 use crate::container::Arena;
 use crate::nodes::{
-    BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
-    LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SubtractNode,
-    WrapNode,
+    BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DivideNode, EqualNode,
+    FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode,
+    SampleAndHoldNode, SeqNode, SubtractNode, WrapNode,
 };
 use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
@@ -429,6 +429,15 @@ impl Parser {
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
                 ))))
             }
+            "buf" => {
+                let name = self.parse_str()?;
+                let length = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, self.sample_rate as f32));
+                let frames = vec![[0.0; 2]; length as usize];
+                arena.store_buffer(name.clone(), frames);
+                Some(arena.alloc(Box::new(BufRefNode::new(name))))
+            }
             "file" => {
                 let name = self.parse_str()?;
                 let frames = get_audio_frames(&name);
@@ -437,11 +446,27 @@ impl Parser {
             }
             "play" => {
                 let buf_ref_id = self.parse_primary(arena)?;
-                let buffer_name = arena.get(buf_ref_id).get_buffer_name()?.to_string();
+                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
                 let phase = self
                     .parse_primary(arena)
                     .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(BufReaderNode::new(buffer_name, vec![phase]))))
+                Some(arena.alloc(Box::new(BufReaderNode::new(buf_name, vec![phase]))))
+            }
+            "tap" => {
+                let buf_ref_id = self.parse_primary(arena)?;
+                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
+                let offset = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(BufTapNode::new(buf_name, vec![offset]))))
+            }
+            "rec" => {
+                let buf_ref_id = self.parse_primary(arena)?;
+                let buf_name = arena.get(buf_ref_id).get_buf_name()?.to_string();
+                let input = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(BufWriterNode::new(buf_name, vec![input]))))
             }
             _ => None,
         }
