@@ -6,7 +6,7 @@ use crate::nodes::{
 };
 use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Token {
@@ -32,8 +32,8 @@ fn constant_node(arena: &mut Arena, value: f32) -> usize {
     arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(dc(value)))))
 }
 
-pub(crate) fn tokenize(str: String) -> Vec<Token> {
-    let mut tokens = Vec::new();
+fn tokenize(str: String) -> VecDeque<Token> {
+    let mut tokens = VecDeque::new();
     let mut chars = str.chars().peekable();
 
     while let Some(&ch) = chars.peek() {
@@ -42,51 +42,51 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                 chars.next();
             }
             '\n' => {
-                tokens.push(Token::Newline);
+                tokens.push_back(Token::Newline);
                 chars.next();
             }
             '+' => {
-                tokens.push(Token::Plus);
+                tokens.push_back(Token::Plus);
                 chars.next();
             }
             '-' => {
-                tokens.push(Token::Minus);
+                tokens.push_back(Token::Minus);
                 chars.next();
             }
             '*' => {
-                tokens.push(Token::Multiply);
+                tokens.push_back(Token::Multiply);
                 chars.next();
             }
             '/' => {
-                tokens.push(Token::Divide);
+                tokens.push_back(Token::Divide);
                 chars.next();
             }
             '%' => {
-                tokens.push(Token::Modulo);
+                tokens.push_back(Token::Modulo);
                 chars.next();
             }
             '^' => {
-                tokens.push(Token::Power);
+                tokens.push_back(Token::Power);
                 chars.next();
             }
             '>' => {
-                tokens.push(Token::Greater);
+                tokens.push_back(Token::Greater);
                 chars.next();
             }
             '<' => {
-                tokens.push(Token::Less);
+                tokens.push_back(Token::Less);
                 chars.next();
             }
             '=' => {
-                tokens.push(Token::Equal);
+                tokens.push_back(Token::Equal);
                 chars.next();
             }
             '(' => {
-                tokens.push(Token::LParen);
+                tokens.push_back(Token::LParen);
                 chars.next();
             }
             ')' => {
-                tokens.push(Token::RParen);
+                tokens.push_back(Token::RParen);
                 chars.next();
             }
             '0'..='9' | '.' => {
@@ -100,7 +100,7 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                     }
                 }
                 if let Ok(num) = num_str.parse::<f32>() {
-                    tokens.push(Token::Number(num));
+                    tokens.push_back(Token::Number(num));
                 } else {
                     panic!("Invalid number: {}", num_str);
                 }
@@ -124,7 +124,7 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                     panic!("Unterminated string literal");
                 }
 
-                tokens.push(Token::String(str_content));
+                tokens.push_back(Token::String(str_content));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
                 let mut ident = String::new();
@@ -136,27 +136,27 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
                         break;
                     }
                 }
-                tokens.push(Token::Identifier(ident));
+                tokens.push_back(Token::Identifier(ident));
             }
             _ => panic!("Unrecognized character: {}", ch),
         }
     }
 
-    tokens.push(Token::Eof);
+    tokens.push_back(Token::Eof);
     tokens
 }
 
 pub(crate) struct Parser {
-    tokens: Vec<Token>,
+    tokens: VecDeque<Token>,
     pos: usize,
     env: HashMap<String, usize>,
     sample_rate: u32,
 }
 
 impl Parser {
-    pub(crate) fn new(tokens: Vec<Token>, sample_rate: u32) -> Self {
+    pub(crate) fn new(src: String, sample_rate: u32) -> Self {
         return Self {
-            tokens,
+            tokens: tokenize(src),
             pos: 0,
             env: HashMap::new(),
             sample_rate,

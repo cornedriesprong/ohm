@@ -17,7 +17,7 @@ mod container;
 use container::*;
 
 mod parser;
-use crate::parser::{tokenize, Parser};
+use crate::parser::Parser;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -63,8 +63,7 @@ where
 
     let update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
-        let tokens = tokenize(src);
-        let mut parser = Parser::new(tokens, config.sample_rate.0);
+        let mut parser = Parser::new(src, config.sample_rate.0);
         let mut arena = Arena::new();
 
         match parser.parse(&mut arena) {
