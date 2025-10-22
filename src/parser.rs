@@ -173,8 +173,8 @@ impl Parser {
         tok
     }
 
-    pub(crate) fn parse(&mut self, arena: &mut Arena) -> Option<usize> {
-        let mut last_expr = None;
+    pub(crate) fn parse(mut self, arena: &mut Arena) -> Vec<usize> {
+        let mut top_level_expressions = Vec::new();
 
         loop {
             while matches!(self.peek(), Token::Newline) {
@@ -185,14 +185,16 @@ impl Parser {
                 break;
             }
 
-            last_expr = self.parse_statement(arena);
+            if let Some(expr) = self.parse_statement(arena) {
+                top_level_expressions.push(expr);
+            }
 
             while matches!(self.peek(), Token::Newline) {
                 self.consume();
             }
         }
 
-        last_expr
+        top_level_expressions
     }
 
     fn parse_statement(&mut self, arena: &mut Arena) -> Option<usize> {
@@ -205,7 +207,7 @@ impl Parser {
                 self.consume();
                 if let Some(expr) = self.parse_expr(arena, 0) {
                     self.env.insert(name, expr);
-                    return Some(expr);
+                    return None;
                 }
             }
 

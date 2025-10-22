@@ -17,7 +17,7 @@ mod container;
 use container::*;
 
 mod parser;
-use crate::parser::Parser;
+use crate::{nodes::MixNode, parser::Parser};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -63,17 +63,22 @@ where
 
     let update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
-        let mut parser = Parser::new(src, config.sample_rate.0);
+        let parser = Parser::new(src, config.sample_rate.0);
         let mut arena = Arena::new();
-
-        match parser.parse(&mut arena) {
-            Some(root_id) => {
-                let mut guard = container.lock().unwrap();
-                guard.update_graph(arena, root_id);
-                Ok(())
-            }
-            None => Err(anyhow::anyhow!("Parsing error")),
+        let top_level_expressions = parser.parse(&mut arena);
+        if top_level_expressions.is_empty() {
+            return Err(anyhow::anyhow!("Parsing error"));
         }
+
+        let mut guard = container.lock().unwrap();
+
+        let mut root = top_level_expressions[0];
+        for expr in top_level_expressions.iter().skip(1) {
+            root = arena.alloc(Box::new(MixNode::new(vec![root, *expr])));
+        }
+
+        guard.update_graph(arena, root);
+        Ok(())
     };
 
     update_audio_graph(Path::new(filename))?;
