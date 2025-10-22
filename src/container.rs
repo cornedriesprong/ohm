@@ -1,24 +1,27 @@
-use crate::nodes::{Frame, Node};
+use crate::nodes::{Arena, Frame};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 
 pub(crate) struct Container {
-    root: Option<Box<dyn Node>>,
+    arena: Arena,
+    root_node: Option<usize>,
     output_buffer: Vec<Frame>,
 }
 
 impl Container {
     pub(crate) fn new() -> Self {
         Self {
-            root: None,
+            arena: Arena::new(),
+            root_node: None,
             output_buffer: Vec::new(),
         }
     }
 
-    pub(crate) fn update_graph(&mut self, mut new: Box<dyn Node>) {
-        if let Some(ref old_root) = self.root {
-            self.apply_diff(&**old_root, &mut *new);
+    pub(crate) fn update_graph(&mut self, new_arena: Arena, new_root: usize) {
+        if let Some(old_id) = self.root_node {
+            self.apply_diff(old_id, &new_arena, new_root);
         }
-        self.root = Some(new);
+        self.arena = new_arena;
+        self.root_node = Some(new_root);
     }
 
     #[inline(always)]
@@ -29,9 +32,15 @@ impl Container {
             self.output_buffer.resize(num_frames, [0.0; 2]);
         }
 
-        if let Some(root) = &mut self.root {
+        if let Some(root_id) = self.root_node {
             let output_chunk = &mut self.output_buffer[..num_frames];
-            root.process(output_chunk);
+
+            unsafe {
+                let arena_ptr = &mut self.arena as *mut Arena;
+                (*arena_ptr)
+                    .get_mut(root_id)
+                    .process(&mut *arena_ptr, output_chunk);
+            }
 
             scale_buffer(output_chunk, 0.5);
             soft_limit_poly(output_chunk);
@@ -46,15 +55,22 @@ impl Container {
         }
     }
 
-    fn apply_diff(&self, old: &dyn Node, new: &mut dyn Node) {
-        if old.get_id() == new.get_id() {
-            new.transfer_state(old);
+    fn apply_diff(&self, old_id: usize, arena: &Arena, new_id: usize) {
+        let old_node = self.arena.get(old_id);
+        let new_node = arena.get(new_id);
 
-            let old_inputs = old.get_inputs();
-            let new_inputs = new.get_inputs_mut();
+        if old_node.get_id() == new_node.get_id() {
+            // transfer state from old to new
+            unsafe {
+                let arena_ptr = arena as *const Arena as *mut Arena;
+                (*arena_ptr).get_mut(new_id).transfer_state(old_node);
+            }
 
-            for (o, n) in old_inputs.iter().zip(new_inputs.iter_mut()) {
-                self.apply_diff(&**o, &mut **n);
+            let old_inputs = old_node.get_inputs();
+            let new_inputs = new_node.get_inputs();
+
+            for (&old, &new) in old_inputs.iter().zip(new_inputs.iter()) {
+                self.apply_diff(old, arena, new);
             }
         }
     }

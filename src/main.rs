@@ -17,7 +17,10 @@ mod container;
 use container::*;
 
 mod parser;
-use crate::parser::{tokenize, Parser};
+use crate::{
+    nodes::Arena,
+    parser::{tokenize, Parser},
+};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -65,11 +68,12 @@ where
         let src = fs::read_to_string(path)?;
         let tokens = tokenize(src);
         let mut parser = Parser::new(tokens, config.sample_rate.0);
+        let mut arena = Arena::new();
 
-        match parser.parse() {
-            Some(expr) => {
+        match parser.parse(&mut arena) {
+            Some(root_id) => {
                 let mut guard = container.lock().unwrap();
-                guard.update_graph(expr);
+                guard.update_graph(arena, root_id);
                 Ok(())
             }
             None => Err(anyhow::anyhow!("Parsing error")),

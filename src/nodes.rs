@@ -5,18 +5,41 @@ use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
 
+pub struct Arena {
+    nodes: Vec<Box<dyn Node>>,
+}
+
+impl Arena {
+    pub fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+
+    pub fn alloc(&mut self, node: Box<dyn Node>) -> usize {
+        let id = self.nodes.len();
+        self.nodes.push(node);
+        id
+    }
+
+    pub fn get(&self, id: usize) -> &dyn Node {
+        &*self.nodes[id]
+    }
+
+    pub fn get_mut(&mut self, id: usize) -> &mut dyn Node {
+        &mut *self.nodes[id]
+    }
+}
+
 macro_rules! define_osc_node {
     ($name:ident, $node_name:expr, $phase_to_output:expr) => {
-        #[derive(Clone)]
         pub struct $name {
-            inputs: Vec<Box<dyn Node>>,
+            inputs: Vec<usize>,
             phase: f32,
             sample_rate: u32,
             buffers: Vec<Vec<Frame>>,
         }
 
         impl $name {
-            pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self {
+            pub(crate) fn new(inputs: Vec<usize>, sample_rate: u32) -> Self {
                 let num_inputs = inputs.len();
                 Self {
                     inputs,
@@ -29,8 +52,8 @@ macro_rules! define_osc_node {
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, outputs: &mut [Frame]) {
-                render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+            fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+                render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
                 let freq_input = &self.buffers[0];
                 let sample_rate_f32 = self.sample_rate as f32;
@@ -54,16 +77,8 @@ macro_rules! define_osc_node {
                 $node_name.to_string()
             }
 
-            fn clone_box(&self) -> Box<dyn Node> {
-                Box::new(self.clone())
-            }
-
-            fn get_inputs(&self) -> &[Box<dyn Node>] {
+            fn get_inputs(&self) -> &[usize] {
                 &self.inputs
-            }
-
-            fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-                &mut self.inputs
             }
 
             fn transfer_state(&mut self, old: &dyn Node) {
@@ -77,14 +92,13 @@ macro_rules! define_osc_node {
 
 macro_rules! define_binary_op_node {
     ($name:ident, $node_name:expr, $op:expr) => {
-        #[derive(Clone)]
         pub struct $name {
-            inputs: Vec<Box<dyn Node>>,
+            inputs: Vec<usize>,
             buffers: Vec<Vec<Frame>>,
         }
 
         impl $name {
-            pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+            pub(crate) fn new(inputs: Vec<usize>) -> Self {
                 let num_inputs = inputs.len();
                 Self {
                     inputs,
@@ -95,8 +109,8 @@ macro_rules! define_binary_op_node {
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, outputs: &mut [Frame]) {
-                render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+            fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+                render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
                 let lhs = &self.buffers[0];
                 let rhs = &self.buffers[1];
@@ -110,16 +124,8 @@ macro_rules! define_binary_op_node {
                 $node_name.to_string()
             }
 
-            fn clone_box(&self) -> Box<dyn Node> {
-                Box::new(self.clone())
-            }
-
-            fn get_inputs(&self) -> &[Box<dyn Node>] {
+            fn get_inputs(&self) -> &[usize] {
                 &self.inputs
-            }
-
-            fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-                &mut self.inputs
             }
         }
     };
@@ -127,36 +133,40 @@ macro_rules! define_binary_op_node {
 
 // helper function to render node inputs
 #[inline(always)]
-fn render_inputs(inputs: &mut [Box<dyn Node>], buffers: &mut Vec<Vec<Frame>>, len: usize) {
+fn render_inputs(arena: &mut Arena, inputs: &[usize], buffers: &mut Vec<Vec<Frame>>, len: usize) {
     if buffers.len() != inputs.len() {
         buffers.resize_with(inputs.len(), Vec::new);
     }
 
-    for (i, input_node) in inputs.iter_mut().enumerate() {
+    for (i, &input_id) in inputs.iter().enumerate() {
         if buffers[i].len() < len {
             buffers[i].resize(len, [0.0; 2]);
         }
-        input_node.process(&mut buffers[i][..len]);
+
+        unsafe {
+            let arena_ptr = arena as *mut Arena;
+            (*arena_ptr)
+                .get_mut(input_id)
+                .process(&mut *arena_ptr, &mut buffers[i][..len]);
+        }
     }
 }
 
 pub(crate) trait Node: Send + Sync + Any {
     #[inline(always)]
-    fn process(&mut self, _outputs: &mut [Frame]) {}
+    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {}
 
-    fn get_id(&self) -> String;
+    fn get_id(&self) -> String {
+        std::any::type_name::<Self>().to_string()
+    }
 
-    fn clone_box(&self) -> Box<dyn Node>;
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
+    fn get_inputs(&self) -> &[usize] {
         &[]
     }
 
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut []
+    fn transfer_state(&mut self, _old: &dyn Node) {
+        // stateless nodes don't transfer state, so we default to no-op
     }
-
-    fn transfer_state(&mut self, _old: &dyn Node) {}
 }
 
 define_binary_op_node!(MixNode, "MixNode", |lhs: Frame, rhs: Frame| {
@@ -212,16 +222,15 @@ define_osc_node!(LFONode, "LFONode", |phase: f32, _two_pi: f32| {
     (phase.cos() + 1.0) * 0.5
 });
 
-#[derive(Clone)]
 pub struct SampleAndHoldNode {
-    inputs: Vec<Box<dyn Node>>,
+    inputs: Vec<usize>,
     value: Frame,
     prev: f32,
     buffers: Vec<Vec<Frame>>,
 }
 
 impl SampleAndHoldNode {
-    pub(crate) fn new(inputs: Vec<Box<dyn Node>>, sample_rate: u32) -> Self {
+    pub(crate) fn new(inputs: Vec<usize>, sample_rate: u32) -> Self {
         _ = sample_rate;
         Self {
             inputs,
@@ -233,8 +242,8 @@ impl SampleAndHoldNode {
 }
 
 impl Node for SampleAndHoldNode {
-    fn process(&mut self, outputs: &mut [Frame]) {
-        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
         let signal = &self.buffers[0];
         let ramp = &self.buffers[1];
@@ -249,20 +258,8 @@ impl Node for SampleAndHoldNode {
         }
     }
 
-    fn get_id(&self) -> String {
-        "SampleAndHoldNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
+    fn get_inputs(&self) -> &[usize] {
         &self.inputs
-    }
-
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut self.inputs
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -273,9 +270,8 @@ impl Node for SampleAndHoldNode {
     }
 }
 
-#[derive(Clone)]
 pub struct FunDSPNode {
-    inputs: Vec<Box<dyn Node>>,
+    inputs: Vec<usize>,
     node: Box<dyn AudioUnit>,
     is_stereo: bool,
     input_buffer: Vec<f32>,
@@ -283,7 +279,7 @@ pub struct FunDSPNode {
 }
 
 impl FunDSPNode {
-    pub fn mono(inputs: Vec<Box<dyn Node>>, node: Box<dyn AudioUnit>) -> Self {
+    pub fn mono(inputs: Vec<usize>, node: Box<dyn AudioUnit>) -> Self {
         let num_inputs = inputs.len();
         let num_audio_inputs = node.inputs();
         Self {
@@ -295,7 +291,7 @@ impl FunDSPNode {
         }
     }
 
-    pub fn stereo(inputs: Vec<Box<dyn Node>>, node: Box<dyn AudioUnit>) -> Self {
+    pub fn stereo(inputs: Vec<usize>, node: Box<dyn AudioUnit>) -> Self {
         let num_inputs = inputs.len();
         let num_audio_inputs = node.inputs();
         Self {
@@ -310,9 +306,9 @@ impl FunDSPNode {
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    fn process(&mut self, outputs: &mut [Frame]) {
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
         let chunk_size = outputs.len();
-        render_inputs(&mut self.inputs, &mut self.buffers, chunk_size);
+        render_inputs(arena, &self.inputs, &mut self.buffers, chunk_size);
 
         let num_inputs = self.node.inputs();
 
@@ -339,37 +335,18 @@ impl Node for FunDSPNode {
         }
     }
 
-    fn get_id(&self) -> String {
-        "FunDSPNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
+    fn get_inputs(&self) -> &[usize] {
         &self.inputs
     }
-
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut self.inputs
-    }
 }
 
-impl Clone for Box<dyn Node> {
-    fn clone(&self) -> Self {
-        self.clone_box()
-    }
-}
-
-#[derive(Clone)]
 pub struct SeqNode {
-    inputs: Vec<Box<dyn Node>>,
+    inputs: Vec<usize>,
     buffers: Vec<Vec<Frame>>,
 }
 
 impl SeqNode {
-    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+    pub(crate) fn new(inputs: Vec<usize>) -> Self {
         let num_inputs = inputs.len();
         Self {
             inputs,
@@ -380,8 +357,8 @@ impl SeqNode {
 
 impl Node for SeqNode {
     #[inline(always)]
-    fn process(&mut self, outputs: &mut [Frame]) {
-        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
         let num_steps = self.buffers.len() - 1;
         let ramp_input = &self.buffers[0];
@@ -393,20 +370,8 @@ impl Node for SeqNode {
         }
     }
 
-    fn get_id(&self) -> String {
-        "SeqNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
+    fn get_inputs(&self) -> &[usize] {
         &self.inputs
-    }
-
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut self.inputs
     }
 }
 
@@ -430,21 +395,16 @@ impl Node for BufRefNode {
     fn get_id(&self) -> String {
         format!("BufRefNode {}", self.id).to_string()
     }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
 }
 
-#[derive(Clone)]
 pub struct BufReaderNode {
     buf_ref: BufRefNode,
-    inputs: Vec<Box<dyn Node>>,
+    inputs: Vec<usize>,
     buffers: Vec<Vec<Frame>>,
 }
 
 impl BufReaderNode {
-    pub(crate) fn new(buf_ref: BufRefNode, inputs: Vec<Box<dyn Node>>) -> Self {
+    pub(crate) fn new(buf_ref: BufRefNode, inputs: Vec<usize>) -> Self {
         Self {
             buf_ref,
             inputs,
@@ -454,8 +414,8 @@ impl BufReaderNode {
 }
 
 impl Node for BufReaderNode {
-    fn process(&mut self, outputs: &mut [Frame]) {
-        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
         let buffer = self.buf_ref.get_buffer();
         let phase = self.buffers[0].as_slice();
 
@@ -466,18 +426,13 @@ impl Node for BufReaderNode {
         }
     }
 
-    fn get_id(&self) -> String {
-        "BufReaderNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
+    fn get_inputs(&self) -> &[usize] {
+        &self.inputs
     }
 }
 
 // a buf tap node is stateful in that it maintains it's own interal write position
 // which makes it usable as a delay line
-#[derive(Clone)]
 pub struct BufTapNode {
     write_pos: usize,
 }
@@ -489,16 +444,8 @@ impl BufTapNode {
 }
 
 impl Node for BufTapNode {
-    fn process(&mut self, _outputs: &mut [Frame]) {
+    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {
         // TODO: read from buffer at offset
-    }
-
-    fn get_id(&self) -> String {
-        "BufTapNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -520,16 +467,8 @@ impl BufWriterNode {
 }
 
 impl Node for BufWriterNode {
-    fn process(&mut self, _outputs: &mut [Frame]) {
+    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {
         // TODO: write to buffer
-    }
-
-    fn get_id(&self) -> String {
-        "BufWriterNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -540,9 +479,8 @@ impl Node for BufWriterNode {
 }
 
 // delay line
-#[derive(Clone)]
 pub(crate) struct DelayNode {
-    inputs: Vec<Box<dyn Node>>,
+    inputs: Vec<usize>,
     buffer: [Frame; Self::BUFFER_SIZE],
     write_pos: usize,
     buffers: Vec<Vec<Frame>>,
@@ -551,7 +489,7 @@ pub(crate) struct DelayNode {
 impl DelayNode {
     pub const BUFFER_SIZE: usize = 48000;
 
-    pub(crate) fn new(inputs: Vec<Box<dyn Node>>) -> Self {
+    pub(crate) fn new(inputs: Vec<usize>) -> Self {
         let num_inputs = inputs.len();
         Self {
             inputs,
@@ -564,8 +502,8 @@ impl DelayNode {
 
 impl Node for DelayNode {
     #[inline(always)]
-    fn process(&mut self, outputs: &mut [Frame]) {
-        render_inputs(&mut self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
 
         let signal = &self.buffers[0];
         let delay_input = &self.buffers[1];
@@ -587,20 +525,8 @@ impl Node for DelayNode {
         }
     }
 
-    fn get_id(&self) -> String {
-        "DelayNode".to_string()
-    }
-
-    fn clone_box(&self) -> Box<dyn Node> {
-        Box::new(self.clone())
-    }
-
-    fn get_inputs(&self) -> &[Box<dyn Node>] {
+    fn get_inputs(&self) -> &[usize] {
         &self.inputs
-    }
-
-    fn get_inputs_mut(&mut self) -> &mut [Box<dyn Node>] {
-        &mut self.inputs
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {

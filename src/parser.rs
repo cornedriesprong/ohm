@@ -1,6 +1,6 @@
 use crate::nodes::{
-    BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
-    LFONode, LessNode, MixNode, Node, PowerNode, RampNode, SampleAndHoldNode, SeqNode,
+    Arena, BufReaderNode, BufRefNode, DelayNode, DivideNode, EqualNode, FunDSPNode, GainNode,
+    GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode,
     SubtractNode, WrapNode,
 };
 use crate::utils::get_audio_frames;
@@ -27,8 +27,8 @@ pub(crate) enum Token {
     Eof,
 }
 
-fn constant_node(value: f32) -> Box<dyn Node> {
-    Box::new(FunDSPNode::mono(vec![], Box::new(dc(value))))
+fn constant_node(arena: &mut Arena, value: f32) -> usize {
+    arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(dc(value)))))
 }
 
 pub(crate) fn tokenize(str: String) -> Vec<Token> {
@@ -148,7 +148,7 @@ pub(crate) fn tokenize(str: String) -> Vec<Token> {
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     pos: usize,
-    env: HashMap<String, Box<dyn Node>>,
+    env: HashMap<String, usize>,
     sample_rate: u32,
 }
 
@@ -172,7 +172,7 @@ impl Parser {
         tok
     }
 
-    pub(crate) fn parse(&mut self) -> Option<Box<dyn Node>> {
+    pub(crate) fn parse(&mut self, arena: &mut Arena) -> Option<usize> {
         let mut last_expr = None;
 
         loop {
@@ -184,7 +184,7 @@ impl Parser {
                 break;
             }
 
-            last_expr = self.parse_statement();
+            last_expr = self.parse_statement(arena);
 
             while matches!(self.peek(), Token::Newline) {
                 self.consume();
@@ -194,7 +194,7 @@ impl Parser {
         last_expr
     }
 
-    fn parse_statement(&mut self) -> Option<Box<dyn Node>> {
+    fn parse_statement(&mut self, arena: &mut Arena) -> Option<usize> {
         if let Token::Identifier(name) = self.peek() {
             let name = name.clone();
             let prev_pos = self.pos;
@@ -202,8 +202,8 @@ impl Parser {
 
             if matches!(self.peek(), Token::Equal) {
                 self.consume();
-                if let Some(expr) = self.parse_expr(0) {
-                    self.env.insert(name, expr.clone());
+                if let Some(expr) = self.parse_expr(arena, 0) {
+                    self.env.insert(name, expr);
                     return Some(expr);
                 }
             }
@@ -211,11 +211,11 @@ impl Parser {
             self.pos = prev_pos;
         }
 
-        self.parse_expr(0)
+        self.parse_expr(arena, 0)
     }
 
-    fn parse_expr(&mut self, min_prec: u8) -> Option<Box<dyn Node>> {
-        let mut lhs = self.parse_primary()?;
+    fn parse_expr(&mut self, arena: &mut Arena, min_prec: u8) -> Option<usize> {
+        let mut lhs = self.parse_primary(arena)?;
 
         while let Some(op_prec) = self.get_precedence(self.peek()) {
             if op_prec < min_prec {
@@ -223,18 +223,18 @@ impl Parser {
             }
 
             let op = self.consume();
-            let rhs = self.parse_expr(op_prec + 1)?;
+            let rhs = self.parse_expr(arena, op_prec + 1)?;
 
             lhs = match op {
-                Token::Plus => Box::new(MixNode::new(vec![lhs, rhs])),
-                Token::Minus => Box::new(SubtractNode::new(vec![lhs, rhs])),
-                Token::Multiply => Box::new(GainNode::new(vec![lhs, rhs])),
-                Token::Divide => Box::new(DivideNode::new(vec![lhs, rhs])),
-                Token::Modulo => Box::new(WrapNode::new(vec![lhs, rhs])),
-                Token::Power => Box::new(PowerNode::new(vec![lhs, rhs])),
-                Token::Greater => Box::new(GreaterNode::new(vec![lhs, rhs])),
-                Token::Less => Box::new(LessNode::new(vec![lhs, rhs])),
-                Token::Equal => Box::new(EqualNode::new(vec![lhs, rhs])),
+                Token::Plus => arena.alloc(Box::new(MixNode::new(vec![lhs, rhs]))),
+                Token::Minus => arena.alloc(Box::new(SubtractNode::new(vec![lhs, rhs]))),
+                Token::Multiply => arena.alloc(Box::new(GainNode::new(vec![lhs, rhs]))),
+                Token::Divide => arena.alloc(Box::new(DivideNode::new(vec![lhs, rhs]))),
+                Token::Modulo => arena.alloc(Box::new(WrapNode::new(vec![lhs, rhs]))),
+                Token::Power => arena.alloc(Box::new(PowerNode::new(vec![lhs, rhs]))),
+                Token::Greater => arena.alloc(Box::new(GreaterNode::new(vec![lhs, rhs]))),
+                Token::Less => arena.alloc(Box::new(LessNode::new(vec![lhs, rhs]))),
+                Token::Equal => arena.alloc(Box::new(EqualNode::new(vec![lhs, rhs]))),
                 _ => lhs,
             };
         }
@@ -242,20 +242,22 @@ impl Parser {
         Some(lhs)
     }
 
-    fn parse_primary(&mut self) -> Option<Box<dyn Node>> {
+    fn parse_primary(&mut self, arena: &mut Arena) -> Option<usize> {
         match self.consume() {
-            Token::Number(num) => Some(Box::new(FunDSPNode::mono(vec![], Box::new(dc(num))))),
+            Token::Number(num) => {
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(dc(num))))))
+            }
             Token::Identifier(name) => {
-                if let Some(op) = self.parse_node(&name) {
+                if let Some(op) = self.parse_node(arena, &name) {
                     Some(op)
-                } else if let Some(node) = self.env.get(&name) {
-                    Some(node.clone())
+                } else if let Some(&node_id) = self.env.get(&name) {
+                    Some(node_id)
                 } else {
                     panic!("Undefined variable: {}", name);
                 }
             }
             Token::LParen => {
-                let expr = self.parse_expr(0)?;
+                let expr = self.parse_expr(arena, 0)?;
                 match self.consume() {
                     Token::RParen => Some(expr),
                     _ => panic!("Expected closing parenthesis"),
@@ -272,133 +274,181 @@ impl Parser {
         }
     }
 
-    fn parse_node(&mut self, name: &str) -> Option<Box<dyn Node>> {
+    fn parse_node(&mut self, arena: &mut Arena, name: &str) -> Option<usize> {
         match name {
             "ramp" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(1.0));
-                Some(Box::new(RampNode::new(vec![freq], self.sample_rate)))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 1.0));
+                Some(arena.alloc(Box::new(RampNode::new(vec![freq], self.sample_rate))))
             }
             "sin" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
-                Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(sine()))))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 100.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(sine())))))
             }
             "saw" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
-                Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw()))))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 100.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw())))))
             }
             "sqr" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
-                Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(square()))))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 100.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(square())))))
             }
             "tri" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(100.0));
-                Some(Box::new(FunDSPNode::mono(vec![freq], Box::new(triangle()))))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 100.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(triangle())))))
             }
-            "noise" => Some(Box::new(FunDSPNode::mono(vec![], Box::new(noise())))),
+            "noise" => Some(arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(noise()))))),
             "clip" => {
                 let input = self
-                    .parse_primary()
-                    .unwrap_or_else(|| Box::new(FunDSPNode::mono(vec![], Box::new(dc(0.0)))));
-                Some(Box::new(FunDSPNode::mono(vec![input], Box::new(clip()))))
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![input], Box::new(clip())))))
             }
             "lfo" => {
-                let freq = self.parse_primary().unwrap_or_else(|| constant_node(1.0));
-                Some(Box::new(LFONode::new(vec![freq], self.sample_rate)))
+                let freq = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 1.0));
+                Some(arena.alloc(Box::new(LFONode::new(vec![freq], self.sample_rate))))
             }
             "sh" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                let trig = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                Some(Box::new(SampleAndHoldNode::new(
+                let input = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                let trig = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(SampleAndHoldNode::new(
                     vec![input, trig],
                     self.sample_rate,
-                )))
+                ))))
             }
             "pan" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                let pan = self.parse_primary().unwrap_or_else(|| constant_node(0.5));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                let pan = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.5));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, pan],
                     Box::new(panner()),
-                )))
+                ))))
             }
             "seq" => {
                 let mut args = Vec::new();
-                while let Some(arg) = self.parse_primary() {
+                while let Some(arg) = self.parse_primary(arena) {
                     args.push(arg);
                 }
-                Some(Box::new(SeqNode::new(args)))
+                Some(arena.alloc(Box::new(SeqNode::new(args))))
             }
             "onepole" => {
-                let input = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(20.0));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                let cutoff = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 20.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, cutoff],
                     Box::new(lowpole()),
-                )))
+                ))))
             }
             "lp" => {
-                let input = self.parse_primary()?;
-                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
-                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self.parse_primary(arena)?;
+                let cutoff = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                let resonance = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.707));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(lowpass()),
-                )))
+                ))))
             }
             "bp" => {
-                let input = self.parse_primary()?;
-                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
-                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self.parse_primary(arena)?;
+                let cutoff = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                let resonance = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.707));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(bandpass()),
-                )))
+                ))))
             }
             "hp" => {
-                let input = self.parse_primary()?;
-                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
-                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.707));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self.parse_primary(arena)?;
+                let cutoff = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                let resonance = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.707));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(highpass()),
-                )))
+                ))))
             }
             "moog" => {
-                let input = self.parse_primary()?;
-                let cutoff = self.parse_primary().unwrap_or_else(|| constant_node(500.0));
-                let resonance = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                Some(Box::new(FunDSPNode::mono(
+                let input = self.parse_primary(arena)?;
+                let cutoff = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                let resonance = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(FunDSPNode::mono(
                     vec![input, cutoff, resonance],
                     Box::new(moog()),
-                )))
+                ))))
             }
             "delay" => {
-                let input = self.parse_primary()?;
+                let input = self.parse_primary(arena)?;
                 let delay_time = self
-                    .parse_primary()
-                    .unwrap_or_else(|| constant_node(1000.0));
-                Some(Box::new(DelayNode::new(vec![input, delay_time])))
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 1000.0));
+                Some(arena.alloc(Box::new(DelayNode::new(vec![input, delay_time]))))
             }
             "reverb" => {
-                let input = self.parse_primary()?;
-                Some(Box::new(FunDSPNode::stereo(
+                let input = self.parse_primary(arena)?;
+                Some(arena.alloc(Box::new(FunDSPNode::stereo(
                     vec![input],
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
-                )))
+                ))))
             }
             "file" => {
                 let name = self.parse_str()?;
                 let frames = get_audio_frames(&name);
-                Some(Box::new(BufRefNode::new(name, frames)))
+                Some(arena.alloc(Box::new(BufRefNode::new(name, frames))))
             }
             "play" => {
-                let buf_ref = self.parse_primary()?;
-                if let Some(buf_ref) = (buf_ref.as_ref() as &dyn Any).downcast_ref::<BufRefNode>() {
-                    let phase = self.parse_primary().unwrap_or_else(|| constant_node(0.0));
-                    Some(Box::new(BufReaderNode::new(buf_ref.clone(), vec![phase])))
+                let buf_ref_id = self.parse_primary(arena)?;
+
+                // Clone the buf_ref before we do any more mutable borrows of arena
+                let buf_ref = if let Some(buf_ref) =
+                    (arena.get(buf_ref_id) as &dyn Any).downcast_ref::<BufRefNode>()
+                {
+                    buf_ref.clone()
                 } else {
                     panic!("Expected a buffer reference for 'play'");
-                }
+                };
+
+                let phase = self
+                    .parse_primary(arena)
+                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                Some(arena.alloc(Box::new(BufReaderNode::new(buf_ref, vec![phase]))))
             }
             _ => None,
         }
