@@ -29,8 +29,8 @@ macro_rules! define_osc_node {
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-                render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+            fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+                render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
                 let freq_input = &self.buffers[0];
                 let sample_rate_f32 = self.sample_rate as f32;
@@ -38,7 +38,7 @@ macro_rules! define_osc_node {
                 let two_pi = 2.0 * PI;
                 let phase_increment_scale = two_pi / sample_rate_f32;
 
-                for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
+                for (out, freq_frame) in out.iter_mut().zip(freq_input.iter()) {
                     let freq = freq_frame[0].clamp(0.0, max_freq);
 
                     self.phase += freq * phase_increment_scale;
@@ -82,13 +82,13 @@ macro_rules! define_binary_op_node {
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-                render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+            fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+                render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
                 let lhs = &self.buffers[0];
                 let rhs = &self.buffers[1];
 
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                for (out, (l, r)) in out.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
                     *out = $op(*l, *r);
                 }
             }
@@ -123,7 +123,7 @@ fn render_inputs(arena: &mut Arena, inputs: &[usize], buffers: &mut Vec<Vec<Fram
 
 pub(crate) trait Node: Send + Sync + Any {
     #[inline(always)]
-    fn process(&mut self, _arena: &mut Arena, _outputs: &mut [Frame]) {}
+    fn process(&mut self, _arena: &mut Arena, _out: &mut [Frame]) {}
 
     fn get_id(&self) -> String {
         std::any::type_name::<Self>().to_string()
@@ -142,7 +142,7 @@ pub(crate) trait Node: Send + Sync + Any {
     }
 }
 
-define_binary_op_node!(MixNode, |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(AddNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] + rhs[0], lhs[1] + rhs[0]]
 });
 
@@ -213,19 +213,19 @@ impl SampleAndHoldNode {
 }
 
 impl Node for SampleAndHoldNode {
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let signal = &self.buffers[0];
         let ramp = &self.buffers[1];
 
-        for i in 0..outputs.len() {
+        for i in 0..out.len() {
             let ramp_val = ramp[i][0];
             if (ramp_val - self.prev).abs() > 0.5 {
                 self.value = signal[i];
             }
             self.prev = ramp_val;
-            outputs[i] = self.value;
+            out[i] = self.value;
         }
     }
 
@@ -277,8 +277,8 @@ impl FunDSPNode {
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        let chunk_size = outputs.len();
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        let chunk_size = out.len();
         render_inputs(arena, &self.inputs, &mut self.buffers, chunk_size);
 
         let num_inputs = self.node.inputs();
@@ -291,7 +291,7 @@ impl Node for FunDSPNode {
 
                 let mut output_sample = [0.0; 2];
                 self.node.tick(&self.input_buffer, &mut output_sample);
-                outputs[i] = output_sample;
+                out[i] = output_sample;
             }
         } else {
             for i in 0..chunk_size {
@@ -301,8 +301,51 @@ impl Node for FunDSPNode {
 
                 let mut output_sample = [0.0; 1];
                 self.node.tick(&self.input_buffer, &mut output_sample);
-                outputs[i] = [output_sample[0]; 2];
+                out[i] = [output_sample[0]; 2];
             }
+        }
+    }
+
+    fn get_inputs(&self) -> &[usize] {
+        &self.inputs
+    }
+}
+
+pub struct MixNode {
+    inputs: Vec<usize>,
+    num_inputs: usize,
+    buffers: Vec<Vec<Frame>>,
+}
+
+impl MixNode {
+    pub(crate) fn new(inputs: Vec<usize>) -> Self {
+        let num_inputs = inputs.len();
+        Self {
+            inputs,
+            num_inputs,
+            buffers: vec![Vec::new(); num_inputs],
+        }
+    }
+}
+
+impl Node for MixNode {
+    #[inline(always)]
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        // return silence if there are no inputs
+        if self.num_inputs == 0 {
+            return;
+        }
+
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
+
+        for (i, out) in out.iter_mut().enumerate() {
+            for j in 0..self.num_inputs {
+                out[0] += self.buffers[j][i][0];
+                out[1] += self.buffers[j][i][1];
+            }
+
+            out[0] /= self.num_inputs as f32;
+            out[1] /= self.num_inputs as f32;
         }
     }
 
@@ -328,13 +371,13 @@ impl SeqNode {
 
 impl Node for SeqNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let num_steps = self.buffers.len() - 1;
         let ramp_input = &self.buffers[0];
 
-        for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate() {
+        for (i, (out, ramp_frame)) in out.iter_mut().zip(ramp_input.iter()).enumerate() {
             let ramp = ramp_frame[0];
             let step = (ramp * num_steps as f32).floor() as usize;
             *out = self.buffers[step + 1][i];
@@ -383,8 +426,8 @@ impl BufReaderNode {
 }
 
 impl Node for BufReaderNode {
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
             buffer
@@ -394,7 +437,7 @@ impl Node for BufReaderNode {
 
         let phase = self.buffers[0].as_slice();
 
-        for (i, out) in outputs.iter_mut().enumerate() {
+        for (i, out) in out.iter_mut().enumerate() {
             let phase = phase[i][0];
             let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
             *out = cubic_interpolate(buffer, read_pos);
@@ -427,8 +470,8 @@ impl BufTapNode {
 }
 
 impl Node for BufTapNode {
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
             buffer
@@ -438,7 +481,7 @@ impl Node for BufTapNode {
 
         let offset = self.buffers[0].as_slice();
 
-        for (out, offset) in outputs.iter_mut().zip(offset.iter()) {
+        for (out, offset) in out.iter_mut().zip(offset.iter()) {
             let read_pos_f = self.write_pos as f32 - offset[0];
             let buffer_len = buffer.len() as f32;
             let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
@@ -473,8 +516,8 @@ impl BufWriterNode {
 }
 
 impl Node for BufWriterNode {
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let buffer = if let Some(buffer) = arena.get_buffer_mut(&self.buf_name) {
             buffer
@@ -521,18 +564,15 @@ impl DelayNode {
 
 impl Node for DelayNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, outputs: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, outputs.len());
+    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
         let signal = &self.buffers[0];
         let delay_input = &self.buffers[1];
         let buffer_size_f32 = Self::BUFFER_SIZE as f32;
         let max_delay = (Self::BUFFER_SIZE - 1) as f32;
 
-        for (out, (sig, delay_frame)) in outputs
-            .iter_mut()
-            .zip(signal.iter().zip(delay_input.iter()))
-        {
+        for (out, (sig, delay_frame)) in out.iter_mut().zip(signal.iter().zip(delay_input.iter())) {
             self.buffer[self.write_pos] = *sig;
 
             let delay = delay_frame[0].clamp(0.0, max_delay);

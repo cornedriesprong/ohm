@@ -1,7 +1,7 @@
 use crate::container::Arena;
 use crate::nodes::{
-    BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DivideNode, EqualNode,
-    FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode,
+    AddNode, BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DivideNode,
+    EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode,
     SampleAndHoldNode, SeqNode, SubtractNode, WrapNode,
 };
 use crate::utils::get_audio_frames;
@@ -39,6 +39,7 @@ fn tokenize(str: String) -> VecDeque<Token> {
     while let Some(&ch) = chars.peek() {
         match ch {
             ' ' | '\t' | '\r' => {
+                // ignore these
                 chars.next();
             }
             '\n' => {
@@ -173,8 +174,8 @@ impl Parser {
         tok
     }
 
-    pub(crate) fn parse(mut self, arena: &mut Arena) -> Vec<usize> {
-        let mut top_level_expressions = Vec::new();
+    pub(crate) fn parse(mut self, arena: &mut Arena) -> usize {
+        let mut exprs = Vec::new();
 
         loop {
             while matches!(self.peek(), Token::Newline) {
@@ -186,7 +187,7 @@ impl Parser {
             }
 
             if let Some(expr) = self.parse_statement(arena) {
-                top_level_expressions.push(expr);
+                exprs.push(expr);
             }
 
             while matches!(self.peek(), Token::Newline) {
@@ -194,7 +195,8 @@ impl Parser {
             }
         }
 
-        top_level_expressions
+        // mix all top-level expressions together at the output
+        arena.alloc(Box::new(MixNode::new(exprs)))
     }
 
     fn parse_statement(&mut self, arena: &mut Arena) -> Option<usize> {
@@ -229,7 +231,7 @@ impl Parser {
             let rhs = self.parse_expr(arena, op_prec + 1)?;
 
             lhs = match op {
-                Token::Plus => arena.alloc(Box::new(MixNode::new(vec![lhs, rhs]))),
+                Token::Plus => arena.alloc(Box::new(AddNode::new(vec![lhs, rhs]))),
                 Token::Minus => arena.alloc(Box::new(SubtractNode::new(vec![lhs, rhs]))),
                 Token::Multiply => arena.alloc(Box::new(GainNode::new(vec![lhs, rhs]))),
                 Token::Divide => arena.alloc(Box::new(DivideNode::new(vec![lhs, rhs]))),
@@ -359,6 +361,13 @@ impl Parser {
                     args.push(arg);
                 }
                 Some(arena.alloc(Box::new(SeqNode::new(args))))
+            }
+            "mix" => {
+                let mut args = Vec::new();
+                while let Some(arg) = self.parse_primary(arena) {
+                    args.push(arg);
+                }
+                Some(arena.alloc(Box::new(MixNode::new(args))))
             }
             "onepole" => {
                 let input = self

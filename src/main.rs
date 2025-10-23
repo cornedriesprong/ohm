@@ -17,7 +17,7 @@ mod container;
 use container::*;
 
 mod parser;
-use crate::{nodes::MixNode, parser::Parser};
+use crate::parser::Parser;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -65,18 +65,8 @@ where
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src, config.sample_rate.0);
         let mut arena = Arena::new();
-        let top_level_expressions = parser.parse(&mut arena);
-        if top_level_expressions.is_empty() {
-            return Err(anyhow::anyhow!("Parsing error"));
-        }
-
+        let root = parser.parse(&mut arena);
         let mut guard = container.lock().unwrap();
-
-        let mut root = top_level_expressions[0];
-        for expr in top_level_expressions.iter().skip(1) {
-            root = arena.alloc(Box::new(MixNode::new(vec![root, *expr])));
-        }
-
         guard.update_graph(arena, root);
         Ok(())
     };
