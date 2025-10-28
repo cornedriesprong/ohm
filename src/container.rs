@@ -97,18 +97,18 @@ impl Container {
     }
 
     fn apply_diff(&self, old_id: usize, arena: &Arena, new_id: usize) {
-        let old_node = self.arena.get(old_id);
-        let new_node = arena.get(new_id);
+        let old = self.arena.get(old_id);
+        let new = arena.get(new_id);
 
-        if old_node.get_id() == new_node.get_id() {
+        if old.get_id() == new.get_id() {
             // transfer state from old to new
             unsafe {
                 let arena_ptr = arena as *const Arena as *mut Arena;
-                (*arena_ptr).get_mut(new_id).transfer_state(old_node);
+                (*arena_ptr).get_mut(new_id).transfer_state(old);
             }
 
-            let old_inputs = old_node.get_inputs();
-            let new_inputs = new_node.get_inputs();
+            let old_inputs = old.get_inputs();
+            let new_inputs = new.get_inputs();
 
             for (&old, &new) in old_inputs.iter().zip(new_inputs.iter()) {
                 self.apply_diff(old, arena, new);

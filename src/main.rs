@@ -1,6 +1,6 @@
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    FromSample, SizedSample,
+    Device, FromSample, SizedSample, StreamConfig,
 };
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::{
@@ -36,42 +36,39 @@ fn main() -> anyhow::Result<()> {
     run::<f32>(&device, &config.into(), filename)
 }
 
-pub fn run<T>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    filename: &str,
-) -> Result<(), anyhow::Error>
+pub fn run<T>(device: &Device, config: &StreamConfig, filename: &str) -> Result<(), anyhow::Error>
 where
     T: SizedSample + FromSample<f32>,
 {
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-
     let container = Container::new();
-    let container: Arc<Mutex<Container>> = Arc::new(Mutex::new(container));
+    let container = Arc::new(Mutex::new(container));
     let container_clone = Arc::clone(&container);
 
     let stream = device.build_output_stream(
         config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            container_clone.lock().unwrap().process(data);
+        move |data, _| {
+            if let Ok(mut container) = container_clone.lock() {
+                container.process(data);
+            }
         },
-        err_fn,
+        |err| eprintln!("an error occurred on stream: {}", err),
         None,
     )?;
 
     stream.play()?;
 
-    let update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
+    let update_graph = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src, config.sample_rate.0);
         let mut arena = Arena::new();
         let root = parser.parse(&mut arena);
-        let mut guard = container.lock().unwrap();
-        guard.update_graph(arena, root);
+        if let Ok(mut guard) = container.lock() {
+            guard.update_graph(arena, root);
+        }
         Ok(())
     };
 
-    update_audio_graph(Path::new(filename))?;
+    update_graph(Path::new(filename))?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -80,32 +77,30 @@ where
     watcher.watch(path, RecursiveMode::NonRecursive)?;
 
     let mut last_update = Instant::now();
-    let debounce_duration = Duration::from_millis(100); // Adjust as needed
+    let debounce_duration = Duration::from_millis(100);
+
+    let mut check_duration_and_update = || {
+        let now = Instant::now();
+        if now.duration_since(last_update) >= debounce_duration {
+            if let Err(e) = update_graph(path) {
+                eprintln!("Error updating audio graph: {}", e);
+            }
+            last_update = now;
+        }
+    };
 
     for res in rx {
         match res {
             Ok(event) => match event.kind {
                 EventKind::Modify(ModifyKind::Data(_)) => {
-                    let now = Instant::now();
-                    if now.duration_since(last_update) >= debounce_duration {
-                        if let Err(e) = update_audio_graph(path) {
-                            eprintln!("Error updating audio graph: {}", e);
-                        }
-                        last_update = now;
-                    }
+                    check_duration_and_update();
                 }
                 EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
                     // re-watch the file
                     watcher.unwatch(path).ok();
                     watcher.watch(path, RecursiveMode::NonRecursive).ok();
 
-                    let now = Instant::now();
-                    if now.duration_since(last_update) >= debounce_duration {
-                        if let Err(e) = update_audio_graph(path) {
-                            eprintln!("Error updating audio graph: {}", e);
-                        }
-                        last_update = now;
-                    }
+                    check_duration_and_update();
                 }
                 _ => {}
             },
