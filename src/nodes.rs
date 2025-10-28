@@ -33,16 +33,14 @@ macro_rules! define_osc_node {
                 render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
 
                 let freq_input = &self.buffers[0];
-                let sample_rate_f32 = self.sample_rate as f32;
-                let max_freq = sample_rate_f32 * 0.5;
+                let sample_rate = self.sample_rate as f32;
                 let two_pi = 2.0 * PI;
-                let phase_increment_scale = two_pi / sample_rate_f32;
+                let inc = two_pi / sample_rate;
 
                 for (out, freq_frame) in out.iter_mut().zip(freq_input.iter()) {
-                    let freq = freq_frame[0].clamp(0.0, max_freq);
-
-                    self.phase += freq * phase_increment_scale;
-                    self.phase = self.phase % two_pi;
+                    let freq = freq_frame[0];
+                    self.phase += freq * inc;
+                    self.phase %= two_pi;
 
                     let y = $phase_to_output(self.phase, two_pi);
 
