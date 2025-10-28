@@ -493,7 +493,7 @@ impl Parser {
             }
             "file" => {
                 let name = self.parse_str()?;
-                let frames = get_audio_frames(&name);
+                let frames = get_audio_frames(&name).ok()?;
                 arena.store_buffer(name.clone(), frames);
                 Some(arena.alloc(Box::new(BufRefNode::new(name))))
             }
