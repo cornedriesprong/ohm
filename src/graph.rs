@@ -1,6 +1,7 @@
 use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 pub(crate) struct Graph {
@@ -22,6 +23,7 @@ impl Graph {
         }
     }
 
+    #[inline(always)]
     fn set_chunk_size(&mut self, chunk_size: usize) {
         if chunk_size > self.chunk_size {
             self.chunk_size = chunk_size;
@@ -146,7 +148,7 @@ impl Container {
                     let buffers_ptr = graph.output_buffers.as_ptr();
                     let node_inputs = &graph.inputs[output_idx];
 
-                    let input_slices: Vec<&[Frame]> = node_inputs
+                    let input_slices: SmallVec<[&[Frame]; 8]> = node_inputs
                         .iter()
                         .map(|&idx| {
                             let buf_ptr = buffers_ptr.add(idx);

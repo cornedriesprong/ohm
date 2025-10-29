@@ -61,6 +61,7 @@ pub(crate) enum Node {
 }
 
 impl Node {
+    #[inline(always)]
     pub(crate) fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
         match self {
             Node::Constant(value) => {
@@ -216,6 +217,7 @@ impl Node {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn get_id(&self) -> String {
         match self {
             Node::Constant(v) => format!("Constant({})", v),
@@ -238,20 +240,33 @@ impl Node {
         }
     }
 
+    #[inline(always)]
     pub(crate) fn transfer_state(&mut self, old: &Node) {
         match (self, old) {
             (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => *new = *old,
             (Node::Lfo { phase: new, .. }, Node::Lfo { phase: old, .. }) => *new = *old,
             (
-                Node::SampleAndHold { value: new_val, prev: new_prev },
-                Node::SampleAndHold { value: old_val, prev: old_prev },
+                Node::SampleAndHold {
+                    value: new_val,
+                    prev: new_prev,
+                },
+                Node::SampleAndHold {
+                    value: old_val,
+                    prev: old_prev,
+                },
             ) => {
                 *new_val = *old_val;
                 *new_prev = *old_prev;
             }
             (
-                Node::Delay { buffer: new_buf, write_pos: new_pos },
-                Node::Delay { buffer: old_buf, write_pos: old_pos },
+                Node::Delay {
+                    buffer: new_buf,
+                    write_pos: new_pos,
+                },
+                Node::Delay {
+                    buffer: old_buf,
+                    write_pos: old_pos,
+                },
             ) => {
                 **new_buf = **old_buf;
                 *new_pos = *old_pos;

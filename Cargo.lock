@@ -1193,6 +1193,7 @@ dependencies = [
  "notify",
  "petgraph",
  "rtsan-standalone",
+ "smallvec",
 ]
 
 [[package]]
