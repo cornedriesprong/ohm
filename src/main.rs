@@ -13,8 +13,8 @@ use std::{
 mod nodes;
 mod utils;
 
-mod container;
-use container::*;
+mod graph;
+use graph::*;
 
 mod parser;
 use crate::parser::Parser;

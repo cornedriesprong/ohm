@@ -1,4 +1,4 @@
-use crate::container::Graph;
+use crate::graph::Graph;
 use crate::nodes::Node;
 use fundsp::hacker32::*;
 use petgraph::graph::NodeIndex;
