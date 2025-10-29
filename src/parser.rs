@@ -202,8 +202,12 @@ impl Parser {
             }
         }
 
-        // mix all top-level expressions together at the output
-        arena.alloc(Box::new(MixNode::new(exprs)))
+        // if there is more than one top-level expression, mix them together at the output
+        if exprs.len() == 1 {
+            return exprs[0];
+        } else {
+            arena.alloc(Box::new(MixNode::new(exprs)))
+        }
     }
 
     fn parse_statement(&mut self, arena: &mut Arena) -> Option<usize> {
