@@ -323,12 +323,15 @@ impl Parser {
         }
     }
 
+    fn get_arg(&mut self, arg: Option<NodeIndex>, default: f32) -> NodeIndex {
+        arg.or_else(|| self.parse_primary())
+            .unwrap_or_else(|| self.graph.add_node(Node::Constant(default)))
+    }
+
     fn parse_node(&mut self, name: &str, first_arg: Option<NodeIndex>) -> Option<NodeIndex> {
         match name {
             "ramp" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1.0)));
+                let freq = self.get_arg(first_arg, 1.0);
                 let node_idx = self.graph.add_node(Node::Ramp {
                     phase: 0.0,
                     sample_rate: self.sample_rate,
@@ -337,9 +340,7 @@ impl Parser {
                 Some(node_idx)
             }
             "sin" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(sine());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -351,9 +352,7 @@ impl Parser {
                 Some(node_idx)
             }
             "saw" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(saw());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -365,9 +364,7 @@ impl Parser {
                 Some(node_idx)
             }
             "sqr" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(square());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -379,9 +376,7 @@ impl Parser {
                 Some(node_idx)
             }
             "tri" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(triangle());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -402,9 +397,7 @@ impl Parser {
                 }))
             }
             "clip" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
                 let node = Box::new(clip());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -416,9 +409,7 @@ impl Parser {
                 Some(node_idx)
             }
             "lfo" => {
-                let freq = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1.0)));
+                let freq = self.get_arg(first_arg, 1.0);
                 let node_idx = self.graph.add_node(Node::Lfo {
                     phase: 0.0,
                     sample_rate: self.sample_rate,
@@ -427,12 +418,8 @@ impl Parser {
                 Some(node_idx)
             }
             "sh" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let trig = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
+                let trig = self.get_arg(None, 0.0);
                 let node_idx = self.graph.add_node(Node::SampleAndHold {
                     value: [0.0; 2],
                     prev: 0.0,
@@ -442,9 +429,7 @@ impl Parser {
                 Some(node_idx)
             }
             "pan" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
                 let pan = self
                     .parse_primary()
                     .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.5)));
@@ -460,9 +445,7 @@ impl Parser {
                 Some(node_idx)
             }
             "seq" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
                 let mut args = vec![input];
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
@@ -485,12 +468,8 @@ impl Parser {
                 Some(node_idx)
             }
             "onepole" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(20.0)));
+                let input = self.get_arg(first_arg, 0.0);
+                let cutoff = self.get_arg(None, 20.0);
                 let node = Box::new(lowpole());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -503,15 +482,9 @@ impl Parser {
                 Some(node_idx)
             }
             "lp" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let input = self.get_arg(first_arg, 0.0);
+                let cutoff = self.get_arg(None, 500.0);
+                let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(lowpass());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -525,15 +498,9 @@ impl Parser {
                 Some(node_idx)
             }
             "bp" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let input = self.get_arg(first_arg, 0.0);
+                let cutoff = self.get_arg(None, 500.0);
+                let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(bandpass());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -547,15 +514,9 @@ impl Parser {
                 Some(node_idx)
             }
             "hp" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let input = self.get_arg(first_arg, 0.0);
+                let cutoff = self.get_arg(None, 500.0);
+                let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(highpass());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -569,15 +530,9 @@ impl Parser {
                 Some(node_idx)
             }
             "moog" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let cutoff = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
-                let resonance = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
+                let cutoff = self.get_arg(None, 500.0);
+                let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(moog());
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
@@ -591,12 +546,8 @@ impl Parser {
                 Some(node_idx)
             }
             "delay" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
-                let delay_time = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1000.0)));
+                let input = self.get_arg(first_arg, 0.0);
+                let delay_time = self.get_arg(None, 100.0);
                 let node_idx = self.graph.add_node(Node::Delay {
                     buffer: Box::new([[0.0; 2]; 48000]),
                     write_pos: 0,
@@ -606,9 +557,7 @@ impl Parser {
                 Some(node_idx)
             }
             "reverb" => {
-                let input = first_arg
-                    .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let input = self.get_arg(first_arg, 0.0);
                 let node = Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0)));
                 let num_inputs = node.inputs();
                 let node_idx = self.graph.add_node(Node::FunDSP {
