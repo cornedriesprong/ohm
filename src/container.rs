@@ -4,7 +4,7 @@ use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use std::collections::HashMap;
 
 pub(crate) struct Graph {
-    graph: StableDiGraph<Box<dyn Node>, ()>,
+    graph: StableDiGraph<Node, ()>,
     sorted_nodes: Vec<NodeIndex>,
     input_indices: Vec<usize>,
     output_buffers: Vec<Vec<Frame>>,
@@ -33,7 +33,7 @@ impl Graph {
         }
     }
 
-    pub(crate) fn add_node(&mut self, node: Box<dyn Node>) -> NodeIndex {
+    pub(crate) fn add_node(&mut self, node: Node) -> NodeIndex {
         let index = self.graph.add_node(node);
         self.update_processing_order();
         index
@@ -87,7 +87,7 @@ impl Graph {
             if let Some(&old_node_idx) = old_nodes.get(&new_id) {
                 let old_node = &old_graph.graph[old_node_idx];
                 let new_node = &mut self.graph[new_node_idx];
-                new_node.transfer_state(&**old_node);
+                new_node.transfer_state(old_node);
             }
         }
     }

@@ -1,499 +1,308 @@
 use crate::utils::cubic_interpolate;
 use fundsp::hacker32::AudioUnit;
-use std::any::Any;
 use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
 
-macro_rules! define_osc_node {
-    ($name:ident, $phase_to_output:expr) => {
-        pub struct $name {
-            phase: f32,
-            sample_rate: u32,
-        }
+pub(crate) enum Node {
+    Constant(f32),
+    Ramp {
+        phase: f32,
+        sample_rate: u32,
+    },
+    Lfo {
+        phase: f32,
+        sample_rate: u32,
+    },
+    Sum,
+    Diff,
+    Gain,
+    Divide,
+    Wrap,
+    Power,
+    Greater,
+    Less,
+    Equal,
+    SampleAndHold {
+        value: Frame,
+        prev: f32,
+    },
+    FunDSP {
+        node: Box<dyn AudioUnit>,
+        is_stereo: bool,
+        input_buffer: Vec<f32>,
+    },
+    Mix,
+    Seq,
+    Delay {
+        buffer: Box<[Frame; 48000]>,
+        write_pos: usize,
+    },
+}
 
-        impl $name {
-            pub(crate) fn new(sample_rate: u32) -> Self {
-                Self {
-                    phase: 0.0,
-                    sample_rate,
+impl Node {
+    pub(crate) fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        match self {
+            Node::Constant(value) => {
+                let frame = [*value; 2];
+                outputs.fill(frame);
+            }
+            Node::Ramp { phase, sample_rate } => {
+                let freq = inputs[0];
+                let sample_rate = *sample_rate as f32;
+                let two_pi = 2.0 * PI;
+                let inc = two_pi / sample_rate;
+
+                for (out, freq_frame) in outputs.iter_mut().zip(freq.iter()) {
+                    let freq = freq_frame[0];
+                    *phase += freq * inc;
+                    *phase %= two_pi;
+                    let y = *phase / two_pi;
+                    *out = [y; 2];
                 }
             }
-        }
-
-        impl Node for $name {
-            #[inline(always)]
-            fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-                const EMPTY: &[Frame] = &[];
-                let freq_input = inputs.get(0).unwrap_or(&EMPTY);
-                let sample_rate = self.sample_rate as f32;
+            Node::Lfo { phase, sample_rate } => {
+                let freq_input = inputs[0];
+                let sample_rate = *sample_rate as f32;
                 let two_pi = 2.0 * PI;
                 let inc = two_pi / sample_rate;
 
                 for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
                     let freq = freq_frame[0];
-                    self.phase += freq * inc;
-                    self.phase %= two_pi;
-
-                    let y = $phase_to_output(self.phase, two_pi);
-
+                    *phase += freq * inc;
+                    *phase %= two_pi;
+                    let y = (phase.cos() + 1.0) * 0.5;
                     *out = [y; 2];
                 }
             }
-
-            fn transfer_state(&mut self, old: &dyn Node) {
-                if let Some(old) = (old as &dyn Any).downcast_ref::<$name>() {
-                    self.phase = old.phase;
-                }
-            }
-        }
-    };
-}
-
-macro_rules! define_binary_op_node {
-    ($name:ident, $op:expr) => {
-        pub struct $name;
-
-        impl $name {
-            pub(crate) fn new() -> Self {
-                Self
-            }
-        }
-
-        impl Node for $name {
-            #[inline(always)]
-            fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-                const EMPTY: &[Frame] = &[];
-                let lhs = inputs.get(0).unwrap_or(&EMPTY);
-                let rhs = inputs.get(1).unwrap_or(&EMPTY);
-
+            Node::Sum => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
                 for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = $op(*l, *r);
+                    *out = [l[0] + r[0], l[1] + r[1]];
+                }
+            }
+            Node::Diff => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [l[0] - r[0], l[1] - r[1]];
+                }
+            }
+            Node::Gain => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [l[0] * r[0], l[1] * r[1]];
+                }
+            }
+            Node::Divide => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [l[0] / r[0], l[1] / r[1]];
+                }
+            }
+            Node::Wrap => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [l[0] % r[0], l[1] % r[1]];
+                }
+            }
+            Node::Power => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [l[0].powf(r[0]), l[1].powf(r[1])];
+                }
+            }
+            Node::Greater => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [(l[0] > r[0]) as u32 as f32, (l[1] > r[1]) as u32 as f32];
+                }
+            }
+            Node::Less => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [(l[0] < r[0]) as u32 as f32, (l[1] < r[1]) as u32 as f32];
+                }
+            }
+            Node::Equal => {
+                let lhs = inputs[0];
+                let rhs = inputs[1];
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                    *out = [(l[0] == r[0]) as u32 as f32, (l[1] == r[1]) as u32 as f32];
+                }
+            }
+            Node::SampleAndHold { value, prev, .. } => {
+                let input = inputs[0];
+                let ramp = inputs[1];
+                for i in 0..outputs.len() {
+                    let ramp_val = ramp.get(i).map(|f| f[0]).unwrap_or(0.0);
+                    if (ramp_val - *prev).abs() > 0.5 {
+                        *value = input.get(i).copied().unwrap_or([0.0; 2]);
+                    }
+                    *prev = ramp_val;
+                    outputs[i] = *value;
+                }
+            }
+            Node::FunDSP {
+                node,
+                is_stereo,
+                input_buffer,
+            } => {
+                const EMPTY: &[Frame] = &[];
+                let num_inputs = node.inputs();
+                if *is_stereo {
+                    for i in 0..outputs.len() {
+                        for input_idx in 0..num_inputs {
+                            let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
+                            input_buffer[input_idx] =
+                                input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                        }
+                        let mut output_sample = [0.0; 2];
+                        node.tick(input_buffer, &mut output_sample);
+                        outputs[i] = output_sample;
+                    }
+                } else {
+                    for i in 0..outputs.len() {
+                        for input_idx in 0..num_inputs {
+                            let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
+                            input_buffer[input_idx] =
+                                input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
+                        }
+                        let mut output_sample = [0.0; 1];
+                        node.tick(input_buffer, &mut output_sample);
+                        outputs[i] = [output_sample[0]; 2];
+                    }
+                }
+            }
+            Node::Mix => {
+                let num_inputs = inputs.len();
+                if num_inputs == 0 {
+                    outputs.fill([0.0; 2]);
+                    return;
+                }
+
+                let inv_n = 1.0 / num_inputs as f32;
+                for (i, frame) in outputs.iter_mut().enumerate() {
+                    let mut l = 0.0f32;
+                    let mut r = 0.0f32;
+                    for input in inputs.iter() {
+                        let src = input.get(i).copied().unwrap_or([0.0; 2]);
+                        l += src[0];
+                        r += src[1];
+                    }
+                    frame[0] = l * inv_n;
+                    frame[1] = r * inv_n;
+                }
+            }
+            Node::Seq => {
+                if inputs.is_empty() {
+                    outputs.fill([0.0; 2]);
+                    return;
+                }
+
+                let ramp_input = inputs[0];
+                let num_steps = inputs.len() - 1;
+
+                for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate()
+                {
+                    let ramp = ramp_frame[0];
+                    let step = (ramp * num_steps as f32).floor() as usize;
+                    let step_input = inputs[step + 1];
+                    *out = step_input.get(i).copied().unwrap_or([0.0; 2]);
+                }
+            }
+            Node::Delay { buffer, write_pos } => {
+                const BUFFER_SIZE: usize = 48000;
+                let signal = inputs[0];
+                let delay_input = inputs[1];
+                let buffer_size_f32 = BUFFER_SIZE as f32;
+                let max_delay = (BUFFER_SIZE - 1) as f32;
+
+                for (i, out) in outputs.iter_mut().enumerate() {
+                    let sig = signal.get(i).copied().unwrap_or([0.0; 2]);
+                    buffer[*write_pos] = sig;
+
+                    let delay = delay_input
+                        .get(i)
+                        .map(|f| f[0])
+                        .unwrap_or(0.0)
+                        .clamp(0.0, max_delay);
+                    let read_pos = (*write_pos as f32 - delay + buffer_size_f32) % buffer_size_f32;
+
+                    *out = cubic_interpolate(&buffer[..], read_pos);
+
+                    *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
         }
-    };
-}
-
-pub(crate) trait Node: Send + Sync + Any {
-    #[inline(always)]
-    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {}
-
-    fn get_id(&self) -> String {
-        std::any::type_name::<Self>().to_string()
     }
 
-    fn transfer_state(&mut self, _old: &dyn Node) {
-        // stateless nodes don't transfer state, so we default to no-op
-    }
-
-    fn get_buf_name(&self) -> Option<&str> {
-        None
-    }
-}
-
-define_binary_op_node!(SumNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0] + rhs[0], lhs[1] + rhs[0]]
-});
-
-define_binary_op_node!(DiffNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0] - rhs[0], lhs[1] - rhs[0]]
-});
-
-define_binary_op_node!(GainNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0] * rhs[0], lhs[1] * rhs[0]]
-});
-
-define_binary_op_node!(DivideNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0] / rhs[0], lhs[1] / rhs[0]]
-});
-
-define_binary_op_node!(WrapNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0] % rhs[0], lhs[1] % rhs[0]]
-});
-
-define_binary_op_node!(PowerNode, |lhs: Frame, rhs: Frame| {
-    [lhs[0].powf(rhs[0]), lhs[1].powf(rhs[0])]
-});
-
-define_binary_op_node!(GreaterNode, |lhs: Frame, rhs: Frame| {
-    [
-        (lhs[0] > rhs[0]) as u32 as f32,
-        (lhs[1] > rhs[0]) as u32 as f32,
-    ]
-});
-
-define_binary_op_node!(LessNode, |lhs: Frame, rhs: Frame| {
-    [
-        (lhs[0] < rhs[0]) as u32 as f32,
-        (lhs[1] < rhs[0]) as u32 as f32,
-    ]
-});
-
-define_binary_op_node!(EqualNode, |lhs: Frame, rhs: Frame| {
-    [
-        (lhs[0] == rhs[0]) as u32 as f32,
-        (lhs[1] == rhs[0]) as u32 as f32,
-    ]
-});
-
-define_osc_node!(RampNode, |phase: f32, two_pi: f32| { phase / two_pi });
-
-define_osc_node!(LFONode, |phase: f32, _two_pi: f32| {
-    (phase.cos() + 1.0) * 0.5
-});
-
-pub struct ConstantNode {
-    value: f32,
-}
-
-impl ConstantNode {
-    pub(crate) fn new(value: f32) -> Self {
-        Self { value }
-    }
-}
-
-impl Node for ConstantNode {
-    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        let frame = [self.value; 2];
-        outputs.fill(frame);
-    }
-
-    fn get_id(&self) -> String {
-        format!("{}", self.value)
-    }
-}
-
-pub struct SampleAndHoldNode {
-    value: Frame,
-    prev: f32,
-}
-
-impl SampleAndHoldNode {
-    pub(crate) fn new(sample_rate: u32) -> Self {
-        _ = sample_rate;
-        Self {
-            value: [0.0; 2],
-            prev: 1.0,
+    pub(crate) fn get_id(&self) -> String {
+        match self {
+            Node::Constant(v) => format!("Constant({})", v),
+            Node::Ramp { .. } => "Ramp".to_string(),
+            Node::Lfo { .. } => "Lfo".to_string(),
+            Node::Sum => "Sum".to_string(),
+            Node::Diff => "Diff".to_string(),
+            Node::Gain => "Gain".to_string(),
+            Node::Divide => "Divide".to_string(),
+            Node::Wrap => "Wrap".to_string(),
+            Node::Power => "Power".to_string(),
+            Node::Greater => "Greater".to_string(),
+            Node::Less => "Less".to_string(),
+            Node::Equal => "Equal".to_string(),
+            Node::SampleAndHold { .. } => "SampleAndHold".to_string(),
+            Node::FunDSP { .. } => "FunDSP".to_string(),
+            Node::Mix => "Mix".to_string(),
+            Node::Seq => "Seq".to_string(),
+            Node::Delay { .. } => "Delay".to_string(),
         }
     }
-}
 
-impl Node for SampleAndHoldNode {
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        const EMPTY: &[Frame] = &[];
-        let signal = inputs.get(0).unwrap_or(&EMPTY);
-        let ramp = inputs.get(1).unwrap_or(&EMPTY);
-        let chunk_size = outputs.len();
-
-        for i in 0..chunk_size {
-            let ramp_val = ramp.get(i).map(|f| f[0]).unwrap_or(0.0);
-            if (ramp_val - self.prev).abs() > 0.5 {
-                self.value = signal.get(i).copied().unwrap_or([0.0; 2]);
+    pub(crate) fn transfer_state(&mut self, old: &Node) {
+        match (self, old) {
+            (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => {
+                *new = *old;
             }
-            self.prev = ramp_val;
-            outputs[i] = self.value;
-        }
-    }
-
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old) = (old as &dyn Any).downcast_ref::<SampleAndHoldNode>() {
-            self.value = old.value;
-            self.prev = old.prev;
-        }
-    }
-}
-
-pub struct FunDSPNode {
-    node: Box<dyn AudioUnit>,
-    is_stereo: bool,
-    input_buffer: Vec<f32>,
-}
-
-impl FunDSPNode {
-    pub fn mono(node: Box<dyn AudioUnit>) -> Self {
-        let num_audio_inputs = node.inputs();
-        Self {
-            node,
-            is_stereo: false,
-            input_buffer: vec![0.0; num_audio_inputs],
-        }
-    }
-
-    pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
-        let num_audio_inputs = node.inputs();
-        Self {
-            node,
-            is_stereo: true,
-            input_buffer: vec![0.0; num_audio_inputs],
-        }
-    }
-
-    fn get_name(&self) -> String {
-        match self.node.get_id() {
-            6 => "Reverb".to_string(),
-            21 => "Sin".to_string(),
-            _ => self.node.get_id().to_string(),
-        }
-    }
-}
-
-impl Node for FunDSPNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        const EMPTY: &[Frame] = &[];
-        let chunk_size = outputs.len();
-        let num_inputs = self.node.inputs();
-
-        if self.is_stereo {
-            for i in 0..chunk_size {
-                for input_idx in 0..num_inputs {
-                    let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
-                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
-                }
-
-                let mut output_sample = [0.0; 2];
-                self.node.tick(&self.input_buffer, &mut output_sample);
-                outputs[i] = output_sample;
+            (Node::Lfo { phase: new, .. }, Node::Lfo { phase: old, .. }) => {
+                *new = *old;
             }
-        } else {
-            for i in 0..chunk_size {
-                for input_idx in 0..num_inputs {
-                    let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
-                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
-                }
-
-                let mut output_sample = [0.0; 1];
-                self.node.tick(&self.input_buffer, &mut output_sample);
-                outputs[i] = [output_sample[0]; 2];
+            (
+                Node::SampleAndHold {
+                    value: new_val,
+                    prev: new_prev,
+                    ..
+                },
+                Node::SampleAndHold {
+                    value: old_val,
+                    prev: old_prev,
+                    ..
+                },
+            ) => {
+                *new_val = *old_val;
+                *new_prev = *old_prev;
             }
-        }
-    }
-
-    fn get_id(&self) -> String {
-        format!("FunDSP: {}", self.get_name())
-    }
-}
-
-pub struct MixNode;
-
-impl MixNode {
-    pub(crate) fn new() -> Self {
-        Self
-    }
-}
-
-impl Node for MixNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        let num_inputs = inputs.len();
-
-        // return silence if there are no inputs
-        if num_inputs == 0 {
-            outputs.fill([0.0; 2]);
-            return;
-        }
-
-        let inv_n = 1.0 / num_inputs as f32;
-
-        for (i, frame) in outputs.iter_mut().enumerate() {
-            let mut l = 0.0f32;
-            let mut r = 0.0f32;
-
-            for input in inputs.iter() {
-                let src = input.get(i).copied().unwrap_or([0.0; 2]);
-                l += src[0];
-                r += src[1];
+            (
+                Node::Delay {
+                    buffer: new_buf,
+                    write_pos: new_pos,
+                },
+                Node::Delay {
+                    buffer: old_buf,
+                    write_pos: old_pos,
+                },
+            ) => {
+                **new_buf = **old_buf;
+                *new_pos = *old_pos;
             }
-
-            frame[0] = l * inv_n;
-            frame[1] = r * inv_n;
-        }
-    }
-}
-
-pub struct SeqNode;
-
-impl SeqNode {
-    pub(crate) fn new() -> Self {
-        Self
-    }
-}
-
-impl Node for SeqNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        if inputs.is_empty() {
-            outputs.fill([0.0; 2]);
-            return;
-        }
-
-        let ramp_input = inputs[0];
-        let num_steps = inputs.len() - 1;
-
-        for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate() {
-            let ramp = ramp_frame[0];
-            let step = (ramp * num_steps as f32).floor() as usize;
-            let step_input = inputs[step + 1];
-            *out = step_input.get(i).copied().unwrap_or([0.0; 2]);
-        }
-    }
-}
-
-pub struct BufRefNode {
-    name: String,
-}
-
-impl BufRefNode {
-    pub(crate) fn new(name: String) -> Self {
-        Self { name }
-    }
-}
-
-impl Node for BufRefNode {
-    fn get_id(&self) -> String {
-        format!("BufRefNode {}", self.name)
-    }
-
-    fn get_buf_name(&self) -> Option<&str> {
-        Some(&self.name)
-    }
-}
-
-pub struct BufReaderNode {
-    buf_name: String,
-    inputs: Vec<usize>,
-    buffers: Vec<Vec<Frame>>,
-}
-
-impl BufReaderNode {
-    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
-        Self {
-            buf_name,
-            inputs,
-            buffers: vec![Vec::new(); 1],
-        }
-    }
-}
-
-impl Node for BufReaderNode {
-    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        // TODO: implement buffer support
-        outputs.fill([0.0; 2]);
-    }
-}
-
-// a buf tap node is stateful in that it maintains it's own interal write position
-// which makes it usable as a delay line
-pub struct BufTapNode {
-    buf_name: String,
-    inputs: Vec<usize>,
-    write_pos: usize,
-    buffers: Vec<Vec<Frame>>,
-}
-
-impl BufTapNode {
-    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
-        Self {
-            buf_name,
-            inputs,
-            write_pos: 0,
-            buffers: vec![Vec::new(); 1],
-        }
-    }
-}
-
-impl Node for BufTapNode {
-    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        // TODO: implement buffer support
-        outputs.fill([0.0; 2]);
-    }
-
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old) = (old as &dyn Any).downcast_ref::<BufTapNode>() {
-            self.write_pos = old.write_pos;
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct BufWriterNode {
-    buf_name: String,
-    inputs: Vec<usize>,
-    write_pos: usize,
-    buffers: Vec<Vec<Frame>>,
-}
-
-impl BufWriterNode {
-    pub(crate) fn new(buf_name: String, inputs: Vec<usize>) -> Self {
-        Self {
-            buf_name,
-            inputs,
-            write_pos: 0,
-            buffers: vec![Vec::new(); 1],
-        }
-    }
-}
-
-impl Node for BufWriterNode {
-    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {
-        // TODO: implement buffer support
-    }
-
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old) = (old as &dyn Any).downcast_ref::<BufWriterNode>() {
-            self.write_pos = old.write_pos;
-        }
-    }
-}
-
-// delay line
-pub(crate) struct DelayNode {
-    buffer: [Frame; Self::BUFFER_SIZE],
-    write_pos: usize,
-}
-
-impl DelayNode {
-    pub const BUFFER_SIZE: usize = 48000;
-
-    pub(crate) fn new() -> Self {
-        Self {
-            buffer: [[0.0; 2]; Self::BUFFER_SIZE],
-            write_pos: 0,
-        }
-    }
-}
-
-impl Node for DelayNode {
-    #[inline(always)]
-    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
-        const EMPTY: &[Frame] = &[];
-        let signal = inputs.get(0).unwrap_or(&EMPTY);
-        let delay_input = inputs.get(1).unwrap_or(&EMPTY);
-        let buffer_size_f32 = Self::BUFFER_SIZE as f32;
-        let max_delay = (Self::BUFFER_SIZE - 1) as f32;
-
-        for (i, out) in outputs.iter_mut().enumerate() {
-            let sig = signal.get(i).copied().unwrap_or([0.0; 2]);
-            self.buffer[self.write_pos] = sig;
-
-            let delay = delay_input
-                .get(i)
-                .map(|f| f[0])
-                .unwrap_or(0.0)
-                .clamp(0.0, max_delay);
-            let read_pos = (self.write_pos as f32 - delay + buffer_size_f32) % buffer_size_f32;
-
-            *out = cubic_interpolate(&self.buffer, read_pos);
-
-            self.write_pos = (self.write_pos + 1) % Self::BUFFER_SIZE;
-        }
-    }
-
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
-            self.buffer = old.buffer;
-            self.write_pos = old.write_pos;
+            _ => {}
         }
     }
 }

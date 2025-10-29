@@ -1,8 +1,5 @@
 use crate::container::Graph;
-use crate::nodes::{
-    ConstantNode, DelayNode, DiffNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
-    LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SumNode, WrapNode,
-};
+use crate::nodes::Node;
 use fundsp::hacker32::*;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, VecDeque};
@@ -203,7 +200,7 @@ impl Parser {
             // Root is already in the graph
         } else if !exprs.is_empty() {
             println!("Mixing {} top-level expressions", exprs.len());
-            let mix_node = self.graph.add_node(Box::new(MixNode::new()));
+            let mix_node = self.graph.add_node(Node::Mix);
             for &expr in &exprs {
                 self.graph.connect_node(expr, mix_node);
             }
@@ -253,15 +250,15 @@ impl Parser {
                 _ => {
                     let rhs = self.parse_expr(op_prec + 1)?;
                     let node_idx = match op {
-                        Token::Plus => self.graph.add_node(Box::new(SumNode::new())),
-                        Token::Minus => self.graph.add_node(Box::new(DiffNode::new())),
-                        Token::Multiply => self.graph.add_node(Box::new(GainNode::new())),
-                        Token::Divide => self.graph.add_node(Box::new(DivideNode::new())),
-                        Token::Modulo => self.graph.add_node(Box::new(WrapNode::new())),
-                        Token::Power => self.graph.add_node(Box::new(PowerNode::new())),
-                        Token::Greater => self.graph.add_node(Box::new(GreaterNode::new())),
-                        Token::Less => self.graph.add_node(Box::new(LessNode::new())),
-                        Token::Equal => self.graph.add_node(Box::new(EqualNode::new())),
+                        Token::Plus => self.graph.add_node(Node::Sum),
+                        Token::Minus => self.graph.add_node(Node::Diff),
+                        Token::Multiply => self.graph.add_node(Node::Gain),
+                        Token::Divide => self.graph.add_node(Node::Divide),
+                        Token::Modulo => self.graph.add_node(Node::Wrap),
+                        Token::Power => self.graph.add_node(Node::Power),
+                        Token::Greater => self.graph.add_node(Node::Greater),
+                        Token::Less => self.graph.add_node(Node::Less),
+                        Token::Equal => self.graph.add_node(Node::Equal),
                         _ => lhs,
                     };
                     if !matches!(
@@ -291,7 +288,7 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Option<NodeIndex> {
         match self.consume() {
-            Token::Number(num) => Some(self.graph.add_node(Box::new(ConstantNode::new(num)))),
+            Token::Number(num) => Some(self.graph.add_node(Node::Constant(num))),
             Token::Identifier(name) => {
                 if let Some(op) = self.parse_node(&name, None) {
                     Some(op)
@@ -331,87 +328,115 @@ impl Parser {
             "ramp" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(RampNode::new(self.sample_rate)));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1.0)));
+                let node_idx = self.graph.add_node(Node::Ramp {
+                    phase: 0.0,
+                    sample_rate: self.sample_rate,
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
             "sin" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(sine()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let node = Box::new(sine());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
             "saw" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(saw()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let node = Box::new(saw());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
             "sqr" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(square()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let node = Box::new(square());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
             "tri" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(triangle()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(100.0)));
+                let node = Box::new(triangle());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
-            "noise" => Some(
-                self.graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(noise())))),
-            ),
+            "noise" => {
+                let node = Box::new(noise());
+                let num_inputs = node.inputs();
+                Some(self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                }))
+            }
             "clip" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(clip()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let node = Box::new(clip());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 Some(node_idx)
             }
             "lfo" => {
                 let freq = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(LFONode::new(self.sample_rate)));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1.0)));
+                let node_idx = self.graph.add_node(Node::Lfo {
+                    phase: 0.0,
+                    sample_rate: self.sample_rate,
+                });
                 self.graph.connect_node(freq, node_idx);
                 Some(node_idx)
             }
             "sh" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let trig = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(SampleAndHoldNode::new(self.sample_rate)));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let node_idx = self.graph.add_node(Node::SampleAndHold {
+                    value: [0.0; 2],
+                    prev: 0.0,
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(trig, node_idx);
                 Some(node_idx)
@@ -419,13 +444,17 @@ impl Parser {
             "pan" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let pan = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.5))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(panner()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.5)));
+                let node = Box::new(panner());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(pan, node_idx);
                 Some(node_idx)
@@ -433,12 +462,12 @@ impl Parser {
             "seq" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let mut args = vec![input];
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                let node_idx = self.graph.add_node(Box::new(SeqNode::new()));
+                let node_idx = self.graph.add_node(Node::Seq);
                 for arg in args {
                     self.graph.connect_node(arg, node_idx);
                 }
@@ -449,7 +478,7 @@ impl Parser {
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                let node_idx = self.graph.add_node(Box::new(MixNode::new()));
+                let node_idx = self.graph.add_node(Node::Mix);
                 for arg in args {
                     self.graph.connect_node(arg, node_idx);
                 }
@@ -458,13 +487,17 @@ impl Parser {
             "onepole" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let cutoff = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(20.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(lowpole()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(20.0)));
+                let node = Box::new(lowpole());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(cutoff, node_idx);
                 Some(node_idx)
@@ -472,16 +505,20 @@ impl Parser {
             "lp" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let cutoff = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
                 let resonance = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(lowpass()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let node = Box::new(lowpass());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(cutoff, node_idx);
                 self.graph.connect_node(resonance, node_idx);
@@ -490,16 +527,20 @@ impl Parser {
             "bp" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let cutoff = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
                 let resonance = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(bandpass()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let node = Box::new(bandpass());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(cutoff, node_idx);
                 self.graph.connect_node(resonance, node_idx);
@@ -508,16 +549,20 @@ impl Parser {
             "hp" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let cutoff = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
                 let resonance = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(highpass()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.707)));
+                let node = Box::new(highpass());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(cutoff, node_idx);
                 self.graph.connect_node(resonance, node_idx);
@@ -526,16 +571,20 @@ impl Parser {
             "moog" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let cutoff = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(500.0)));
                 let resonance = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
-                let node_idx = self
-                    .graph
-                    .add_node(Box::new(FunDSPNode::mono(Box::new(moog()))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let node = Box::new(moog());
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: false,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(cutoff, node_idx);
                 self.graph.connect_node(resonance, node_idx);
@@ -544,11 +593,14 @@ impl Parser {
             "delay" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
                 let delay_time = self
                     .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1000.0))));
-                let node_idx = self.graph.add_node(Box::new(DelayNode::new()));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(1000.0)));
+                let node_idx = self.graph.add_node(Node::Delay {
+                    buffer: Box::new([[0.0; 2]; 48000]),
+                    write_pos: 0,
+                });
                 self.graph.connect_node(input, node_idx);
                 self.graph.connect_node(delay_time, node_idx);
                 Some(node_idx)
@@ -556,16 +608,14 @@ impl Parser {
             "reverb" => {
                 let input = first_arg
                     .or_else(|| self.parse_primary())
-                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
-                let node_idx =
-                    self.graph
-                        .add_node(Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
-                            10.0,
-                            2.0,
-                            0.9,
-                            1.0,
-                            lowpole_hz(18000.0),
-                        )))));
+                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.0)));
+                let node = Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0)));
+                let num_inputs = node.inputs();
+                let node_idx = self.graph.add_node(Node::FunDSP {
+                    node,
+                    is_stereo: true,
+                    input_buffer: vec![0.0; num_inputs],
+                });
                 self.graph.connect_node(input, node_idx);
                 Some(node_idx)
             }
