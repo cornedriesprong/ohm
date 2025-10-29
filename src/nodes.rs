@@ -1,4 +1,3 @@
-use crate::container::Arena;
 use crate::utils::cubic_interpolate;
 use fundsp::hacker32::AudioUnit;
 use std::any::Any;
@@ -9,35 +8,29 @@ pub type Frame = [f32; 2];
 macro_rules! define_osc_node {
     ($name:ident, $phase_to_output:expr) => {
         pub struct $name {
-            inputs: Vec<usize>,
             phase: f32,
             sample_rate: u32,
-            buffers: Vec<Vec<Frame>>,
         }
 
         impl $name {
-            pub(crate) fn new(inputs: Vec<usize>, sample_rate: u32) -> Self {
-                let num_inputs = inputs.len();
+            pub(crate) fn new(sample_rate: u32) -> Self {
                 Self {
-                    inputs,
                     phase: 0.0,
                     sample_rate,
-                    buffers: vec![Vec::new(); num_inputs],
                 }
             }
         }
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-                render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
-
-                let freq_input = &self.buffers[0];
+            fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+                const EMPTY: &[Frame] = &[];
+                let freq_input = inputs.get(0).unwrap_or(&EMPTY);
                 let sample_rate = self.sample_rate as f32;
                 let two_pi = 2.0 * PI;
                 let inc = two_pi / sample_rate;
 
-                for (out, freq_frame) in out.iter_mut().zip(freq_input.iter()) {
+                for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
                     let freq = freq_frame[0];
                     self.phase += freq * inc;
                     self.phase %= two_pi;
@@ -46,10 +39,6 @@ macro_rules! define_osc_node {
 
                     *out = [y; 2];
                 }
-            }
-
-            fn get_inputs(&self) -> &[usize] {
-                &self.inputs
             }
 
             fn transfer_state(&mut self, old: &dyn Node) {
@@ -63,72 +52,35 @@ macro_rules! define_osc_node {
 
 macro_rules! define_binary_op_node {
     ($name:ident, $op:expr) => {
-        pub struct $name {
-            inputs: Vec<usize>,
-            buffers: Vec<Vec<Frame>>,
-        }
+        pub struct $name;
 
         impl $name {
-            pub(crate) fn new(inputs: Vec<usize>) -> Self {
-                let num_inputs = inputs.len();
-                Self {
-                    inputs,
-                    buffers: vec![Vec::new(); num_inputs],
-                }
+            pub(crate) fn new() -> Self {
+                Self
             }
         }
 
         impl Node for $name {
             #[inline(always)]
-            fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-                render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
+            fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+                const EMPTY: &[Frame] = &[];
+                let lhs = inputs.get(0).unwrap_or(&EMPTY);
+                let rhs = inputs.get(1).unwrap_or(&EMPTY);
 
-                let lhs = &self.buffers[0];
-                let rhs = &self.buffers[1];
-
-                for (out, (l, r)) in out.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
                     *out = $op(*l, *r);
                 }
-            }
-
-            fn get_inputs(&self) -> &[usize] {
-                &self.inputs
             }
         }
     };
 }
 
-// helper function to render node inputs
-#[inline(always)]
-fn render_inputs(arena: &mut Arena, inputs: &[usize], buffers: &mut Vec<Vec<Frame>>, len: usize) {
-    if buffers.len() != inputs.len() {
-        buffers.resize_with(inputs.len(), Vec::new);
-    }
-
-    for (i, &input_id) in inputs.iter().enumerate() {
-        if buffers[i].len() < len {
-            buffers[i].resize(len, [0.0; 2]);
-        }
-
-        unsafe {
-            let arena_ptr = arena as *mut Arena;
-            (*arena_ptr)
-                .get_mut(input_id)
-                .process(&mut *arena_ptr, &mut buffers[i][..len]);
-        }
-    }
-}
-
 pub(crate) trait Node: Send + Sync + Any {
     #[inline(always)]
-    fn process(&mut self, _arena: &mut Arena, _out: &mut [Frame]) {}
+    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {}
 
     fn get_id(&self) -> String {
         std::any::type_name::<Self>().to_string()
-    }
-
-    fn get_inputs(&self) -> &[usize] {
-        &[]
     }
 
     fn transfer_state(&mut self, _old: &dyn Node) {
@@ -191,44 +143,57 @@ define_osc_node!(LFONode, |phase: f32, _two_pi: f32| {
     (phase.cos() + 1.0) * 0.5
 });
 
+pub struct ConstantNode {
+    value: f32,
+}
+
+impl ConstantNode {
+    pub(crate) fn new(value: f32) -> Self {
+        Self { value }
+    }
+}
+
+impl Node for ConstantNode {
+    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        let frame = [self.value; 2];
+        outputs.fill(frame);
+    }
+
+    fn get_id(&self) -> String {
+        format!("{}", self.value)
+    }
+}
+
 pub struct SampleAndHoldNode {
-    inputs: Vec<usize>,
     value: Frame,
     prev: f32,
-    buffers: Vec<Vec<Frame>>,
 }
 
 impl SampleAndHoldNode {
-    pub(crate) fn new(inputs: Vec<usize>, sample_rate: u32) -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         _ = sample_rate;
         Self {
-            inputs,
             value: [0.0; 2],
             prev: 1.0,
-            buffers: vec![vec![], vec![]],
         }
     }
 }
 
 impl Node for SampleAndHoldNode {
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        const EMPTY: &[Frame] = &[];
+        let signal = inputs.get(0).unwrap_or(&EMPTY);
+        let ramp = inputs.get(1).unwrap_or(&EMPTY);
+        let chunk_size = outputs.len();
 
-        let signal = &self.buffers[0];
-        let ramp = &self.buffers[1];
-
-        for i in 0..out.len() {
-            let ramp_val = ramp[i][0];
+        for i in 0..chunk_size {
+            let ramp_val = ramp.get(i).map(|f| f[0]).unwrap_or(0.0);
             if (ramp_val - self.prev).abs() > 0.5 {
-                self.value = signal[i];
+                self.value = signal.get(i).copied().unwrap_or([0.0; 2]);
             }
             self.prev = ramp_val;
-            out[i] = self.value;
+            outputs[i] = self.value;
         }
-    }
-
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -240,41 +205,34 @@ impl Node for SampleAndHoldNode {
 }
 
 pub struct FunDSPNode {
-    inputs: Vec<usize>,
     node: Box<dyn AudioUnit>,
     is_stereo: bool,
     input_buffer: Vec<f32>,
-    buffers: Vec<Vec<Frame>>,
 }
 
 impl FunDSPNode {
-    pub fn mono(inputs: Vec<usize>, node: Box<dyn AudioUnit>) -> Self {
-        let num_inputs = inputs.len();
+    pub fn mono(node: Box<dyn AudioUnit>) -> Self {
         let num_audio_inputs = node.inputs();
         Self {
-            inputs,
             node,
             is_stereo: false,
             input_buffer: vec![0.0; num_audio_inputs],
-            buffers: vec![Vec::new(); num_inputs],
         }
     }
 
-    pub fn stereo(inputs: Vec<usize>, node: Box<dyn AudioUnit>) -> Self {
-        let num_inputs = inputs.len();
+    pub fn stereo(node: Box<dyn AudioUnit>) -> Self {
         let num_audio_inputs = node.inputs();
         Self {
-            inputs,
             node,
             is_stereo: true,
             input_buffer: vec![0.0; num_audio_inputs],
-            buffers: vec![Vec::new(); num_inputs],
         }
     }
 
     fn get_name(&self) -> String {
         match self.node.get_id() {
-            34 => "Reverb".to_string(),
+            6 => "Reverb".to_string(),
+            21 => "Sin".to_string(),
             _ => self.node.get_id().to_string(),
         }
     }
@@ -282,119 +240,103 @@ impl FunDSPNode {
 
 impl Node for FunDSPNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        let chunk_size = out.len();
-        render_inputs(arena, &self.inputs, &mut self.buffers, chunk_size);
-
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        const EMPTY: &[Frame] = &[];
+        let chunk_size = outputs.len();
         let num_inputs = self.node.inputs();
 
         if self.is_stereo {
             for i in 0..chunk_size {
-                for (input_idx, input_frames) in self.buffers.iter().enumerate().take(num_inputs) {
-                    self.input_buffer[input_idx] = input_frames[i][0];
+                for input_idx in 0..num_inputs {
+                    let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
+                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
                 }
 
                 let mut output_sample = [0.0; 2];
                 self.node.tick(&self.input_buffer, &mut output_sample);
-                out[i] = output_sample;
+                outputs[i] = output_sample;
             }
         } else {
             for i in 0..chunk_size {
-                for (input_idx, input_frames) in self.buffers.iter().enumerate().take(num_inputs) {
-                    self.input_buffer[input_idx] = input_frames[i][0];
+                for input_idx in 0..num_inputs {
+                    let input_frames = inputs.get(input_idx).unwrap_or(&EMPTY);
+                    self.input_buffer[input_idx] = input_frames.get(i).map(|f| f[0]).unwrap_or(0.0);
                 }
 
                 let mut output_sample = [0.0; 1];
                 self.node.tick(&self.input_buffer, &mut output_sample);
-                out[i] = [output_sample[0]; 2];
+                outputs[i] = [output_sample[0]; 2];
             }
         }
     }
 
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
-    }
-
     fn get_id(&self) -> String {
-        format!("FunDSP {}", self.get_name())
+        format!("FunDSP: {}", self.get_name())
     }
 }
 
-pub struct MixNode {
-    inputs: Vec<usize>,
-    num_inputs: usize,
-    buffers: Vec<Vec<Frame>>,
-}
+pub struct MixNode;
 
 impl MixNode {
-    pub(crate) fn new(inputs: Vec<usize>) -> Self {
-        let num_inputs = inputs.len();
-        Self {
-            inputs,
-            num_inputs,
-            buffers: vec![Vec::new(); num_inputs],
-        }
+    pub(crate) fn new() -> Self {
+        Self
     }
 }
 
 impl Node for MixNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        let num_inputs = inputs.len();
+
         // return silence if there are no inputs
-        if self.num_inputs == 0 {
+        if num_inputs == 0 {
+            outputs.fill([0.0; 2]);
             return;
         }
 
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
+        let inv_n = 1.0 / num_inputs as f32;
 
-        for (i, out) in out.iter_mut().enumerate() {
-            for j in 0..self.num_inputs {
-                out[0] += self.buffers[j][i][0];
-                out[1] += self.buffers[j][i][1];
+        for (i, frame) in outputs.iter_mut().enumerate() {
+            let mut l = 0.0f32;
+            let mut r = 0.0f32;
+
+            for input in inputs.iter() {
+                let src = input.get(i).copied().unwrap_or([0.0; 2]);
+                l += src[0];
+                r += src[1];
             }
 
-            out[0] /= self.num_inputs as f32;
-            out[1] /= self.num_inputs as f32;
+            frame[0] = l * inv_n;
+            frame[1] = r * inv_n;
         }
     }
-
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
-    }
 }
 
-pub struct SeqNode {
-    inputs: Vec<usize>,
-    buffers: Vec<Vec<Frame>>,
-}
+pub struct SeqNode;
 
 impl SeqNode {
-    pub(crate) fn new(inputs: Vec<usize>) -> Self {
-        let num_inputs = inputs.len();
-        Self {
-            inputs,
-            buffers: vec![Vec::new(); num_inputs],
-        }
+    pub(crate) fn new() -> Self {
+        Self
     }
 }
 
 impl Node for SeqNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        if inputs.is_empty() {
+            outputs.fill([0.0; 2]);
+            return;
+        }
 
-        let num_steps = self.buffers.len() - 1;
-        let ramp_input = &self.buffers[0];
+        let ramp_input = inputs[0];
+        let num_steps = inputs.len() - 1;
 
-        for (i, (out, ramp_frame)) in out.iter_mut().zip(ramp_input.iter()).enumerate() {
+        for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate() {
             let ramp = ramp_frame[0];
             let step = (ramp * num_steps as f32).floor() as usize;
-            *out = self.buffers[step + 1][i];
+            let step_input = inputs[step + 1];
+            *out = step_input.get(i).copied().unwrap_or([0.0; 2]);
         }
-    }
-
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
     }
 }
 
@@ -435,26 +377,9 @@ impl BufReaderNode {
 }
 
 impl Node for BufReaderNode {
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
-
-        let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
-            buffer
-        } else {
-            return;
-        };
-
-        let phase = self.buffers[0].as_slice();
-
-        for (i, out) in out.iter_mut().enumerate() {
-            let phase = phase[i][0];
-            let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
-            *out = cubic_interpolate(buffer, read_pos);
-        }
-    }
-
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
+    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        // TODO: implement buffer support
+        outputs.fill([0.0; 2]);
     }
 }
 
@@ -479,23 +404,9 @@ impl BufTapNode {
 }
 
 impl Node for BufTapNode {
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
-
-        let buffer = if let Some(buffer) = arena.get_buffer(&self.buf_name) {
-            buffer
-        } else {
-            return;
-        };
-
-        let offset = self.buffers[0].as_slice();
-
-        for (out, offset) in out.iter_mut().zip(offset.iter()) {
-            let read_pos_f = self.write_pos as f32 - offset[0];
-            let buffer_len = buffer.len() as f32;
-            let read_pos = (read_pos_f % buffer_len + buffer_len) % buffer_len;
-            *out = cubic_interpolate(&buffer, read_pos);
-        }
+    fn process(&mut self, _inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        // TODO: implement buffer support
+        outputs.fill([0.0; 2]);
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -525,21 +436,8 @@ impl BufWriterNode {
 }
 
 impl Node for BufWriterNode {
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
-
-        let buffer = if let Some(buffer) = arena.get_buffer_mut(&self.buf_name) {
-            buffer
-        } else {
-            return;
-        };
-
-        let input = &self.buffers[0].as_slice();
-
-        for frame in input.iter() {
-            buffer[self.write_pos] = *frame;
-            self.write_pos = (self.write_pos + 1) % buffer.len();
-        }
+    fn process(&mut self, _inputs: &[&[Frame]], _outputs: &mut [Frame]) {
+        // TODO: implement buffer support
     }
 
     fn transfer_state(&mut self, old: &dyn Node) {
@@ -551,40 +449,39 @@ impl Node for BufWriterNode {
 
 // delay line
 pub(crate) struct DelayNode {
-    inputs: Vec<usize>,
     buffer: [Frame; Self::BUFFER_SIZE],
     write_pos: usize,
-    buffers: Vec<Vec<Frame>>,
 }
 
 impl DelayNode {
     pub const BUFFER_SIZE: usize = 48000;
 
-    pub(crate) fn new(inputs: Vec<usize>) -> Self {
-        let num_inputs = inputs.len();
+    pub(crate) fn new() -> Self {
         Self {
-            inputs,
             buffer: [[0.0; 2]; Self::BUFFER_SIZE],
             write_pos: 0,
-            buffers: vec![Vec::new(); num_inputs],
         }
     }
 }
 
 impl Node for DelayNode {
     #[inline(always)]
-    fn process(&mut self, arena: &mut Arena, out: &mut [Frame]) {
-        render_inputs(arena, &self.inputs, &mut self.buffers, out.len());
-
-        let signal = &self.buffers[0];
-        let delay_input = &self.buffers[1];
+    fn process(&mut self, inputs: &[&[Frame]], outputs: &mut [Frame]) {
+        const EMPTY: &[Frame] = &[];
+        let signal = inputs.get(0).unwrap_or(&EMPTY);
+        let delay_input = inputs.get(1).unwrap_or(&EMPTY);
         let buffer_size_f32 = Self::BUFFER_SIZE as f32;
         let max_delay = (Self::BUFFER_SIZE - 1) as f32;
 
-        for (out, (sig, delay_frame)) in out.iter_mut().zip(signal.iter().zip(delay_input.iter())) {
-            self.buffer[self.write_pos] = *sig;
+        for (i, out) in outputs.iter_mut().enumerate() {
+            let sig = signal.get(i).copied().unwrap_or([0.0; 2]);
+            self.buffer[self.write_pos] = sig;
 
-            let delay = delay_frame[0].clamp(0.0, max_delay);
+            let delay = delay_input
+                .get(i)
+                .map(|f| f[0])
+                .unwrap_or(0.0)
+                .clamp(0.0, max_delay);
             let read_pos = (self.write_pos as f32 - delay + buffer_size_f32) % buffer_size_f32;
 
             *out = cubic_interpolate(&self.buffer, read_pos);
@@ -593,14 +490,10 @@ impl Node for DelayNode {
         }
     }
 
-    fn get_inputs(&self) -> &[usize] {
-        &self.inputs
+    fn transfer_state(&mut self, old: &dyn Node) {
+        if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
+            self.buffer = old.buffer;
+            self.write_pos = old.write_pos;
+        }
     }
-
-    // fn transfer_state(&mut self, old: &dyn Node) {
-    //     if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
-    //         self.buffer = old.buffer;
-    //         self.write_pos = old.write_pos;
-    //     }
-    // }
 }

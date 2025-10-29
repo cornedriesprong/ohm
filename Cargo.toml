@@ -8,6 +8,7 @@ anyhow = "1.0.94"
 cpal = "0.16.0"
 fundsp = "0.20.0"
 notify = "8.0.0"
+petgraph = "0.8.3"
 rtsan-standalone = "0.1.2"
 
 [features]

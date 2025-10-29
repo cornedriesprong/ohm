@@ -60,11 +60,10 @@ where
     let update_graph = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src, config.sample_rate.0);
-        let mut arena = Arena::new();
-        let root = parser.parse(&mut arena);
+        let graph = parser.parse();
 
         if let Ok(mut container) = container.lock() {
-            container.update_graph(arena, root);
+            container.update_graph(graph);
         }
         Ok(())
     };

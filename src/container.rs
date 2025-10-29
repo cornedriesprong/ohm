@@ -1,70 +1,124 @@
 use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
+use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use std::collections::HashMap;
 
-pub struct Arena {
-    nodes: Vec<Box<dyn Node>>,
-    buffers: HashMap<String, Vec<Frame>>,
+pub(crate) struct Graph {
+    graph: StableDiGraph<Box<dyn Node>, ()>,
+    sorted_nodes: Vec<NodeIndex>,
+    input_indices: Vec<usize>,
+    output_buffers: Vec<Vec<Frame>>,
+    chunk_size: usize,
+    max_inputs: usize,
 }
 
-impl Arena {
-    pub fn new() -> Self {
+impl Graph {
+    pub(crate) fn new() -> Self {
         Self {
-            nodes: Vec::new(),
-            buffers: HashMap::new(),
+            graph: StableDiGraph::new(),
+            sorted_nodes: Vec::new(),
+            input_indices: Vec::new(),
+            output_buffers: Vec::new(),
+            chunk_size: 0,
+            max_inputs: 8,
         }
     }
 
-    pub fn alloc(&mut self, node: Box<dyn Node>) -> usize {
-        let id = self.nodes.len();
-        self.nodes.push(node);
-        id
+    fn set_chunk_size(&mut self, chunk_size: usize) {
+        if chunk_size > self.chunk_size {
+            self.chunk_size = chunk_size;
+            for buffer in &mut self.output_buffers {
+                buffer.resize(chunk_size, [0.0, 0.0]);
+            }
+        }
     }
 
-    pub fn get(&self, id: usize) -> &dyn Node {
-        &*self.nodes[id]
+    pub(crate) fn add_node(&mut self, node: Box<dyn Node>) -> NodeIndex {
+        let index = self.graph.add_node(node);
+        self.update_processing_order();
+        index
     }
 
-    pub fn get_mut(&mut self, id: usize) -> &mut dyn Node {
-        &mut *self.nodes[id]
+    pub(crate) fn connect_node(&mut self, from: NodeIndex, to: NodeIndex) {
+        self.graph.add_edge(from, to, ());
+        self.update_processing_order();
     }
 
-    pub fn store_buffer(&mut self, name: String, buffer: Vec<Frame>) {
-        self.buffers.insert(name, buffer);
+    fn update_processing_order(&mut self) {
+        self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
+
+        let node_count = self.graph.node_count();
+        if self.output_buffers.len() < node_count {
+            self.output_buffers.resize(node_count, Vec::new());
+        }
+
+        for buffer in &mut self.output_buffers {
+            if buffer.len() < self.chunk_size {
+                buffer.resize(self.chunk_size, [0.0, 0.0]);
+            }
+        }
+
+        for &node_idx in &self.sorted_nodes {
+            let input_count = self
+                .graph
+                .edges_directed(node_idx, petgraph::Direction::Incoming)
+                .count();
+            if input_count > self.max_inputs {
+                self.max_inputs = input_count;
+            }
+        }
+
+        self.input_indices.clear();
+        self.input_indices.reserve(self.max_inputs);
     }
 
-    pub fn get_buffer(&self, name: &str) -> Option<&[Frame]> {
-        self.buffers.get(name).map(|v| v.as_slice())
-    }
+    pub(crate) fn apply_diff(&mut self, new_graph: Graph) {
+        let mut old_nodes: HashMap<String, NodeIndex> = HashMap::new();
+        for &node_idx in &self.sorted_nodes {
+            let id = self.graph[node_idx].get_id();
+            old_nodes.insert(id, node_idx);
+        }
 
-    pub fn get_buffer_mut(&mut self, name: &str) -> Option<&mut [Frame]> {
-        self.buffers.get_mut(name).map(|v| v.as_mut_slice())
+        let old_graph = std::mem::replace(self, new_graph);
+
+        // transfer state
+        for &new_node_idx in &self.sorted_nodes {
+            let new_id = self.graph[new_node_idx].get_id();
+            if let Some(&old_node_idx) = old_nodes.get(&new_id) {
+                let old_node = &old_graph.graph[old_node_idx];
+                let new_node = &mut self.graph[new_node_idx];
+                new_node.transfer_state(&**old_node);
+            }
+        }
     }
 }
 
 pub(crate) struct Container {
-    arena: Arena,
-    root_node: Option<usize>,
+    graph: Option<Graph>,
     output_buffer: Vec<Frame>,
 }
 
 impl Container {
     pub(crate) fn new() -> Self {
         Self {
-            arena: Arena::new(),
-            root_node: None,
+            graph: None,
             output_buffer: Vec::new(),
         }
     }
 
-    pub(crate) fn update_graph(&mut self, arena: Arena, root: usize) {
-        if let Some(old_id) = self.root_node {
-            self.apply_diff(old_id, &arena, root);
+    pub(crate) fn update_graph(&mut self, new_graph: Graph) {
+        if let Some(old_graph) = self.graph.as_mut() {
+            old_graph.apply_diff(new_graph);
+        } else {
+            self.graph = Some(new_graph);
         }
-        self.arena = arena;
-        self.root_node = Some(root);
 
-        self.print_graph(root);
+        if let Some(graph) = &self.graph {
+            println!(
+                "rendering audio graph ({} nodes):",
+                graph.graph.node_count()
+            );
+        }
     }
 
     #[inline(always)]
@@ -75,78 +129,62 @@ impl Container {
             self.output_buffer.resize(num_frames, [0.0; 2]);
         }
 
-        if let Some(root_id) = self.root_node {
-            let output_chunk = &mut self.output_buffer[..num_frames];
+        let output_chunk = &mut self.output_buffer[..num_frames];
 
-            unsafe {
-                let arena_ptr = &mut self.arena as *mut Arena;
-                (*arena_ptr)
-                    .get_mut(root_id)
-                    .process(&mut *arena_ptr, output_chunk);
+        if let Some(graph) = &mut self.graph {
+            graph.set_chunk_size(num_frames);
+
+            let sorted_nodes = graph.sorted_nodes.clone();
+            for &node_idx in &sorted_nodes {
+                graph.input_indices.clear();
+                for edge in graph
+                    .graph
+                    .edges_directed(node_idx, petgraph::Direction::Incoming)
+                {
+                    graph.input_indices.push(edge.source().index());
+                }
+                graph.input_indices.reverse();
+
+                let output_idx = node_idx.index();
+
+                // SAFETY: We use unsafe here to work around borrow checker limitations.
+                // The topological sort guarantees that input nodes are processed before
+                // this node, and that no node writes to its own input buffers.
+                // Therefore, the input slices and output slice never alias.
+                unsafe {
+                    let buffers_ptr = graph.output_buffers.as_ptr();
+                    let mut input_slices = Vec::with_capacity(graph.max_inputs);
+                    for &idx in &graph.input_indices {
+                        let buf_ptr = buffers_ptr.add(idx);
+                        input_slices
+                            .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames));
+                    }
+
+                    let output_buffer = &mut graph.output_buffers[output_idx][..num_frames];
+                    let node = &mut graph.graph[node_idx];
+                    node.process(&input_slices, output_buffer);
+                }
             }
 
-            scale_buffer(output_chunk, 0.5);
-            soft_limit_poly(output_chunk);
-            hard_clip(output_chunk);
+            if let Some(last_node_idx) = graph.sorted_nodes.last() {
+                let final_output = &graph.output_buffers[last_node_idx.index()][..num_frames];
+                output_chunk.copy_from_slice(final_output);
 
-            for i in 0..num_frames {
-                data[i * 2] = output_chunk[i][0];
-                data[i * 2 + 1] = output_chunk[i][1];
+                scale_buffer(output_chunk, 0.5);
+                soft_limit_poly(output_chunk);
+                hard_clip(output_chunk);
+            } else {
+                // if no nodes, return silence
+                output_chunk.fill([0.0, 0.0]);
             }
         } else {
-            data.fill(0.0);
+            output_chunk.fill([0.0, 0.0]);
         }
-    }
 
-    fn apply_diff(&self, old_id: usize, arena: &Arena, new_id: usize) {
-        let old = self.arena.get(old_id);
-        let new = arena.get(new_id);
-
-        if old.get_id() == new.get_id() {
-            // transfer state from old to new
-            unsafe {
-                let arena_ptr = arena as *const Arena as *mut Arena;
-                (*arena_ptr).get_mut(new_id).transfer_state(old);
-            }
-
-            let old_inputs = old.get_inputs();
-            let new_inputs = new.get_inputs();
-
-            for (&old, &new) in old_inputs.iter().zip(new_inputs.iter()) {
-                self.apply_diff(old, arena, new);
-            }
+        // convert to interleaved
+        for i in 0..num_frames {
+            data[i * 2] = output_chunk[i][0];
+            data[i * 2 + 1] = output_chunk[i][1];
         }
-    }
-
-    fn print_graph(&self, root: usize) {
-        self.print_node(root, "", true);
-    }
-
-    fn print_node(&self, node_id: usize, prefix: &str, is_last: bool) {
-        let node = self.arena.get(node_id);
-        let node_type = self.format_node_type(&node.get_id());
-        let connector = if is_last { "└─" } else { "├─" };
-
-        println!("{}{} {}", prefix, connector, node_type);
-
-        let inputs = node.get_inputs();
-        if !inputs.is_empty() {
-            let new_prefix = if is_last {
-                format!("{}  ", prefix)
-            } else {
-                format!("{}│ ", prefix)
-            };
-
-            for (i, &input_id) in inputs.iter().enumerate() {
-                let is_last_input = i == inputs.len() - 1;
-                self.print_node(input_id, &new_prefix, is_last_input);
-            }
-        }
-    }
-
-    fn format_node_type(&self, node_id: &str) -> String {
-        let parts: Vec<&str> = node_id.split("::").collect();
-        let name = parts.last().unwrap_or(&node_id);
-        name.strip_suffix("Node").unwrap_or(name).to_string()
     }
 }

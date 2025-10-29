@@ -1,13 +1,11 @@
-use crate::container::Arena;
+use crate::container::Graph;
 use crate::nodes::{
-    BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DiffNode, DivideNode,
-    EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode,
-    SampleAndHoldNode, SeqNode, SumNode, WrapNode,
+    ConstantNode, DelayNode, DiffNode, DivideNode, EqualNode, FunDSPNode, GainNode, GreaterNode,
+    LFONode, LessNode, MixNode, PowerNode, RampNode, SampleAndHoldNode, SeqNode, SumNode, WrapNode,
 };
-use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
+use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, VecDeque};
-use std::iter::once;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Token {
@@ -28,10 +26,6 @@ pub(crate) enum Token {
     Newline,
     Pipe,
     Eof,
-}
-
-fn constant_node(arena: &mut Arena, value: f32) -> usize {
-    arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(dc(value)))))
 }
 
 fn tokenize(str: String) -> VecDeque<Token> {
@@ -157,8 +151,9 @@ fn tokenize(str: String) -> VecDeque<Token> {
 pub(crate) struct Parser {
     tokens: VecDeque<Token>,
     pos: usize,
-    env: HashMap<String, usize>,
+    env: HashMap<String, NodeIndex>,
     sample_rate: u32,
+    graph: Graph,
 }
 
 impl Parser {
@@ -168,6 +163,7 @@ impl Parser {
             pos: 0,
             env: HashMap::new(),
             sample_rate,
+            graph: Graph::new(),
         };
     }
 
@@ -181,7 +177,7 @@ impl Parser {
         tok
     }
 
-    pub(crate) fn parse(mut self, arena: &mut Arena) -> usize {
+    pub(crate) fn parse(mut self) -> Graph {
         let mut exprs = Vec::new();
 
         loop {
@@ -193,7 +189,7 @@ impl Parser {
                 break;
             }
 
-            if let Some(expr) = self.parse_statement(arena) {
+            if let Some(expr) = self.parse_statement() {
                 exprs.push(expr);
             }
 
@@ -204,13 +200,19 @@ impl Parser {
 
         // if there is more than one top-level expression, mix them together at the output
         if exprs.len() == 1 {
-            return exprs[0];
-        } else {
-            arena.alloc(Box::new(MixNode::new(exprs)))
+            // Root is already in the graph
+        } else if !exprs.is_empty() {
+            println!("Mixing {} top-level expressions", exprs.len());
+            let mix_node = self.graph.add_node(Box::new(MixNode::new()));
+            for &expr in &exprs {
+                self.graph.connect_node(expr, mix_node);
+            }
         }
+
+        self.graph
     }
 
-    fn parse_statement(&mut self, arena: &mut Arena) -> Option<usize> {
+    fn parse_statement(&mut self) -> Option<NodeIndex> {
         if let Token::Identifier(name) = self.peek() {
             let name = name.clone();
             let prev_pos = self.pos;
@@ -218,7 +220,7 @@ impl Parser {
 
             if matches!(self.peek(), Token::Equal) {
                 self.consume();
-                if let Some(expr) = self.parse_expr(arena, 0) {
+                if let Some(expr) = self.parse_expr(0) {
                     self.env.insert(name, expr);
                     return None;
                 }
@@ -227,11 +229,11 @@ impl Parser {
             self.pos = prev_pos;
         }
 
-        self.parse_expr(arena, 0)
+        self.parse_expr(0)
     }
 
-    fn parse_expr(&mut self, arena: &mut Arena, min_prec: u8) -> Option<usize> {
-        let mut lhs = self.parse_primary(arena)?;
+    fn parse_expr(&mut self, min_prec: u8) -> Option<NodeIndex> {
+        let mut lhs = self.parse_primary()?;
 
         while let Some(op_prec) = self.op_precedence(self.peek()) {
             if op_prec < min_prec {
@@ -243,24 +245,42 @@ impl Parser {
             lhs = match op {
                 Token::Pipe => {
                     if let Token::Identifier(name) = self.consume() {
-                        self.parse_node(arena, &name, Some(lhs))?
+                        self.parse_node(&name, Some(lhs))?
                     } else {
                         panic!("Expected function name after pipe operator");
                     }
                 }
                 _ => {
-                    let rhs = self.parse_expr(arena, op_prec + 1)?;
-                    match op {
-                        Token::Plus => arena.alloc(Box::new(SumNode::new(vec![lhs, rhs]))),
-                        Token::Minus => arena.alloc(Box::new(DiffNode::new(vec![lhs, rhs]))),
-                        Token::Multiply => arena.alloc(Box::new(GainNode::new(vec![lhs, rhs]))),
-                        Token::Divide => arena.alloc(Box::new(DivideNode::new(vec![lhs, rhs]))),
-                        Token::Modulo => arena.alloc(Box::new(WrapNode::new(vec![lhs, rhs]))),
-                        Token::Power => arena.alloc(Box::new(PowerNode::new(vec![lhs, rhs]))),
-                        Token::Greater => arena.alloc(Box::new(GreaterNode::new(vec![lhs, rhs]))),
-                        Token::Less => arena.alloc(Box::new(LessNode::new(vec![lhs, rhs]))),
-                        Token::Equal => arena.alloc(Box::new(EqualNode::new(vec![lhs, rhs]))),
+                    let rhs = self.parse_expr(op_prec + 1)?;
+                    let node_idx = match op {
+                        Token::Plus => self.graph.add_node(Box::new(SumNode::new())),
+                        Token::Minus => self.graph.add_node(Box::new(DiffNode::new())),
+                        Token::Multiply => self.graph.add_node(Box::new(GainNode::new())),
+                        Token::Divide => self.graph.add_node(Box::new(DivideNode::new())),
+                        Token::Modulo => self.graph.add_node(Box::new(WrapNode::new())),
+                        Token::Power => self.graph.add_node(Box::new(PowerNode::new())),
+                        Token::Greater => self.graph.add_node(Box::new(GreaterNode::new())),
+                        Token::Less => self.graph.add_node(Box::new(LessNode::new())),
+                        Token::Equal => self.graph.add_node(Box::new(EqualNode::new())),
                         _ => lhs,
+                    };
+                    if !matches!(
+                        op,
+                        Token::Plus
+                            | Token::Minus
+                            | Token::Multiply
+                            | Token::Divide
+                            | Token::Modulo
+                            | Token::Power
+                            | Token::Greater
+                            | Token::Less
+                            | Token::Equal
+                    ) {
+                        lhs
+                    } else {
+                        self.graph.connect_node(lhs, node_idx);
+                        self.graph.connect_node(rhs, node_idx);
+                        node_idx
                     }
                 }
             };
@@ -269,11 +289,11 @@ impl Parser {
         Some(lhs)
     }
 
-    fn parse_primary(&mut self, arena: &mut Arena) -> Option<usize> {
+    fn parse_primary(&mut self) -> Option<NodeIndex> {
         match self.consume() {
-            Token::Number(num) => Some(constant_node(arena, num)),
+            Token::Number(num) => Some(self.graph.add_node(Box::new(ConstantNode::new(num)))),
             Token::Identifier(name) => {
-                if let Some(op) = self.parse_node(arena, &name, None) {
+                if let Some(op) = self.parse_node(&name, None) {
                     Some(op)
                 } else if let Some(&node_id) = self.env.get(&name) {
                     Some(node_id)
@@ -282,7 +302,7 @@ impl Parser {
                 }
             }
             Token::LParen => {
-                let expr = self.parse_expr(arena, 0)?;
+                let expr = self.parse_expr(0)?;
                 match self.consume() {
                     Token::RParen => Some(expr),
                     _ => panic!("Expected closing parenthesis"),
@@ -306,225 +326,268 @@ impl Parser {
         }
     }
 
-    fn parse_node(
-        &mut self,
-        arena: &mut Arena,
-        name: &str,
-        first_arg: Option<usize>,
-    ) -> Option<usize> {
+    fn parse_node(&mut self, name: &str, first_arg: Option<NodeIndex>) -> Option<NodeIndex> {
         match name {
             "ramp" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 1.0));
-                Some(arena.alloc(Box::new(RampNode::new(vec![freq], self.sample_rate))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(RampNode::new(self.sample_rate)));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
             "sin" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 100.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(sine())))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(sine()))));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
             "saw" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 100.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(saw())))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(saw()))));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
             "sqr" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 100.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(square())))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(square()))));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
             "tri" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 100.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![freq], Box::new(triangle())))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(100.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(triangle()))));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
-            "noise" => Some(arena.alloc(Box::new(FunDSPNode::mono(vec![], Box::new(noise()))))),
+            "noise" => Some(
+                self.graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(noise())))),
+            ),
             "clip" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(vec![input], Box::new(clip())))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(clip()))));
+                self.graph.connect_node(input, node_idx);
+                Some(node_idx)
             }
             "lfo" => {
                 let freq = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 1.0));
-                Some(arena.alloc(Box::new(LFONode::new(vec![freq], self.sample_rate))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(LFONode::new(self.sample_rate)));
+                self.graph.connect_node(freq, node_idx);
+                Some(node_idx)
             }
             "sh" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let trig = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(SampleAndHoldNode::new(
-                    vec![input, trig],
-                    self.sample_rate,
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(SampleAndHoldNode::new(self.sample_rate)));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(trig, node_idx);
+                Some(node_idx)
             }
             "pan" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let pan = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.5));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, pan],
-                    Box::new(panner()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.5))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(panner()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(pan, node_idx);
+                Some(node_idx)
             }
             "seq" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                let mut args = Vec::new();
-                while let Some(arg) = self.parse_primary(arena) {
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                let mut args = vec![input];
+                while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                let args = once(input).chain(args.into_iter()).collect();
-                Some(arena.alloc(Box::new(SeqNode::new(args))))
+                let node_idx = self.graph.add_node(Box::new(SeqNode::new()));
+                for arg in args {
+                    self.graph.connect_node(arg, node_idx);
+                }
+                Some(node_idx)
             }
             "mix" => {
                 let mut args = Vec::new();
-                while let Some(arg) = self.parse_primary(arena) {
+                while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                Some(arena.alloc(Box::new(MixNode::new(args))))
+                let node_idx = self.graph.add_node(Box::new(MixNode::new()));
+                for arg in args {
+                    self.graph.connect_node(arg, node_idx);
+                }
+                Some(node_idx)
             }
             "onepole" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let cutoff = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 20.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, cutoff],
-                    Box::new(lowpole()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(20.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(lowpole()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(cutoff, node_idx);
+                Some(node_idx)
             }
             "lp" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let cutoff = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
                 let resonance = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.707));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, cutoff, resonance],
-                    Box::new(lowpass()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(lowpass()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(cutoff, node_idx);
+                self.graph.connect_node(resonance, node_idx);
+                Some(node_idx)
             }
             "bp" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let cutoff = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
                 let resonance = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.707));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, cutoff, resonance],
-                    Box::new(bandpass()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(bandpass()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(cutoff, node_idx);
+                self.graph.connect_node(resonance, node_idx);
+                Some(node_idx)
             }
             "hp" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let cutoff = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
                 let resonance = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.707));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, cutoff, resonance],
-                    Box::new(highpass()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.707))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(highpass()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(cutoff, node_idx);
+                self.graph.connect_node(resonance, node_idx);
+                Some(node_idx)
             }
             "moog" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let cutoff = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 500.0));
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(500.0))));
                 let resonance = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(FunDSPNode::mono(
-                    vec![input, cutoff, resonance],
-                    Box::new(moog()),
-                ))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                let node_idx = self
+                    .graph
+                    .add_node(Box::new(FunDSPNode::mono(Box::new(moog()))));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(cutoff, node_idx);
+                self.graph.connect_node(resonance, node_idx);
+                Some(node_idx)
             }
             "delay" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
                 let delay_time = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 1000.0));
-                Some(arena.alloc(Box::new(DelayNode::new(vec![input, delay_time]))))
+                    .parse_primary()
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(1000.0))));
+                let node_idx = self.graph.add_node(Box::new(DelayNode::new()));
+                self.graph.connect_node(input, node_idx);
+                self.graph.connect_node(delay_time, node_idx);
+                Some(node_idx)
             }
             "reverb" => {
                 let input = first_arg
-                    .or_else(|| self.parse_primary(arena))
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(FunDSPNode::stereo(
-                    vec![input],
-                    Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
-                ))))
+                    .or_else(|| self.parse_primary())
+                    .unwrap_or_else(|| self.graph.add_node(Box::new(ConstantNode::new(0.0))));
+                let node_idx =
+                    self.graph
+                        .add_node(Box::new(FunDSPNode::stereo(Box::new(reverb2_stereo(
+                            10.0,
+                            2.0,
+                            0.9,
+                            1.0,
+                            lowpole_hz(18000.0),
+                        )))));
+                self.graph.connect_node(input, node_idx);
+                Some(node_idx)
             }
             "buf" => {
-                let name = self.parse_str()?;
-                let length = self.parse_num().unwrap_or(self.sample_rate as f32);
-                let frames = vec![[0.0; 2]; length as usize];
-                arena.store_buffer(name.clone(), frames);
-                Some(arena.alloc(Box::new(BufRefNode::new(name))))
+                // TODO: implement buffer support
+                None
             }
             "file" => {
-                let name = self.parse_str()?;
-                let frames = get_audio_frames(&name).ok()?;
-                arena.store_buffer(name.clone(), frames);
-                Some(arena.alloc(Box::new(BufRefNode::new(name))))
+                // TODO: implement buffer support
+                None
             }
             "play" => {
-                let buf_ref = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
-                let phase = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(BufReaderNode::new(buf_name, vec![phase]))))
+                // TODO: implement buffer support
+                None
             }
             "tap" => {
-                let buf_ref = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
-                let offset = self
-                    .parse_primary(arena)
-                    .unwrap_or_else(|| constant_node(arena, 0.0));
-                Some(arena.alloc(Box::new(BufTapNode::new(buf_name, vec![offset]))))
+                // TODO: implement buffer support
+                None
             }
             "rec" => {
-                let buf_ref = self.parse_primary(arena)?;
-                let buf_name = arena.get(buf_ref).get_buf_name()?.to_string();
-                let input = first_arg.unwrap_or_else(|| {
-                    self.parse_primary(arena)
-                        .unwrap_or_else(|| constant_node(arena, 0.0))
-                });
-                Some(arena.alloc(Box::new(BufWriterNode::new(buf_name, vec![input]))))
+                // TODO: implement buffer support
+                None
             }
             _ => None,
         }
