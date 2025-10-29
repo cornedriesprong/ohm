@@ -6,10 +6,9 @@ use std::collections::HashMap;
 pub(crate) struct Graph {
     graph: StableDiGraph<Node, ()>,
     sorted_nodes: Vec<NodeIndex>,
-    input_indices: Vec<usize>,
+    inputs: Vec<Vec<usize>>,
     output_buffers: Vec<Vec<Frame>>,
     chunk_size: usize,
-    max_inputs: usize,
 }
 
 impl Graph {
@@ -17,10 +16,9 @@ impl Graph {
         Self {
             graph: StableDiGraph::new(),
             sorted_nodes: Vec::new(),
-            input_indices: Vec::new(),
+            inputs: Vec::new(),
             output_buffers: Vec::new(),
             chunk_size: 0,
-            max_inputs: 8,
         }
     }
 
@@ -58,18 +56,20 @@ impl Graph {
             }
         }
 
+        self.inputs.clear();
+        self.inputs.resize(node_count, Vec::new());
+
         for &node_idx in &self.sorted_nodes {
-            let input_count = self
+            let mut inputs: Vec<usize> = self
                 .graph
                 .edges_directed(node_idx, petgraph::Direction::Incoming)
-                .count();
-            if input_count > self.max_inputs {
-                self.max_inputs = input_count;
-            }
-        }
+                .map(|edge| edge.source().index())
+                .collect();
 
-        self.input_indices.clear();
-        self.input_indices.reserve(self.max_inputs);
+            inputs.reverse();
+
+            self.inputs[node_idx.index()] = inputs;
+        }
     }
 
     pub(crate) fn apply_diff(&mut self, new_graph: Graph) {
@@ -82,12 +82,12 @@ impl Graph {
         let old_graph = std::mem::replace(self, new_graph);
 
         // transfer state
-        for &new_node_idx in &self.sorted_nodes {
-            let new_id = self.graph[new_node_idx].get_id();
-            if let Some(&old_node_idx) = old_nodes.get(&new_id) {
-                let old_node = &old_graph.graph[old_node_idx];
-                let new_node = &mut self.graph[new_node_idx];
-                new_node.transfer_state(old_node);
+        for &new_idx in &self.sorted_nodes {
+            let new_id = self.graph[new_idx].get_id();
+            if let Some(&old_idx) = old_nodes.get(&new_id) {
+                let old = &old_graph.graph[old_idx];
+                let new = &mut self.graph[new_idx];
+                new.transfer_state(old);
             }
         }
     }
@@ -134,17 +134,8 @@ impl Container {
         if let Some(graph) = &mut self.graph {
             graph.set_chunk_size(num_frames);
 
-            let sorted_nodes = graph.sorted_nodes.clone();
-            for &node_idx in &sorted_nodes {
-                graph.input_indices.clear();
-                for edge in graph
-                    .graph
-                    .edges_directed(node_idx, petgraph::Direction::Incoming)
-                {
-                    graph.input_indices.push(edge.source().index());
-                }
-                graph.input_indices.reverse();
-
+            for i in 0..graph.sorted_nodes.len() {
+                let node_idx = graph.sorted_nodes[i];
                 let output_idx = node_idx.index();
 
                 // SAFETY: We use unsafe here to work around borrow checker limitations.
@@ -153,12 +144,15 @@ impl Container {
                 // Therefore, the input slices and output slice never alias.
                 unsafe {
                     let buffers_ptr = graph.output_buffers.as_ptr();
-                    let mut input_slices = Vec::with_capacity(graph.max_inputs);
-                    for &idx in &graph.input_indices {
-                        let buf_ptr = buffers_ptr.add(idx);
-                        input_slices
-                            .push(std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames));
-                    }
+                    let node_inputs = &graph.inputs[output_idx];
+
+                    let input_slices: Vec<&[Frame]> = node_inputs
+                        .iter()
+                        .map(|&idx| {
+                            let buf_ptr = buffers_ptr.add(idx);
+                            std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames)
+                        })
+                        .collect();
 
                     let output_buffer = &mut graph.output_buffers[output_idx][..num_frames];
                     let node = &mut graph.graph[node_idx];
