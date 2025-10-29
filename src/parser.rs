@@ -336,6 +336,23 @@ impl Parser {
         node_idx
     }
 
+    fn create_fundsp_node(
+        &mut self,
+        audio_unit: Box<dyn AudioUnit>,
+        is_stereo: bool,
+        args: Vec<NodeIndex>,
+    ) -> NodeIndex {
+        let num_inputs = audio_unit.inputs();
+        self.create_node(
+            Node::FunDSP {
+                audio_unit,
+                is_stereo,
+                input_buffer: vec![0.0; num_inputs],
+            },
+            args,
+        )
+    }
+
     fn parse_node(&mut self, name: &str, first_arg: Option<NodeIndex>) -> Option<NodeIndex> {
         match name {
             "ramp" => {
@@ -348,82 +365,24 @@ impl Parser {
                     vec![freq],
                 ))
             }
-            "sin" => {
+            "sin" | "saw" | "sqr" | "tri" => {
                 let freq = self.get_arg(first_arg, 100.0);
-                let node = Box::new(sine());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
+                Some(self.create_fundsp_node(
+                    match name {
+                        "sin" => Box::new(sine()),
+                        "saw" => Box::new(saw()),
+                        "sqr" => Box::new(square()),
+                        "tri" => Box::new(triangle()),
+                        _ => unreachable!(),
                     },
+                    false,
                     vec![freq],
                 ))
             }
-            "saw" => {
-                let freq = self.get_arg(first_arg, 100.0);
-                let node = Box::new(saw());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![freq],
-                ))
-            }
-            "sqr" => {
-                let freq = self.get_arg(first_arg, 100.0);
-                let node = Box::new(square());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![freq],
-                ))
-            }
-            "tri" => {
-                let freq = self.get_arg(first_arg, 100.0);
-                let node = Box::new(triangle());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![freq],
-                ))
-            }
-            "noise" => {
-                let node = Box::new(noise());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![],
-                ))
-            }
+            "noise" => Some(self.create_fundsp_node(Box::new(noise()), false, vec![])),
             "clip" => {
                 let input = self.get_arg(first_arg, 0.0);
-                let node = Box::new(clip());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![input],
-                ))
+                Some(self.create_fundsp_node(Box::new(clip()), false, vec![input]))
             }
             "lfo" => {
                 let freq = self.get_arg(first_arg, 1.0);
@@ -449,16 +408,7 @@ impl Parser {
             "pan" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let pan = self.get_arg(None, 0.5);
-                let node = Box::new(panner());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![input, pan],
-                ))
+                Some(self.create_fundsp_node(Box::new(panner()), true, vec![input, pan]))
             }
             "seq" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -478,74 +428,21 @@ impl Parser {
             "onepole" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let cutoff = self.get_arg(None, 20.0);
-                let node = Box::new(lowpole());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![input, cutoff],
-                ))
+                Some(self.create_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
             }
-            "lp" => {
+            "lp" | "bp" | "hp" | "moog" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let cutoff = self.get_arg(None, 500.0);
                 let resonance = self.get_arg(None, 0.707);
-                let node = Box::new(lowpass());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
+                Some(self.create_fundsp_node(
+                    match name {
+                        "lp" => Box::new(lowpass()),
+                        "bp" => Box::new(bandpass()),
+                        "hp" => Box::new(highpass()),
+                        "moog" => Box::new(moog()),
+                        _ => unreachable!(),
                     },
-                    vec![input, cutoff, resonance],
-                ))
-            }
-            "bp" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 500.0);
-                let resonance = self.get_arg(None, 0.707);
-                let node = Box::new(bandpass());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![input, cutoff, resonance],
-                ))
-            }
-            "hp" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 500.0);
-                let resonance = self.get_arg(None, 0.707);
-                let node = Box::new(highpass());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
-                    vec![input, cutoff, resonance],
-                ))
-            }
-            "moog" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 500.0);
-                let resonance = self.get_arg(None, 0.707);
-                let node = Box::new(moog());
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: false,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
+                    false,
                     vec![input, cutoff, resonance],
                 ))
             }
@@ -562,14 +459,9 @@ impl Parser {
             }
             "reverb" => {
                 let input = self.get_arg(first_arg, 0.0);
-                let node = Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0)));
-                let num_inputs = node.inputs();
-                Some(self.create_node(
-                    Node::FunDSP {
-                        node,
-                        is_stereo: true,
-                        input_buffer: vec![0.0; num_inputs],
-                    },
+                Some(self.create_fundsp_node(
+                    Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
+                    true,
                     vec![input],
                 ))
             }

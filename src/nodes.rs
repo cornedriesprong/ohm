@@ -48,7 +48,7 @@ pub(crate) enum Node {
         prev: f32,
     },
     FunDSP {
-        node: Box<dyn AudioUnit>,
+        audio_unit: Box<dyn AudioUnit>,
         is_stereo: bool,
         input_buffer: Vec<f32>,
     },
@@ -124,7 +124,7 @@ impl Node {
                 }
             }
             Node::FunDSP {
-                node,
+                audio_unit: node,
                 is_stereo,
                 input_buffer,
             } => {
