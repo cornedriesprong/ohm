@@ -140,11 +140,11 @@ pub(crate) trait Node: Send + Sync + Any {
     }
 }
 
-define_binary_op_node!(AddNode, |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(SumNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] + rhs[0], lhs[1] + rhs[0]]
 });
 
-define_binary_op_node!(SubtractNode, |lhs: Frame, rhs: Frame| {
+define_binary_op_node!(DiffNode, |lhs: Frame, rhs: Frame| {
     [lhs[0] - rhs[0], lhs[1] - rhs[0]]
 });
 

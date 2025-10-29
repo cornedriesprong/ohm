@@ -1,8 +1,8 @@
 use crate::container::Arena;
 use crate::nodes::{
-    AddNode, BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DivideNode,
+    BufReaderNode, BufRefNode, BufTapNode, BufWriterNode, DelayNode, DiffNode, DivideNode,
     EqualNode, FunDSPNode, GainNode, GreaterNode, LFONode, LessNode, MixNode, PowerNode, RampNode,
-    SampleAndHoldNode, SeqNode, SubtractNode, WrapNode,
+    SampleAndHoldNode, SeqNode, SumNode, WrapNode,
 };
 use crate::utils::get_audio_frames;
 use fundsp::hacker32::*;
@@ -247,8 +247,8 @@ impl Parser {
                 _ => {
                     let rhs = self.parse_expr(arena, op_prec + 1)?;
                     match op {
-                        Token::Plus => arena.alloc(Box::new(AddNode::new(vec![lhs, rhs]))),
-                        Token::Minus => arena.alloc(Box::new(SubtractNode::new(vec![lhs, rhs]))),
+                        Token::Plus => arena.alloc(Box::new(SumNode::new(vec![lhs, rhs]))),
+                        Token::Minus => arena.alloc(Box::new(DiffNode::new(vec![lhs, rhs]))),
                         Token::Multiply => arena.alloc(Box::new(GainNode::new(vec![lhs, rhs]))),
                         Token::Divide => arena.alloc(Box::new(DivideNode::new(vec![lhs, rhs]))),
                         Token::Modulo => arena.alloc(Box::new(WrapNode::new(vec![lhs, rhs]))),
