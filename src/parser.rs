@@ -328,121 +328,137 @@ impl Parser {
             .unwrap_or_else(|| self.graph.add_node(Node::Constant(default)))
     }
 
+    fn create_node(&mut self, node: Node, args: Vec<NodeIndex>) -> NodeIndex {
+        let node_idx = self.graph.add_node(node);
+        for arg in args {
+            self.graph.connect_node(arg, node_idx);
+        }
+        node_idx
+    }
+
     fn parse_node(&mut self, name: &str, first_arg: Option<NodeIndex>) -> Option<NodeIndex> {
         match name {
             "ramp" => {
                 let freq = self.get_arg(first_arg, 1.0);
-                let node_idx = self.graph.add_node(Node::Ramp {
-                    phase: 0.0,
-                    sample_rate: self.sample_rate,
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::Ramp {
+                        phase: 0.0,
+                        sample_rate: self.sample_rate,
+                    },
+                    vec![freq],
+                ))
             }
             "sin" => {
                 let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(sine());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![freq],
+                ))
             }
             "saw" => {
                 let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(saw());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![freq],
+                ))
             }
             "sqr" => {
                 let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(square());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![freq],
+                ))
             }
             "tri" => {
                 let freq = self.get_arg(first_arg, 100.0);
                 let node = Box::new(triangle());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![freq],
+                ))
             }
             "noise" => {
                 let node = Box::new(noise());
                 let num_inputs = node.inputs();
-                Some(self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                }))
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![],
+                ))
             }
             "clip" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let node = Box::new(clip());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input],
+                ))
             }
             "lfo" => {
                 let freq = self.get_arg(first_arg, 1.0);
-                let node_idx = self.graph.add_node(Node::Lfo {
-                    phase: 0.0,
-                    sample_rate: self.sample_rate,
-                });
-                self.graph.connect_node(freq, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::Lfo {
+                        phase: 0.0,
+                        sample_rate: self.sample_rate,
+                    },
+                    vec![freq],
+                ))
             }
             "sh" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let trig = self.get_arg(None, 0.0);
-                let node_idx = self.graph.add_node(Node::SampleAndHold {
-                    value: [0.0; 2],
-                    prev: 0.0,
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(trig, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::SampleAndHold {
+                        value: [0.0; 2],
+                        prev: 0.0,
+                    },
+                    vec![input, trig],
+                ))
             }
             "pan" => {
                 let input = self.get_arg(first_arg, 0.0);
-                let pan = self
-                    .parse_primary()
-                    .unwrap_or_else(|| self.graph.add_node(Node::Constant(0.5)));
+                let pan = self.get_arg(None, 0.5);
                 let node = Box::new(panner());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(pan, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, pan],
+                ))
             }
             "seq" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -450,36 +466,28 @@ impl Parser {
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                let node_idx = self.graph.add_node(Node::Seq);
-                for arg in args {
-                    self.graph.connect_node(arg, node_idx);
-                }
-                Some(node_idx)
+                Some(self.create_node(Node::Seq, args))
             }
             "mix" => {
                 let mut args = Vec::new();
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                let node_idx = self.graph.add_node(Node::Mix);
-                for arg in args {
-                    self.graph.connect_node(arg, node_idx);
-                }
-                Some(node_idx)
+                Some(self.create_node(Node::Mix, args))
             }
             "onepole" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let cutoff = self.get_arg(None, 20.0);
                 let node = Box::new(lowpole());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(cutoff, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, cutoff],
+                ))
             }
             "lp" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -487,15 +495,14 @@ impl Parser {
                 let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(lowpass());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(cutoff, node_idx);
-                self.graph.connect_node(resonance, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, cutoff, resonance],
+                ))
             }
             "bp" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -503,15 +510,14 @@ impl Parser {
                 let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(bandpass());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(cutoff, node_idx);
-                self.graph.connect_node(resonance, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, cutoff, resonance],
+                ))
             }
             "hp" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -519,15 +525,14 @@ impl Parser {
                 let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(highpass());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(cutoff, node_idx);
-                self.graph.connect_node(resonance, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, cutoff, resonance],
+                ))
             }
             "moog" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -535,38 +540,38 @@ impl Parser {
                 let resonance = self.get_arg(None, 0.707);
                 let node = Box::new(moog());
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: false,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(cutoff, node_idx);
-                self.graph.connect_node(resonance, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: false,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input, cutoff, resonance],
+                ))
             }
             "delay" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let delay_time = self.get_arg(None, 100.0);
-                let node_idx = self.graph.add_node(Node::Delay {
-                    buffer: Box::new([[0.0; 2]; 48000]),
-                    write_pos: 0,
-                });
-                self.graph.connect_node(input, node_idx);
-                self.graph.connect_node(delay_time, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::Delay {
+                        buffer: Box::new([[0.0; 2]; 48000]),
+                        write_pos: 0,
+                    },
+                    vec![input, delay_time],
+                ))
             }
             "reverb" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let node = Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0)));
                 let num_inputs = node.inputs();
-                let node_idx = self.graph.add_node(Node::FunDSP {
-                    node,
-                    is_stereo: true,
-                    input_buffer: vec![0.0; num_inputs],
-                });
-                self.graph.connect_node(input, node_idx);
-                Some(node_idx)
+                Some(self.create_node(
+                    Node::FunDSP {
+                        node,
+                        is_stereo: true,
+                        input_buffer: vec![0.0; num_inputs],
+                    },
+                    vec![input],
+                ))
             }
             "buf" => {
                 // TODO: implement buffer support
