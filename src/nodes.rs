@@ -4,6 +4,26 @@ use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
 
+macro_rules! binary_op {
+    ($inputs:expr, $outputs:expr, $op:tt) => {{
+        let lhs = $inputs[0];
+        let rhs = $inputs[1];
+        for (out, (l, r)) in $outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+            *out = [l[0] $op r[0], l[1] $op r[1]];
+        }
+    }};
+}
+
+macro_rules! comparison_op {
+    ($inputs:expr, $outputs:expr, $op:tt) => {{
+        let lhs = $inputs[0];
+        let rhs = $inputs[1];
+        for (out, (l, r)) in $outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+            *out = [(l[0] $op r[0]) as u32 as f32, (l[1] $op r[1]) as u32 as f32];
+        }
+    }};
+}
+
 pub(crate) enum Node {
     Constant(f32),
     Ramp {
@@ -75,41 +95,11 @@ impl Node {
                     *out = [y; 2];
                 }
             }
-            Node::Sum => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0] + r[0], l[1] + r[1]];
-                }
-            }
-            Node::Diff => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0] - r[0], l[1] - r[1]];
-                }
-            }
-            Node::Gain => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0] * r[0], l[1] * r[1]];
-                }
-            }
-            Node::Divide => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0] / r[0], l[1] / r[1]];
-                }
-            }
-            Node::Wrap => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0] % r[0], l[1] % r[1]];
-                }
-            }
+            Node::Sum => binary_op!(inputs, outputs, +),
+            Node::Diff => binary_op!(inputs, outputs, -),
+            Node::Gain => binary_op!(inputs, outputs, *),
+            Node::Divide => binary_op!(inputs, outputs, /),
+            Node::Wrap => binary_op!(inputs, outputs, %),
             Node::Power => {
                 let lhs = inputs[0];
                 let rhs = inputs[1];
@@ -117,27 +107,9 @@ impl Node {
                     *out = [l[0].powf(r[0]), l[1].powf(r[1])];
                 }
             }
-            Node::Greater => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [(l[0] > r[0]) as u32 as f32, (l[1] > r[1]) as u32 as f32];
-                }
-            }
-            Node::Less => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [(l[0] < r[0]) as u32 as f32, (l[1] < r[1]) as u32 as f32];
-                }
-            }
-            Node::Equal => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [(l[0] == r[0]) as u32 as f32, (l[1] == r[1]) as u32 as f32];
-                }
-            }
+            Node::Greater => comparison_op!(inputs, outputs, >),
+            Node::Less => comparison_op!(inputs, outputs, <),
+            Node::Equal => comparison_op!(inputs, outputs, ==),
             Node::SampleAndHold { value, prev, .. } => {
                 let input = inputs[0];
                 let ramp = inputs[1];
@@ -268,36 +240,18 @@ impl Node {
 
     pub(crate) fn transfer_state(&mut self, old: &Node) {
         match (self, old) {
-            (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => {
-                *new = *old;
-            }
-            (Node::Lfo { phase: new, .. }, Node::Lfo { phase: old, .. }) => {
-                *new = *old;
-            }
+            (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => *new = *old,
+            (Node::Lfo { phase: new, .. }, Node::Lfo { phase: old, .. }) => *new = *old,
             (
-                Node::SampleAndHold {
-                    value: new_val,
-                    prev: new_prev,
-                    ..
-                },
-                Node::SampleAndHold {
-                    value: old_val,
-                    prev: old_prev,
-                    ..
-                },
+                Node::SampleAndHold { value: new_val, prev: new_prev },
+                Node::SampleAndHold { value: old_val, prev: old_prev },
             ) => {
                 *new_val = *old_val;
                 *new_prev = *old_prev;
             }
             (
-                Node::Delay {
-                    buffer: new_buf,
-                    write_pos: new_pos,
-                },
-                Node::Delay {
-                    buffer: old_buf,
-                    write_pos: old_pos,
-                },
+                Node::Delay { buffer: new_buf, write_pos: new_pos },
+                Node::Delay { buffer: old_buf, write_pos: old_pos },
             ) => {
                 **new_buf = **old_buf;
                 *new_pos = *old_pos;
