@@ -271,6 +271,13 @@ impl FunDSPNode {
             buffers: vec![Vec::new(); num_inputs],
         }
     }
+
+    fn get_name(&self) -> String {
+        match self.node.get_id() {
+            34 => "Reverb".to_string(),
+            _ => self.node.get_id().to_string(),
+        }
+    }
 }
 
 impl Node for FunDSPNode {
@@ -306,6 +313,10 @@ impl Node for FunDSPNode {
 
     fn get_inputs(&self) -> &[usize] {
         &self.inputs
+    }
+
+    fn get_id(&self) -> String {
+        format!("FunDSP {}", self.get_name())
     }
 }
 
@@ -586,10 +597,10 @@ impl Node for DelayNode {
         &self.inputs
     }
 
-    fn transfer_state(&mut self, old: &dyn Node) {
-        if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
-            self.buffer = old.buffer;
-            self.write_pos = old.write_pos;
-        }
-    }
+    // fn transfer_state(&mut self, old: &dyn Node) {
+    //     if let Some(old) = (old as &dyn Any).downcast_ref::<DelayNode>() {
+    //         self.buffer = old.buffer;
+    //         self.write_pos = old.write_pos;
+    //     }
+    // }
 }

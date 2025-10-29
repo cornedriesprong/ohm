@@ -63,6 +63,8 @@ impl Container {
         }
         self.arena = arena;
         self.root_node = Some(root);
+
+        self.print_graph(root);
     }
 
     #[inline(always)]
@@ -114,5 +116,37 @@ impl Container {
                 self.apply_diff(old, arena, new);
             }
         }
+    }
+
+    fn print_graph(&self, root: usize) {
+        self.print_node(root, "", true);
+    }
+
+    fn print_node(&self, node_id: usize, prefix: &str, is_last: bool) {
+        let node = self.arena.get(node_id);
+        let node_type = self.format_node_type(&node.get_id());
+        let connector = if is_last { "└─" } else { "├─" };
+
+        println!("{}{} {}", prefix, connector, node_type);
+
+        let inputs = node.get_inputs();
+        if !inputs.is_empty() {
+            let new_prefix = if is_last {
+                format!("{}  ", prefix)
+            } else {
+                format!("{}│ ", prefix)
+            };
+
+            for (i, &input_id) in inputs.iter().enumerate() {
+                let is_last_input = i == inputs.len() - 1;
+                self.print_node(input_id, &new_prefix, is_last_input);
+            }
+        }
+    }
+
+    fn format_node_type(&self, node_id: &str) -> String {
+        let parts: Vec<&str> = node_id.split("::").collect();
+        let name = parts.last().unwrap_or(&node_id);
+        name.strip_suffix("Node").unwrap_or(name).to_string()
     }
 }

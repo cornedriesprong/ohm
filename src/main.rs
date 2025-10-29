@@ -62,8 +62,9 @@ where
         let parser = Parser::new(src, config.sample_rate.0);
         let mut arena = Arena::new();
         let root = parser.parse(&mut arena);
-        if let Ok(mut guard) = container.lock() {
-            guard.update_graph(arena, root);
+
+        if let Ok(mut container) = container.lock() {
+            container.update_graph(arena, root);
         }
         Ok(())
     };
