@@ -58,6 +58,18 @@ pub(crate) enum Node {
         buffer: Box<[Frame; 48000]>,
         write_pos: usize,
     },
+    // BufferTap {
+    //     name: String,
+    // },
+    // BufferWriter {
+    //     name: String,
+    // },
+    // BufferReader {
+    //     name: String,
+    // },
+    BufferRef {
+        name: String,
+    },
 }
 
 impl Node {
@@ -214,10 +226,10 @@ impl Node {
                     *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
+            Node::BufferRef { .. } => { /* No processing needed */ }
         }
     }
 
-    #[inline(always)]
     pub(crate) fn get_id(&self) -> String {
         match self {
             Node::Constant(v) => format!("Constant({})", v),
