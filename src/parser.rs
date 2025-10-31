@@ -467,27 +467,27 @@ impl Parser {
             }
             "buf" => {
                 let length = self.parse_num().unwrap_or(self.sample_rate as f32) as usize;
-                let id = self.graph.add_buffer(length);
-                Some(self.create_node(Node::BufferRef { id, length }, vec![]))
+                let frames = vec![[0.0; 2]; length];
+                let node_idx = self.graph.add_buffer_node(frames);
+                Some(node_idx)
             }
             "file" => {
                 let filename = self.parse_str()?;
                 let frames = get_audio_frames(&filename).ok()?;
-                let length = frames.len();
-                let id = self.graph.load_frames_to_buffer(frames);
-                Some(self.create_node(Node::BufferRef { id, length }, vec![]))
+                let node_idx = self.graph.add_buffer_node(frames);
+                Some(node_idx)
             }
             "play" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let id = self.get_arg(None, 0.0).index();
-                Some(self.create_node(Node::BufferReader { id }, vec![input]))
+                let phase = self.get_arg(first_arg, 0.0);
+                let id = self.get_arg(None, 0.0);
+                Some(self.create_node(Node::BufferReader { id }, vec![phase, id]))
             }
             "tap" => {
-                let id = self.get_arg(None, 0.0).index();
+                let id = self.get_arg(None, 0.0);
                 Some(self.create_node(Node::BufferTap { id, write_pos: 0 }, vec![]))
             }
             "rec" => {
-                let id = self.get_arg(None, 0.0).index();
+                let id = self.get_arg(None, 0.0);
                 Some(self.create_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
             }
             _ => None,

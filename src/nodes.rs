@@ -1,5 +1,6 @@
 use crate::utils::cubic_interpolate;
 use fundsp::hacker32::AudioUnit;
+use petgraph::graph::NodeIndex;
 use std::f32::consts::PI;
 
 pub type Frame = [f32; 2];
@@ -24,6 +25,7 @@ macro_rules! comparison_op {
     }};
 }
 
+#[derive(Clone)]
 pub(crate) enum Node {
     Constant(f32),
     Ramp {
@@ -59,18 +61,18 @@ pub(crate) enum Node {
         write_pos: usize,
     },
     BufferTap {
-        id: usize,
+        id: NodeIndex,
         write_pos: usize,
     },
     BufferWriter {
-        id: usize,
+        id: NodeIndex,
         write_pos: usize,
     },
     BufferReader {
-        id: usize,
+        id: NodeIndex,
     },
     BufferRef {
-        id: usize,
+        id: NodeIndex,
         length: usize,
     },
 }
@@ -243,10 +245,10 @@ impl Node {
             Node::Mix => "Mix".to_string(),
             Node::Seq => "Seq".to_string(),
             Node::Delay { .. } => "Delay".to_string(),
-            Node::BufferTap { id, .. } => format!("BufferTap({})", id),
-            Node::BufferWriter { id, .. } => format!("BufferWriter({})", id),
-            Node::BufferReader { id } => format!("BufferReader({})", id),
-            Node::BufferRef { id, .. } => format!("BufferRef({})", id),
+            Node::BufferTap { id, .. } => format!("BufferTap({:?})", id),
+            Node::BufferWriter { id, .. } => format!("BufferWriter({:?})", id),
+            Node::BufferReader { id } => format!("BufferReader({:?})", id),
+            Node::BufferRef { id, .. } => format!("BufferRef({:?})", id),
         }
     }
 
@@ -321,6 +323,7 @@ impl Node {
                     *out = cubic_interpolate(buffer, read_pos);
                 }
             }
+            // TODO: buffer tap
             _ => unimplemented!(),
         }
     }

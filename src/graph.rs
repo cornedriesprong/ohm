@@ -8,7 +8,7 @@ pub(crate) struct Graph {
     graph: StableDiGraph<Node, ()>,
     sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<Vec<usize>>,
-    buffers: Vec<Vec<Frame>>,
+    buffers: HashMap<NodeIndex, Vec<Frame>>,
     output_buffers: Vec<Vec<Frame>>,
     chunk_size: usize,
 }
@@ -19,7 +19,7 @@ impl Graph {
             graph: StableDiGraph::new(),
             sorted_nodes: Vec::new(),
             inputs: Vec::new(),
-            buffers: Vec::new(),
+            buffers: HashMap::new(),
             output_buffers: Vec::new(),
             chunk_size: 0,
         }
@@ -35,19 +35,30 @@ impl Graph {
         }
     }
 
-    pub(crate) fn load_frames_to_buffer(&mut self, frames: Vec<Frame>) -> usize {
-        self.buffers.push(frames);
-        self.buffers.len() - 1
-    }
-
-    pub(crate) fn add_buffer(&mut self, length: usize) -> usize {
-        self.buffers.push(vec![[0.0, 0.0]; length]);
-        self.buffers.len() - 1
-    }
-
     pub(crate) fn add_node(&mut self, node: Node) -> NodeIndex {
-        let index = self.graph.add_node(node);
+        let index = self.graph.add_node(node.clone());
+
         self.update_processing_order();
+
+        index
+    }
+
+    pub(crate) fn add_buffer_node(&mut self, frames: Vec<Frame>) -> NodeIndex {
+        let index = self.graph.add_node(Node::BufferRef {
+            id: NodeIndex::end(),
+            length: frames.len(),
+        });
+
+        // update node id
+        let node = &mut self.graph[index];
+        if let Node::BufferRef { id, .. } = node {
+            *id = index;
+        }
+
+        self.buffers.insert(index, frames);
+
+        self.update_processing_order();
+
         index
     }
 
@@ -90,14 +101,14 @@ impl Graph {
         let num_frames = output.len();
         self.set_chunk_size(num_frames);
 
-        for i in 0..self.sorted_nodes.len() {
-            let node_idx = self.sorted_nodes[i];
+        for &node_idx in &self.sorted_nodes {
             let output_idx = node_idx.index();
 
-            // SAFETY: We use unsafe here to work around borrow checker limitations.
-            // The topological sort guarantees that input nodes are processed before
-            // this node, and that no node writes to its own input buffers.
-            // Therefore, the input slices and output slice never alias.
+            // if node is a buffer writer, skip processing
+            // if self.buffers.contains_key(&node_idx) {
+            //     continue;
+            // }
+
             unsafe {
                 let buffers_ptr = self.output_buffers.as_ptr();
                 let node_inputs = &self.inputs[output_idx];
@@ -111,8 +122,38 @@ impl Graph {
                     .collect();
 
                 let output_buffer = &mut self.output_buffers[output_idx][..num_frames];
+
                 let node = &mut self.graph[node_idx];
+                match node {
+                    Node::BufferReader { id } | Node::BufferTap { id, .. } => {
+                        if let Some(buffer) = self.buffers.get(id) {
+                            let node = &mut self.graph[node_idx];
+                            node.process_read_buffer(&input_slices, buffer, output_buffer);
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+
                 node.process(&input_slices, output_buffer);
+
+                match node {
+                    Node::BufferWriter { id, .. } => {
+                        if let Some(buffer) = self.buffers.get_mut(id) {
+                            let buffers_ptr = self.output_buffers.as_ptr();
+                            let node_inputs = &self.inputs[output_idx];
+                            let input_slices: SmallVec<[&[Frame]; 8]> = node_inputs
+                                .iter()
+                                .map(|&idx| {
+                                    let buf_ptr = buffers_ptr.add(idx);
+                                    std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames)
+                                })
+                                .collect();
+                            node.process_write_buffer(&input_slices, buffer);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
