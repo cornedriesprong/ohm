@@ -58,18 +58,22 @@ pub(crate) enum Node {
         buffer: Box<[Frame; 48000]>,
         write_pos: usize,
     },
-    // BufferTap {
-    //     name: String,
-    // },
-    // BufferWriter {
-    //     name: String,
-    // },
-    // BufferReader {
-    //     name: String,
-    // },
-    // BufferRef {
-    //     name: String,
-    // },
+    BufferTap {
+        id: usize,
+        write_pos: usize,
+    },
+    BufferWriter {
+        id: usize,
+        write_pos: usize,
+    },
+    BufferReader {
+        id: usize,
+    },
+    BufferRef {
+        id: usize,
+        length: usize,
+        filename: Option<String>,
+    },
 }
 
 impl Node {
@@ -167,13 +171,7 @@ impl Node {
                 }
             }
             Node::Mix => {
-                let num_inputs = inputs.len();
-                if num_inputs == 0 {
-                    outputs.fill([0.0; 2]);
-                    return;
-                }
-
-                let inv_n = 1.0 / num_inputs as f32;
+                let inv_n = 1.0 / inputs.len() as f32;
                 for (i, frame) in outputs.iter_mut().enumerate() {
                     let mut l = 0.0f32;
                     let mut r = 0.0f32;
@@ -187,14 +185,8 @@ impl Node {
                 }
             }
             Node::Seq => {
-                if inputs.is_empty() {
-                    outputs.fill([0.0; 2]);
-                    return;
-                }
-
                 let ramp_input = inputs[0];
                 let num_steps = inputs.len() - 1;
-
                 for (i, (out, ramp_frame)) in outputs.iter_mut().zip(ramp_input.iter()).enumerate()
                 {
                     let ramp = ramp_frame[0];
@@ -226,6 +218,10 @@ impl Node {
                     *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
+            Node::BufferTap { .. } => {}
+            Node::BufferWriter { .. } => {}
+            Node::BufferReader { .. } => {}
+            Node::BufferRef { .. } => {}
         }
     }
 
@@ -248,6 +244,16 @@ impl Node {
             Node::Mix => "Mix".to_string(),
             Node::Seq => "Seq".to_string(),
             Node::Delay { .. } => "Delay".to_string(),
+            Node::BufferTap { id, .. } => format!("BufferTap({})", id),
+            Node::BufferWriter { id, .. } => format!("BufferWriter({})", id),
+            Node::BufferReader { id } => format!("BufferReader({})", id),
+            Node::BufferRef { filename, .. } => {
+                if let Some(name) = filename {
+                    format!("BufferRef:file:{}", name)
+                } else {
+                    "BufferRef:anonymous".to_string()
+                }
+            }
         }
     }
 
@@ -303,7 +309,41 @@ impl Node {
                     new_buf.resize(new_unit.inputs(), 0.0);
                 }
             }
-            _ => {}
+            _ => unimplemented!(),
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn process_read_buffer(
+        &mut self,
+        inputs: &[&[Frame]],
+        buffer: &[Frame],
+        outputs: &mut [Frame],
+    ) {
+        match self {
+            Node::BufferReader { .. } => {
+                for (i, out) in outputs.iter_mut().enumerate() {
+                    let phase = inputs[0][i][0];
+                    let read_pos = phase * (buffer.len() as f32 - f32::EPSILON);
+                    *out = cubic_interpolate(buffer, read_pos);
+                }
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn process_write_buffer(&mut self, inputs: &[&[Frame]], buffer: &mut [Frame]) {
+        match self {
+            Node::BufferWriter { mut write_pos, .. } => {
+                let buffer_len = buffer.len();
+                for (i, frame) in &mut buffer.iter_mut().enumerate() {
+                    let input = inputs[0][i];
+                    *frame = input;
+                    write_pos = (write_pos + 1) % buffer_len;
+                }
+            }
+            _ => unimplemented!(),
         }
     }
 }
