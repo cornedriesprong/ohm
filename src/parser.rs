@@ -1,5 +1,5 @@
-use crate::graph::Graph;
 use crate::nodes::Node;
+use crate::{graph::Graph, utils::get_audio_frames};
 use fundsp::hacker32::*;
 use petgraph::graph::NodeIndex;
 use std::collections::{HashMap, VecDeque};
@@ -466,24 +466,29 @@ impl Parser {
                 ))
             }
             "buf" => {
-                // TODO: implement buffer support
-                None
+                let length = self.parse_num().unwrap_or(self.sample_rate as f32) as usize;
+                let id = self.graph.add_buffer(length);
+                Some(self.create_node(Node::BufferRef { id, length }, vec![]))
             }
             "file" => {
-                // TODO: implement buffer support
-                None
+                let filename = self.parse_str()?;
+                let frames = get_audio_frames(&filename).ok()?;
+                let length = frames.len();
+                let id = self.graph.load_frames_to_buffer(frames);
+                Some(self.create_node(Node::BufferRef { id, length }, vec![]))
             }
             "play" => {
-                // TODO: implement buffer support
-                None
+                let input = self.get_arg(first_arg, 0.0);
+                let id = self.get_arg(None, 0.0).index();
+                Some(self.create_node(Node::BufferReader { id }, vec![input]))
             }
             "tap" => {
-                // TODO: implement buffer support
-                None
+                let id = self.get_arg(None, 0.0).index();
+                Some(self.create_node(Node::BufferTap { id, write_pos: 0 }, vec![]))
             }
             "rec" => {
-                // TODO: implement buffer support
-                None
+                let id = self.get_arg(None, 0.0).index();
+                Some(self.create_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
             }
             _ => None,
         }

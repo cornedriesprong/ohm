@@ -72,7 +72,6 @@ pub(crate) enum Node {
     BufferRef {
         id: usize,
         length: usize,
-        filename: Option<String>,
     },
 }
 
@@ -247,13 +246,7 @@ impl Node {
             Node::BufferTap { id, .. } => format!("BufferTap({})", id),
             Node::BufferWriter { id, .. } => format!("BufferWriter({})", id),
             Node::BufferReader { id } => format!("BufferReader({})", id),
-            Node::BufferRef { filename, .. } => {
-                if let Some(name) = filename {
-                    format!("BufferRef:file:{}", name)
-                } else {
-                    "BufferRef:anonymous".to_string()
-                }
-            }
+            Node::BufferRef { id, .. } => format!("BufferRef({})", id),
         }
     }
 
