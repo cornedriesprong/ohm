@@ -8,6 +8,7 @@ pub(crate) struct Graph {
     graph: StableDiGraph<Node, ()>,
     sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<Vec<usize>>,
+    buffers: Vec<Vec<Frame>>,
     output_buffers: Vec<Vec<Frame>>,
     chunk_size: usize,
 }
@@ -18,6 +19,7 @@ impl Graph {
             graph: StableDiGraph::new(),
             sorted_nodes: Vec::new(),
             inputs: Vec::new(),
+            buffers: Vec::new(),
             output_buffers: Vec::new(),
             chunk_size: 0,
         }
@@ -31,6 +33,16 @@ impl Graph {
                 buffer.resize(chunk_size, [0.0, 0.0]);
             }
         }
+    }
+
+    pub(crate) fn load_frames_to_buffer(&mut self, frames: Vec<Frame>) -> usize {
+        self.buffers.push(frames);
+        self.buffers.len() - 1
+    }
+
+    pub(crate) fn add_buffer(&mut self, length: usize) -> usize {
+        self.buffers.push(vec![[0.0, 0.0]; length]);
+        self.buffers.len() - 1
     }
 
     pub(crate) fn add_node(&mut self, node: Node) -> NodeIndex {
@@ -71,6 +83,44 @@ impl Graph {
             inputs.reverse();
 
             self.inputs[node_idx.index()] = inputs;
+        }
+    }
+
+    fn process(&mut self, output: &mut [Frame]) {
+        let num_frames = output.len();
+        self.set_chunk_size(num_frames);
+
+        for i in 0..self.sorted_nodes.len() {
+            let node_idx = self.sorted_nodes[i];
+            let output_idx = node_idx.index();
+
+            // SAFETY: We use unsafe here to work around borrow checker limitations.
+            // The topological sort guarantees that input nodes are processed before
+            // this node, and that no node writes to its own input buffers.
+            // Therefore, the input slices and output slice never alias.
+            unsafe {
+                let buffers_ptr = self.output_buffers.as_ptr();
+                let node_inputs = &self.inputs[output_idx];
+
+                let input_slices: SmallVec<[&[Frame]; 8]> = node_inputs
+                    .iter()
+                    .map(|&idx| {
+                        let buf_ptr = buffers_ptr.add(idx);
+                        std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames)
+                    })
+                    .collect();
+
+                let output_buffer = &mut self.output_buffers[output_idx][..num_frames];
+                let node = &mut self.graph[node_idx];
+                node.process(&input_slices, output_buffer);
+            }
+        }
+
+        if let Some(last_node_idx) = self.sorted_nodes.last() {
+            let final_output = &self.output_buffers[last_node_idx.index()][..num_frames];
+            output.copy_from_slice(final_output);
+        } else {
+            output.fill([0.0, 0.0]);
         }
     }
 
@@ -124,8 +174,8 @@ impl Container {
     }
 
     #[inline(always)]
-    pub fn process(&mut self, data: &mut [f32]) {
-        let num_frames = data.len() / 2;
+    pub fn process(&mut self, output: &mut [f32]) {
+        let num_frames = output.len() / 2;
 
         if self.output_buffer.len() < num_frames {
             self.output_buffer.resize(num_frames, [0.0; 2]);
@@ -134,53 +184,19 @@ impl Container {
         let output_chunk = &mut self.output_buffer[..num_frames];
 
         if let Some(graph) = &mut self.graph {
-            graph.set_chunk_size(num_frames);
-
-            for i in 0..graph.sorted_nodes.len() {
-                let node_idx = graph.sorted_nodes[i];
-                let output_idx = node_idx.index();
-
-                // SAFETY: We use unsafe here to work around borrow checker limitations.
-                // The topological sort guarantees that input nodes are processed before
-                // this node, and that no node writes to its own input buffers.
-                // Therefore, the input slices and output slice never alias.
-                unsafe {
-                    let buffers_ptr = graph.output_buffers.as_ptr();
-                    let node_inputs = &graph.inputs[output_idx];
-
-                    let input_slices: SmallVec<[&[Frame]; 8]> = node_inputs
-                        .iter()
-                        .map(|&idx| {
-                            let buf_ptr = buffers_ptr.add(idx);
-                            std::slice::from_raw_parts((*buf_ptr).as_ptr(), num_frames)
-                        })
-                        .collect();
-
-                    let output_buffer = &mut graph.output_buffers[output_idx][..num_frames];
-                    let node = &mut graph.graph[node_idx];
-                    node.process(&input_slices, output_buffer);
-                }
-            }
-
-            if let Some(last_node_idx) = graph.sorted_nodes.last() {
-                let final_output = &graph.output_buffers[last_node_idx.index()][..num_frames];
-                output_chunk.copy_from_slice(final_output);
-
-                scale_buffer(output_chunk, 0.5);
-                soft_limit_poly(output_chunk);
-                hard_clip(output_chunk);
-            } else {
-                // if no nodes, return silence
-                output_chunk.fill([0.0, 0.0]);
-            }
+            graph.process(output_chunk);
+            scale_buffer(output_chunk, 0.5);
+            soft_limit_poly(output_chunk);
+            hard_clip(output_chunk);
         } else {
+            // if no graph, return silence
             output_chunk.fill([0.0, 0.0]);
         }
 
         // convert to interleaved
         for i in 0..num_frames {
-            data[i * 2] = output_chunk[i][0];
-            data[i * 2 + 1] = output_chunk[i][1];
+            output[i * 2] = output_chunk[i][0];
+            output[i * 2 + 1] = output_chunk[i][1];
         }
     }
 }
