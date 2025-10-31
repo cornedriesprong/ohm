@@ -67,9 +67,9 @@ pub(crate) enum Node {
     // BufferReader {
     //     name: String,
     // },
-    BufferRef {
-        name: String,
-    },
+    // BufferRef {
+    //     name: String,
+    // },
 }
 
 impl Node {
@@ -226,7 +226,6 @@ impl Node {
                     *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
-            Node::BufferRef { .. } => { /* No processing needed */ }
         }
     }
 
@@ -282,6 +281,27 @@ impl Node {
             ) => {
                 **new_buf = **old_buf;
                 *new_pos = *old_pos;
+            }
+            (
+                Node::FunDSP {
+                    audio_unit: new_unit,
+                    is_stereo: new_stereo,
+                    input_buffer: new_buf,
+                },
+                Node::FunDSP {
+                    audio_unit: old_unit,
+                    is_stereo: old_stereo,
+                    ..
+                },
+            ) => {
+                if *new_stereo == *old_stereo
+                    && new_unit.inputs() == old_unit.inputs()
+                    && new_unit.outputs() == old_unit.outputs()
+                    && new_unit.get_id() == old_unit.get_id()
+                {
+                    *new_unit = old_unit.clone();
+                    new_buf.resize(new_unit.inputs(), 0.0);
+                }
             }
             _ => {}
         }
