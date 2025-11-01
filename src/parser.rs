@@ -286,6 +286,15 @@ impl Parser {
     fn parse_primary(&mut self) -> Option<NodeIndex> {
         match self.consume() {
             Token::Number(num) => Some(self.graph.add_node(Node::Constant(num))),
+            Token::Minus => {
+                if let Token::Number(num) = self.peek() {
+                    let num = *num;
+                    self.consume();
+                    Some(self.graph.add_node(Node::Constant(-num)))
+                } else {
+                    None
+                }
+            }
             Token::Identifier(name) => {
                 if let Some(op) = self.parse_node(&name, None) {
                     Some(op)
