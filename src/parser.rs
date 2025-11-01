@@ -196,10 +196,7 @@ impl Parser {
         }
 
         // if there is more than one top-level expression, mix them together at the output
-        if exprs.len() == 1 {
-            // Root is already in the graph
-        } else if !exprs.is_empty() {
-            println!("Mixing {} top-level expressions", exprs.len());
+        if exprs.len() > 1 {
             let mix_node = self.graph.add_node(Node::Mix);
             for &expr in &exprs {
                 self.graph.connect_node(expr, mix_node);

@@ -44,6 +44,7 @@ impl Graph {
     }
 
     pub(crate) fn add_buffer_node(&mut self, frames: Vec<Frame>) -> NodeIndex {
+        println!("Adding buffer node with {} frames", frames.len());
         let index = self.graph.add_node(Node::BufferRef);
 
         self.buffers.insert(index, frames);
@@ -94,11 +95,6 @@ impl Graph {
 
         for &node_idx in &self.sorted_nodes {
             let output_idx = node_idx.index();
-
-            // if node is a buffer writer, skip processing
-            // if self.buffers.contains_key(&node_idx) {
-            //     continue;
-            // }
 
             unsafe {
                 let buffers_ptr = self.output_buffers.as_ptr();

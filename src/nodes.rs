@@ -301,7 +301,7 @@ impl Node {
                     new_buf.resize(new_unit.inputs(), 0.0);
                 }
             }
-            _ => unimplemented!(),
+            _ => {}
         }
     }
 
