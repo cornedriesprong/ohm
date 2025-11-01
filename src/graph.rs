@@ -44,16 +44,7 @@ impl Graph {
     }
 
     pub(crate) fn add_buffer_node(&mut self, frames: Vec<Frame>) -> NodeIndex {
-        let index = self.graph.add_node(Node::BufferRef {
-            id: NodeIndex::end(),
-            length: frames.len(),
-        });
-
-        // update node id
-        let node = &mut self.graph[index];
-        if let Node::BufferRef { id, .. } = node {
-            *id = index;
-        }
+        let index = self.graph.add_node(Node::BufferRef);
 
         self.buffers.insert(index, frames);
 

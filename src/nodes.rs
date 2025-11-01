@@ -71,10 +71,7 @@ pub(crate) enum Node {
     BufferReader {
         id: NodeIndex,
     },
-    BufferRef {
-        id: NodeIndex,
-        length: usize,
-    },
+    BufferRef,
 }
 
 impl Node {
@@ -248,7 +245,7 @@ impl Node {
             Node::BufferTap { id, .. } => format!("BufferTap({:?})", id),
             Node::BufferWriter { id, .. } => format!("BufferWriter({:?})", id),
             Node::BufferReader { id } => format!("BufferReader({:?})", id),
-            Node::BufferRef { id, .. } => format!("BufferRef({:?})", id),
+            Node::BufferRef => format!("BufferRef"),
         }
     }
 
