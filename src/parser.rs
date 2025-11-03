@@ -284,7 +284,9 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Option<NodeIndex> {
-        match self.consume() {
+        let pos = self.pos;
+
+        let result = match self.consume() {
             Token::Number(num) => Some(self.graph.add_node(Node::Constant(num))),
             Token::Minus => {
                 if let Token::Number(num) = self.peek() {
@@ -312,7 +314,14 @@ impl Parser {
                 }
             }
             _ => None,
+        };
+
+        // backtrack if we failed to parse
+        if result.is_none() {
+            self.pos = pos;
         }
+
+        result
     }
 
     fn parse_str(&mut self) -> Option<String> {
