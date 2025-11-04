@@ -57,7 +57,7 @@ where
 
     stream.play()?;
 
-    let update_graph = |path| -> Result<(), anyhow::Error> {
+    let parse_file = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src, config.sample_rate.0);
         let graph = parser.parse();
@@ -68,7 +68,7 @@ where
         Ok(())
     };
 
-    update_graph(Path::new(filename))?;
+    parse_file(Path::new(filename))?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -82,7 +82,7 @@ where
     let mut check_duration_and_update = || {
         let now = Instant::now();
         if now.duration_since(last_update) >= debounce_duration {
-            if let Err(e) = update_graph(path) {
+            if let Err(e) = parse_file(path) {
                 eprintln!("Error updating audio graph: {}", e);
             }
             last_update = now;
