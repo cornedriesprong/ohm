@@ -25,6 +25,25 @@ macro_rules! comparison_op {
     }};
 }
 
+macro_rules! unary_op {
+    ($inputs:expr, $outputs:expr, $fn:ident) => {{
+        let input = $inputs[0];
+        for (out, frame) in $outputs.iter_mut().zip(input.iter()) {
+            *out = [frame[0].$fn(), frame[1].$fn()];
+        }
+    }};
+}
+
+macro_rules! binary_fn {
+    ($inputs:expr, $outputs:expr, $fn:ident) => {{
+        let lhs = $inputs[0];
+        let rhs = $inputs[1];
+        for (out, (l, r)) in $outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
+            *out = [l[0].$fn(r[0]), l[1].$fn(r[1])];
+        }
+    }};
+}
+
 #[derive(Clone)]
 pub(crate) enum Node {
     Constant(f32),
@@ -38,6 +57,9 @@ pub(crate) enum Node {
     },
     Sum,
     Diff,
+    Round,
+    Floor,
+    Ceil,
     Gain,
     Divide,
     Wrap,
@@ -116,13 +138,10 @@ impl Node {
             Node::Gain => binary_op!(inputs, outputs, *),
             Node::Divide => binary_op!(inputs, outputs, /),
             Node::Wrap => binary_op!(inputs, outputs, %),
-            Node::Power => {
-                let lhs = inputs[0];
-                let rhs = inputs[1];
-                for (out, (l, r)) in outputs.iter_mut().zip(lhs.iter().zip(rhs.iter())) {
-                    *out = [l[0].powf(r[0]), l[1].powf(r[1])];
-                }
-            }
+            Node::Round => unary_op!(inputs, outputs, round),
+            Node::Floor => unary_op!(inputs, outputs, floor),
+            Node::Ceil => unary_op!(inputs, outputs, ceil),
+            Node::Power => binary_fn!(inputs, outputs, powf),
             Node::Greater => comparison_op!(inputs, outputs, >),
             Node::Less => comparison_op!(inputs, outputs, <),
             Node::Equal => comparison_op!(inputs, outputs, ==),
@@ -239,6 +258,9 @@ impl Node {
             Node::Lfo { .. } => "Lfo".to_string(),
             Node::Sum => "Sum".to_string(),
             Node::Diff => "Diff".to_string(),
+            Node::Round => "Round".to_string(),
+            Node::Floor => "Floor".to_string(),
+            Node::Ceil => "Ceil".to_string(),
             Node::Gain => "Gain".to_string(),
             Node::Divide => "Divide".to_string(),
             Node::Wrap => "Wrap".to_string(),

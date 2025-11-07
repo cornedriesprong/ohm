@@ -403,6 +403,18 @@ impl Parser {
                 let input = self.get_arg(first_arg, 0.0);
                 Some(self.create_fundsp_node(Box::new(clip()), false, vec![input]))
             }
+            "round" => {
+                let input = self.get_arg(first_arg, 0.0);
+                Some(self.create_node(Node::Round, vec![input]))
+            }
+            "floor" => {
+                let input = self.get_arg(first_arg, 0.0);
+                Some(self.create_node(Node::Floor, vec![input]))
+            }
+            "ceil" => {
+                let input = self.get_arg(first_arg, 0.0);
+                Some(self.create_node(Node::Ceil, vec![input]))
+            }
             "lfo" => {
                 let freq = self.get_arg(first_arg, 1.0);
                 Some(self.create_node(
@@ -444,7 +456,7 @@ impl Parser {
                 }
                 Some(self.create_node(Node::Mix, args))
             }
-            "onepole" => {
+            "onepole" | "smooth" => {
                 let input = self.get_arg(first_arg, 0.0);
                 let cutoff = self.get_arg(None, 1.0);
                 Some(self.create_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
