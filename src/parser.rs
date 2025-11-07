@@ -36,6 +36,15 @@ fn tokenize(str: String) -> VecDeque<Token> {
                 // ignore these
                 chars.next();
             }
+            '#' => {
+                while let Some(&ch) = chars.peek() {
+                    chars.next();
+                    if ch == '\n' {
+                        tokens.push_back(Token::Newline);
+                        break;
+                    }
+                }
+            }
             '\n' => {
                 tokens.push_back(Token::Newline);
                 chars.next();
