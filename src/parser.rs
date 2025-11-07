@@ -380,7 +380,7 @@ impl Parser {
                     vec![freq],
                 ))
             }
-            "sin" | "saw" | "sqr" | "tri" => {
+            "sin" | "saw" | "sqr" | "tri" | "organ" | "softsaw" | "rossler" | "lorenz" => {
                 let freq = self.get_arg(first_arg, 100.0);
                 Some(self.create_fundsp_node(
                     match name {
@@ -388,6 +388,10 @@ impl Parser {
                         "saw" => Box::new(saw()),
                         "sqr" => Box::new(square()),
                         "tri" => Box::new(triangle()),
+                        "organ" => Box::new(organ()),
+                        "softsaw" => Box::new(soft_saw()),
+                        "rossler" => Box::new(rossler()),
+                        "lorenz" => Box::new(lorenz()),
                         _ => unreachable!(),
                     },
                     false,
@@ -442,7 +446,7 @@ impl Parser {
             }
             "onepole" => {
                 let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 20.0);
+                let cutoff = self.get_arg(None, 1.0);
                 Some(self.create_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
             }
             "lp" | "bp" | "hp" | "moog" => {
@@ -460,6 +464,10 @@ impl Parser {
                     false,
                     vec![input, cutoff, resonance],
                 ))
+            }
+            "tanh" => {
+                let input = self.get_arg(first_arg, 0.0);
+                Some(self.create_fundsp_node(Box::new(shape(Tanh(1.0))), false, vec![input]))
             }
             "delay" => {
                 let input = self.get_arg(first_arg, 0.0);
@@ -504,6 +512,10 @@ impl Parser {
             "rec" => {
                 let id = self.get_arg(None, 0.0);
                 Some(self.create_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
+            }
+            "log" => {
+                let input = self.get_arg(first_arg, 0.0);
+                Some(self.create_node(Node::Log, vec![input]))
             }
             _ => None,
         }

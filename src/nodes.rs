@@ -72,6 +72,7 @@ pub(crate) enum Node {
         id: NodeIndex,
     },
     BufferRef,
+    Log,
 }
 
 impl Node {
@@ -216,6 +217,14 @@ impl Node {
                     *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
+            Node::Log => {
+                for (i, out) in outputs.iter_mut().enumerate() {
+                    let input = inputs[0];
+                    let frame = input.get(i).copied().unwrap_or([0.0; 2]);
+                    println!("[{}]: L = {}, R = {}", i, frame[0], frame[1]);
+                    *out = frame;
+                }
+            }
             Node::BufferTap { .. } => {}
             Node::BufferWriter { .. } => {}
             Node::BufferReader { .. } => {}
@@ -246,6 +255,7 @@ impl Node {
             Node::BufferWriter { id, .. } => format!("BufferWriter({:?})", id),
             Node::BufferReader { id } => format!("BufferReader({:?})", id),
             Node::BufferRef => format!("BufferRef"),
+            Node::Log => "Log".to_string(),
         }
     }
 
