@@ -9,6 +9,7 @@ pub(crate) enum Token {
     Number(f32),
     Identifier(String),
     String(String),
+    Assign,
     Plus,
     Minus,
     Multiply,
@@ -68,8 +69,13 @@ fn tokenize(str: String) -> VecDeque<Token> {
                 chars.next();
             }
             '=' => {
-                tokens.push_back(Token::Equal);
                 chars.next();
+                if let Some(&'=') = chars.peek() {
+                    chars.next();
+                    tokens.push_back(Token::Equal);
+                } else {
+                    tokens.push_back(Token::Assign);
+                }
             }
             '(' => {
                 tokens.push_back(Token::LParen);
@@ -212,7 +218,7 @@ impl Parser {
             let prev_pos = self.pos;
             self.consume();
 
-            if matches!(self.peek(), Token::Equal) {
+            if matches!(self.peek(), Token::Assign) {
                 self.consume();
                 if let Some(expr) = self.parse_expr(0) {
                     self.env.insert(name, expr);
