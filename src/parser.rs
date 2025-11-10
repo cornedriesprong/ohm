@@ -353,12 +353,12 @@ impl Parser {
         }
     }
 
-    fn get_arg(&mut self, arg: Option<NodeIndex>, default: f32) -> NodeIndex {
+    fn parse_arg(&mut self, arg: Option<NodeIndex>, default: f32) -> NodeIndex {
         arg.or_else(|| self.parse_primary())
             .unwrap_or_else(|| self.graph.add_node(Node::Constant(default)))
     }
 
-    fn create_node(&mut self, node: Node, args: Vec<NodeIndex>) -> NodeIndex {
+    fn add_node(&mut self, node: Node, args: Vec<NodeIndex>) -> NodeIndex {
         let node_idx = self.graph.add_node(node);
         for arg in args {
             self.graph.connect_node(arg, node_idx);
@@ -366,14 +366,14 @@ impl Parser {
         node_idx
     }
 
-    fn create_fundsp_node(
+    fn add_fundsp_node(
         &mut self,
         audio_unit: Box<dyn AudioUnit>,
         is_stereo: bool,
         args: Vec<NodeIndex>,
     ) -> NodeIndex {
         let num_inputs = audio_unit.inputs();
-        self.create_node(
+        self.add_node(
             Node::FunDSP {
                 audio_unit,
                 is_stereo,
@@ -386,8 +386,8 @@ impl Parser {
     fn parse_node(&mut self, name: &str, first_arg: Option<NodeIndex>) -> Option<NodeIndex> {
         match name {
             "ramp" => {
-                let freq = self.get_arg(first_arg, 1.0);
-                Some(self.create_node(
+                let freq = self.parse_arg(first_arg, 1.0);
+                Some(self.add_node(
                     Node::Ramp {
                         phase: 0.0,
                         sample_rate: self.sample_rate,
@@ -396,8 +396,8 @@ impl Parser {
                 ))
             }
             "sin" | "saw" | "sqr" | "tri" | "organ" | "softsaw" | "rossler" | "lorenz" => {
-                let freq = self.get_arg(first_arg, 100.0);
-                Some(self.create_fundsp_node(
+                let freq = self.parse_arg(first_arg, 100.0);
+                Some(self.add_fundsp_node(
                     match name {
                         "sin" => Box::new(sine()),
                         "saw" => Box::new(saw()),
@@ -413,26 +413,26 @@ impl Parser {
                     vec![freq],
                 ))
             }
-            "noise" => Some(self.create_fundsp_node(Box::new(noise()), false, vec![])),
+            "noise" => Some(self.add_fundsp_node(Box::new(noise()), false, vec![])),
             "clip" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_fundsp_node(Box::new(clip()), false, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_fundsp_node(Box::new(clip()), false, vec![input]))
             }
             "round" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_node(Node::Round, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_node(Node::Round, vec![input]))
             }
             "floor" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_node(Node::Floor, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_node(Node::Floor, vec![input]))
             }
             "ceil" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_node(Node::Ceil, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_node(Node::Ceil, vec![input]))
             }
             "lfo" => {
-                let freq = self.get_arg(first_arg, 1.0);
-                Some(self.create_node(
+                let freq = self.parse_arg(first_arg, 1.0);
+                Some(self.add_node(
                     Node::Lfo {
                         phase: 0.0,
                         sample_rate: self.sample_rate,
@@ -441,9 +441,9 @@ impl Parser {
                 ))
             }
             "sh" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let trig = self.get_arg(None, 0.0);
-                Some(self.create_node(
+                let input = self.parse_arg(first_arg, 0.0);
+                let trig = self.parse_arg(None, 0.0);
+                Some(self.add_node(
                     Node::SampleAndHold {
                         value: [0.0; 2],
                         prev: 0.0,
@@ -452,35 +452,35 @@ impl Parser {
                 ))
             }
             "pan" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let pan = self.get_arg(None, 0.5);
-                Some(self.create_fundsp_node(Box::new(panner()), true, vec![input, pan]))
+                let input = self.parse_arg(first_arg, 0.0);
+                let pan = self.parse_arg(None, 0.5);
+                Some(self.add_fundsp_node(Box::new(panner()), true, vec![input, pan]))
             }
             "seq" => {
-                let input = self.get_arg(first_arg, 0.0);
+                let input = self.parse_arg(first_arg, 0.0);
                 let mut args = vec![input];
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                Some(self.create_node(Node::Seq, args))
+                Some(self.add_node(Node::Seq, args))
             }
             "mix" => {
                 let mut args = Vec::new();
                 while let Some(arg) = self.parse_primary() {
                     args.push(arg);
                 }
-                Some(self.create_node(Node::Mix, args))
+                Some(self.add_node(Node::Mix, args))
             }
             "onepole" | "smooth" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 1.0);
-                Some(self.create_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
+                let input = self.parse_arg(first_arg, 0.0);
+                let cutoff = self.parse_arg(None, 1.0);
+                Some(self.add_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
             }
             "lp" | "bp" | "hp" | "moog" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let cutoff = self.get_arg(None, 500.0);
-                let resonance = self.get_arg(None, 0.707);
-                Some(self.create_fundsp_node(
+                let input = self.parse_arg(first_arg, 0.0);
+                let cutoff = self.parse_arg(None, 500.0);
+                let resonance = self.parse_arg(None, 0.707);
+                Some(self.add_fundsp_node(
                     match name {
                         "lp" => Box::new(lowpass()),
                         "bp" => Box::new(bandpass()),
@@ -493,13 +493,13 @@ impl Parser {
                 ))
             }
             "tanh" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_fundsp_node(Box::new(shape(Tanh(1.0))), false, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_fundsp_node(Box::new(shape(Tanh(1.0))), false, vec![input]))
             }
             "delay" => {
-                let input = self.get_arg(first_arg, 0.0);
-                let delay_time = self.get_arg(None, 100.0);
-                Some(self.create_node(
+                let input = self.parse_arg(first_arg, 0.0);
+                let delay_time = self.parse_arg(None, 100.0);
+                Some(self.add_node(
                     Node::Delay {
                         buffer: Box::new([[0.0; 2]; 48000]),
                         write_pos: 0,
@@ -508,8 +508,8 @@ impl Parser {
                 ))
             }
             "reverb" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_fundsp_node(
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_fundsp_node(
                     Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
                     true,
                     vec![input],
@@ -528,21 +528,21 @@ impl Parser {
                 Some(node_idx)
             }
             "play" => {
-                let phase = self.get_arg(first_arg, 0.0);
-                let id = self.get_arg(None, 0.0);
-                Some(self.create_node(Node::BufferReader { id }, vec![phase, id]))
+                let phase = self.parse_arg(first_arg, 0.0);
+                let id = self.parse_arg(None, 0.0);
+                Some(self.add_node(Node::BufferReader { id }, vec![phase, id]))
             }
             "tap" => {
-                let id = self.get_arg(None, 0.0);
-                Some(self.create_node(Node::BufferTap { id, write_pos: 0 }, vec![]))
+                let id = self.parse_arg(None, 0.0);
+                Some(self.add_node(Node::BufferTap { id, write_pos: 0 }, vec![]))
             }
             "rec" => {
-                let id = self.get_arg(None, 0.0);
-                Some(self.create_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
+                let id = self.parse_arg(None, 0.0);
+                Some(self.add_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
             }
             "log" => {
-                let input = self.get_arg(first_arg, 0.0);
-                Some(self.create_node(Node::Log, vec![input]))
+                let input = self.parse_arg(first_arg, 0.0);
+                Some(self.add_node(Node::Log, vec![input]))
             }
             _ => None,
         }
