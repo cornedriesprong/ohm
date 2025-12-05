@@ -2,7 +2,7 @@ use crate::nodes::{Frame, Node};
 use crate::utils::{hard_clip, scale_buffer, soft_limit_poly};
 use petgraph::{graph::NodeIndex, prelude::StableDiGraph, visit::EdgeRef};
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Graph {
     graph: StableDiGraph<Node, ()>,
@@ -153,19 +153,24 @@ impl Graph {
     }
 
     pub(crate) fn apply_diff(&mut self, new_graph: Graph) {
-        let mut old_nodes: HashMap<String, NodeIndex> = HashMap::new();
+        let mut old_nodes: Vec<(String, NodeIndex)> = Vec::new();
         for &node_idx in &self.sorted_nodes {
             let id = self.graph[node_idx].get_id();
-            old_nodes.insert(id, node_idx);
+            old_nodes.push((id, node_idx));
         }
 
         let old_graph = std::mem::replace(self, new_graph);
 
-        // transfer state
+        let mut indices = HashSet::new();
         for &new_idx in &self.sorted_nodes {
             let new_id = self.graph[new_idx].get_id();
-            if let Some(&old_idx) = old_nodes.get(&new_id) {
-                let old = &old_graph.graph[old_idx];
+
+            if let Some((_, old_idx)) = old_nodes
+                .iter()
+                .find(|(id, idx)| id == &new_id && !indices.contains(idx))
+            {
+                indices.insert(*old_idx);
+                let old = &old_graph.graph[*old_idx];
                 let new = &mut self.graph[new_idx];
                 new.transfer_state(old);
             }
