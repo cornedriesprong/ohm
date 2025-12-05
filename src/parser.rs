@@ -395,11 +395,10 @@ impl Parser {
                     vec![freq],
                 ))
             }
-            "sin" | "saw" | "sqr" | "tri" | "organ" | "softsaw" | "rossler" | "lorenz" => {
+            "saw" | "sqr" | "tri" | "organ" | "softsaw" | "rossler" | "lorenz" => {
                 let freq = self.parse_arg(first_arg, 100.0);
                 Some(self.add_fundsp_node(
                     match name {
-                        "sin" => Box::new(sine()),
                         "saw" => Box::new(saw()),
                         "sqr" => Box::new(square()),
                         "tri" => Box::new(triangle()),
@@ -430,14 +429,23 @@ impl Parser {
                 let input = self.parse_arg(first_arg, 0.0);
                 Some(self.add_node(Node::Ceil, vec![input]))
             }
-            "lfo" => {
-                let freq = self.parse_arg(first_arg, 1.0);
+            "lfo" | "sin" => {
+                let freq = self.parse_arg(first_arg, 440.0);
+                let mut args = vec![freq];
+                if let Some(phase_offset) = self.parse_primary() {
+                    args.push(phase_offset);
+
+                    if let Some(fb) = self.parse_primary() {
+                        args.push(fb);
+                    }
+                }
                 Some(self.add_node(
-                    Node::Lfo {
+                    Node::Osc {
                         phase: 0.0,
+                        z: 0.0,
                         sample_rate: self.sample_rate,
                     },
-                    vec![freq],
+                    args,
                 ))
             }
             "sh" => {

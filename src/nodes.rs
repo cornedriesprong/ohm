@@ -51,8 +51,9 @@ pub(crate) enum Node {
         phase: f32,
         sample_rate: u32,
     },
-    Lfo {
+    Osc {
         phase: f32,
+        z: f32,
         sample_rate: u32,
     },
     Sum,
@@ -119,18 +120,40 @@ impl Node {
                     *out = [y; 2];
                 }
             }
-            Node::Lfo { phase, sample_rate } => {
+            Node::Osc {
+                phase,
+                z,
+                sample_rate,
+            } => {
                 let freq_input = inputs[0];
                 let sample_rate = *sample_rate as f32;
                 let two_pi = 2.0 * PI;
                 let inc = two_pi / sample_rate;
 
-                for (out, freq_frame) in outputs.iter_mut().zip(freq_input.iter()) {
+                for (i, (out, freq_frame)) in outputs.iter_mut().zip(freq_input.iter()).enumerate()
+                {
                     let freq = freq_frame[0];
                     *phase += freq * inc;
                     *phase %= two_pi;
-                    let y = (phase.cos() + 1.0) * 0.5;
+
+                    let phase_offset = inputs
+                        .get(1)
+                        .and_then(|input| input.get(i))
+                        .map(|f| f[0] * two_pi)
+                        .unwrap_or(0.0);
+
+                    let fb_amt = inputs
+                        .get(2)
+                        .and_then(|input| input.get(i))
+                        .map(|f| f[0])
+                        .unwrap_or(0.0);
+
+                    let fb_pm = *z * fb_amt * two_pi;
+
+                    let y = (*phase + phase_offset + fb_pm).sin();
                     *out = [y; 2];
+
+                    *z = y;
                 }
             }
             Node::Sum => binary_op!(inputs, outputs, +),
@@ -255,7 +278,7 @@ impl Node {
         match self {
             Node::Constant(v) => format!("Constant({})", v),
             Node::Ramp { .. } => "Ramp".to_string(),
-            Node::Lfo { .. } => "Lfo".to_string(),
+            Node::Osc { .. } => "Osc".to_string(),
             Node::Sum => "Sum".to_string(),
             Node::Diff => "Diff".to_string(),
             Node::Round => "Round".to_string(),
@@ -285,7 +308,21 @@ impl Node {
     pub(crate) fn transfer_state(&mut self, old: &Node) {
         match (self, old) {
             (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => *new = *old,
-            (Node::Lfo { phase: new, .. }, Node::Lfo { phase: old, .. }) => *new = *old,
+            (
+                Node::Osc {
+                    phase: new_phase,
+                    z: new_z,
+                    ..
+                },
+                Node::Osc {
+                    phase: old_phase,
+                    z: old_z,
+                    ..
+                },
+            ) => {
+                *new_phase = *old_phase;
+                *new_z = *old_z;
+            }
             (
                 Node::SampleAndHold {
                     value: new_val,
