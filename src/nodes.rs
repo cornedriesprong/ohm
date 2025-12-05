@@ -139,7 +139,7 @@ impl Node {
                     let phase_offset = inputs
                         .get(1)
                         .and_then(|input| input.get(i))
-                        .map(|f| f[0] * two_pi)
+                        .map(|f| f[0])
                         .unwrap_or(0.0);
 
                     let fb_amt = inputs
@@ -148,7 +148,7 @@ impl Node {
                         .map(|f| f[0])
                         .unwrap_or(0.0);
 
-                    let fb_pm = *z * fb_amt * two_pi;
+                    let fb_pm = *z * fb_amt;
 
                     let y = (*phase + phase_offset + fb_pm).sin();
                     *out = [y; 2];
