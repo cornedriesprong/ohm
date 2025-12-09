@@ -10,7 +10,7 @@ pub(crate) struct Graph {
     inputs: Vec<Vec<usize>>,
     buffers: HashMap<NodeIndex, Vec<Frame>>,
     output_buffers: Vec<Vec<Frame>>,
-    chunk_size: usize,
+    buffer_size: usize,
 }
 
 impl Graph {
@@ -21,16 +21,16 @@ impl Graph {
             inputs: Vec::new(),
             buffers: HashMap::new(),
             output_buffers: Vec::new(),
-            chunk_size: 0,
+            buffer_size: 0,
         }
     }
 
     #[inline(always)]
-    fn set_chunk_size(&mut self, chunk_size: usize) {
-        if chunk_size > self.chunk_size {
-            self.chunk_size = chunk_size;
+    fn set_buffer_size(&mut self, buffer_size: usize) {
+        if buffer_size > self.buffer_size {
+            self.buffer_size = buffer_size;
             for buffer in &mut self.output_buffers {
-                buffer.resize(chunk_size, [0.0, 0.0]);
+                buffer.resize(buffer_size, [0.0, 0.0]);
             }
         }
     }
@@ -68,8 +68,8 @@ impl Graph {
         }
 
         for buffer in &mut self.output_buffers {
-            if buffer.len() < self.chunk_size {
-                buffer.resize(self.chunk_size, [0.0, 0.0]);
+            if buffer.len() < self.buffer_size {
+                buffer.resize(self.buffer_size, [0.0, 0.0]);
             }
         }
 
@@ -91,7 +91,7 @@ impl Graph {
 
     fn process(&mut self, output: &mut [Frame]) {
         let num_frames = output.len();
-        self.set_chunk_size(num_frames);
+        self.set_buffer_size(num_frames);
 
         for &node_idx in &self.sorted_nodes {
             let output_idx = node_idx.index();
