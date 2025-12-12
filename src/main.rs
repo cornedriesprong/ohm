@@ -59,8 +59,11 @@ where
 
     let parse_file = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
-        let parser = Parser::new(src, config.sample_rate.0);
-        let graph = parser.parse();
+        let parser = Parser::new(src);
+        let root = parser.parse();
+        println!("{:?}", root);
+        // TODO: convert expr tree to audio graph
+        let graph = Graph::new();
 
         if let Ok(mut container) = container.lock() {
             container.update_graph(graph);
