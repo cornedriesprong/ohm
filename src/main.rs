@@ -16,8 +16,13 @@ mod utils;
 mod graph;
 use graph::*;
 
+mod tokenizer;
+
 mod parser;
 use crate::parser::Parser;
+
+mod compiler;
+use crate::compiler::Compiler;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -57,13 +62,19 @@ where
 
     stream.play()?;
 
+    let sample_rate = config.sample_rate.0;
+
     let parse_file = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src);
         let root = parser.parse();
-        println!("{:?}", root);
-        // TODO: convert expr tree to audio graph
-        let graph = Graph::new();
+
+        let graph = if let Some(expr) = root {
+            let compiler = Compiler::new(sample_rate);
+            compiler.compile(&expr)
+        } else {
+            Graph::new()
+        };
 
         if let Ok(mut container) = container.lock() {
             container.update_graph(graph);

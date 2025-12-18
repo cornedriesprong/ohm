@@ -1,183 +1,18 @@
-use fundsp::hacker32::*;
+use crate::tokenizer::{tokenize, Token};
 use std::collections::{HashMap, VecDeque};
-
-#[derive(Clone, Debug)]
-pub(crate) enum Token {
-    Number(f32),
-    Identifier(String),
-    String(String),
-    Assign,
-    Plus,
-    Minus,
-    Multiply,
-    Divide,
-    Modulo,
-    Power,
-    Greater,
-    Less,
-    Equal,
-    LParen,
-    RParen,
-    Newline,
-    Chain,
-    // Pipe,
-    Eof,
-}
-
-fn tokenize(str: String) -> VecDeque<Token> {
-    let mut tokens = VecDeque::new();
-    let mut chars = str.chars().peekable();
-
-    while let Some(&ch) = chars.peek() {
-        match ch {
-            ' ' | '\t' | '\r' => {
-                // ignore these
-                chars.next();
-            }
-            '#' => {
-                while let Some(&ch) = chars.peek() {
-                    chars.next();
-                    if ch == '\n' {
-                        tokens.push_back(Token::Newline);
-                        break;
-                    }
-                }
-            }
-            '\n' => {
-                tokens.push_back(Token::Newline);
-                chars.next();
-            }
-            '+' => {
-                tokens.push_back(Token::Plus);
-                chars.next();
-            }
-            '-' => {
-                tokens.push_back(Token::Minus);
-                chars.next();
-            }
-            '*' => {
-                tokens.push_back(Token::Multiply);
-                chars.next();
-            }
-            '/' => {
-                tokens.push_back(Token::Divide);
-                chars.next();
-            }
-            '%' => {
-                tokens.push_back(Token::Modulo);
-                chars.next();
-            }
-            '^' => {
-                tokens.push_back(Token::Power);
-                chars.next();
-            }
-            '<' => {
-                tokens.push_back(Token::Less);
-                chars.next();
-            }
-            '=' => {
-                chars.next();
-                if let Some(&'=') = chars.peek() {
-                    chars.next();
-                    tokens.push_back(Token::Equal);
-                } else {
-                    tokens.push_back(Token::Assign);
-                }
-            }
-            '(' => {
-                tokens.push_back(Token::LParen);
-                chars.next();
-            }
-            ')' => {
-                tokens.push_back(Token::RParen);
-                chars.next();
-            }
-            '>' => {
-                chars.next();
-                if let Some(&'>') = chars.peek() {
-                    chars.next();
-                    tokens.push_back(Token::Chain);
-                } else {
-                    tokens.push_back(Token::Greater);
-                }
-            }
-            // '|' => {
-            //     tokens.push_back(Token::Pipe);
-            //     chars.next();
-            // }
-            '0'..='9' | '.' => {
-                let mut num_str = String::new();
-                while let Some(&ch) = chars.peek() {
-                    if ch.is_ascii_digit() || ch == '.' {
-                        num_str.push(ch);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                if let Ok(num) = num_str.parse::<f32>() {
-                    tokens.push_back(Token::Number(num));
-                } else {
-                    panic!("Invalid number: {}", num_str);
-                }
-            }
-            '"' => {
-                chars.next();
-                let mut str_content = String::new();
-                let mut terminated = false;
-
-                while let Some(&ch) = chars.peek() {
-                    if ch == '"' {
-                        chars.next();
-                        terminated = true;
-                        break;
-                    }
-                    str_content.push(ch);
-                    chars.next();
-                }
-
-                if !terminated {
-                    panic!("Unterminated string literal");
-                }
-
-                tokens.push_back(Token::String(str_content));
-            }
-            'a'..='z' | 'A'..='Z' | '_' => {
-                let mut ident = String::new();
-                while let Some(&ch) = chars.peek() {
-                    if ch.is_alphanumeric() || ch == '_' {
-                        ident.push(ch);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                tokens.push_back(Token::Identifier(ident));
-            }
-            _ => panic!("Unrecognized character: {}", ch),
-        }
-    }
-
-    tokens.push_back(Token::Eof);
-    tokens
-}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Expr {
-    // An integer constant
     Number(f32),
-    // A variable
-    Var(String),
-    // `x + y`
-    Add(Box<Expr>, Box<Expr>),
-    // `x * y`
-    Mul(Box<Expr>, Box<Expr>),
-    // `v = x
-    Let(String, Box<Expr>),
-    // `|v| x`
-    Func(String, Box<Expr>),
-    // f x
-    Call(Box<Expr>, Box<Expr>),
+    Ref(String),
+    Func {
+        params: Vec<String>,
+        body: Box<Expr>,
+    },
+    Call {
+        func: Box<Expr>,
+        args: Vec<Box<Expr>>,
+    },
 }
 
 pub(crate) struct Parser {
@@ -188,15 +23,11 @@ pub(crate) struct Parser {
 
 impl Parser {
     pub(crate) fn new(src: String) -> Self {
-        let mut env = HashMap::new();
-        env.insert("ramp".to_string(), Expr::Number(0.0));
-        env.insert("seq".to_string(), Expr::Number(0.0));
-        env.insert("sin".to_string(), Expr::Number(0.0));
-        return Self {
+        Self {
             tokens: tokenize(src),
             pos: 0,
-            env,
-        };
+            env: HashMap::new(),
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -209,13 +40,17 @@ impl Parser {
         tok
     }
 
+    fn skip_newlines(&mut self) {
+        while matches!(self.peek(), Token::Newline) {
+            self.consume();
+        }
+    }
+
     pub(crate) fn parse(mut self) -> Option<Expr> {
         let mut exprs = Vec::new();
 
         loop {
-            while matches!(self.peek(), Token::Newline) {
-                self.consume();
-            }
+            self.skip_newlines();
 
             if matches!(self.peek(), Token::Eof) {
                 break;
@@ -224,21 +59,17 @@ impl Parser {
             if let Some(expr) = self.parse_statement() {
                 exprs.push(expr);
             }
-
-            while matches!(self.peek(), Token::Newline) {
-                self.consume();
-            }
         }
 
         // if there is more than one top-level expression, mix them together at the output
-        // if exprs.len() > 1 {
-        //     let mix_node = self.graph.add_node(Node::Mix);
-        //     for &expr in &exprs {
-        //         self.graph.connect_node(expr, mix_node);
-        //     }
-        // }
-
-        exprs.last().cloned()
+        if exprs.len() > 1 {
+            Some(Expr::Call {
+                func: Box::new(Expr::Ref("mix".to_string())),
+                args: exprs.into_iter().map(Box::new).collect(),
+            })
+        } else {
+            exprs.last().cloned()
+        }
     }
 
     fn parse_statement(&mut self) -> Option<Expr> {
@@ -264,6 +95,22 @@ impl Parser {
     fn parse_expr(&mut self, min_prec: u8) -> Option<Expr> {
         let mut lhs = self.parse_primary()?;
 
+        // handle function application
+        let mut args = Vec::new();
+        while matches!(
+            self.peek(),
+            Token::Number(_) | Token::Identifier(_) | Token::LParen | Token::Pipe | Token::Minus
+        ) && self.op_precedence(self.peek()).is_none()
+        {
+            args.push(Box::new(self.parse_primary()?));
+        }
+        if !args.is_empty() {
+            lhs = Expr::Call {
+                func: Box::new(lhs),
+                args,
+            };
+        }
+
         while let Some(op_prec) = self.op_precedence(self.peek()) {
             if op_prec < min_prec {
                 break;
@@ -273,45 +120,19 @@ impl Parser {
 
             lhs = match op {
                 Token::Chain => {
-                    if let Token::Identifier(name) = self.consume() {
-                        Expr::Let(name, Box::new(lhs))
-                    } else {
-                        panic!("Expected function name after pipe operator");
+                    let rhs = self.parse_expr(op_prec + 1)?;
+                    Expr::Call {
+                        func: Box::new(rhs),
+                        args: vec![Box::new(lhs)],
                     }
                 }
                 _ => {
                     let rhs = self.parse_expr(op_prec + 1)?;
-                    match op {
-                        // Token::Plus => self.graph.add_node(Node::Sum),
-                        Token::Plus => Expr::Add(Box::new(lhs), Box::new(rhs)),
-                        // Token::Minus => self.graph.add_node(Node::Diff),
-                        // Token::Multiply => self.graph.add_node(Node::Gain),
-                        // Token::Divide => self.graph.add_node(Node::Divide),
-                        // Token::Modulo => self.graph.add_node(Node::Wrap),
-                        // Token::Power => self.graph.add_node(Node::Power),
-                        // Token::Greater => self.graph.add_node(Node::Greater),
-                        // Token::Less => self.graph.add_node(Node::Less),
-                        // Token::Equal => self.graph.add_node(Node::Equal),
-                        _ => lhs,
+                    let name = self.op_name(&op)?;
+                    Expr::Call {
+                        func: Box::new(Expr::Ref(name.to_string())),
+                        args: vec![Box::new(lhs), Box::new(rhs)],
                     }
-                    // if !matches!(
-                    //     op,
-                    //     Token::Plus
-                    //         | Token::Minus
-                    //         | Token::Multiply
-                    //         | Token::Divide
-                    //         | Token::Modulo
-                    //         | Token::Power
-                    //         | Token::Greater
-                    //         | Token::Less
-                    //         | Token::Equal
-                    // ) {
-                    //     lhs
-                    // } else {
-                    // self.graph.connect_node(lhs, node_idx);
-                    // self.graph.connect_node(rhs, node_idx);
-                    // node_idx
-                    // }
                 }
             };
         }
@@ -319,13 +140,31 @@ impl Parser {
         Some(lhs)
     }
 
-    // fn parse_func(&mut self) -> Option<Expr> {}
+    fn parse_func(&mut self) -> Option<Expr> {
+        let mut params = Vec::new();
+
+        while let Token::Identifier(name) = self.peek() {
+            params.push(name.clone());
+            self.consume();
+        }
+
+        if !matches!(self.peek(), Token::Pipe) {
+            panic!("Expected | after function parameters");
+        }
+        self.consume();
+
+        let body = self.parse_expr(0)?;
+
+        Some(Expr::Func {
+            params,
+            body: Box::new(body),
+        })
+    }
 
     fn parse_primary(&mut self) -> Option<Expr> {
         let pos = self.pos;
 
         let result = match self.consume() {
-            // Token::Number(num) => Some(self.graph.add_node(Node::Constant(num))),
             Token::Number(num) => Some(Expr::Number(num)),
             Token::Minus => {
                 // negative number
@@ -341,7 +180,7 @@ impl Parser {
                 if let Some(node_id) = self.env.get(&name) {
                     Some(node_id.clone())
                 } else {
-                    panic!("Undefined variable: {}", name);
+                    Some(Expr::Ref(name))
                 }
             }
             Token::LParen => {
@@ -351,7 +190,13 @@ impl Parser {
                     _ => panic!("Expected closing parenthesis"),
                 }
             }
-            // Token::Pipe => if let Some(op) = self.parse_func() {},
+            Token::Pipe => {
+                if let Some(expr) = self.parse_func() {
+                    Some(expr)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
 
@@ -363,223 +208,6 @@ impl Parser {
         result
     }
 
-    // fn parse_str(&mut self) -> Option<String> {
-    //     match self.consume() {
-    //         Token::String(s) => Some(s),
-    //         _ => None,
-    //     }
-    // }
-    //
-    // fn parse_num(&mut self) -> Option<f32> {
-    //     match self.consume() {
-    //         Token::Number(n) => Some(n),
-    //         _ => None,
-    //     }
-    // }
-    //
-    // fn parse_arg(&mut self, arg: Option<Expr>, default: f32) -> Expr {
-    //     arg.or_else(|| self.parse_primary())
-    //         .unwrap_or_else(|| Expr::Number(default)))
-    // }
-
-    // fn add_node(&mut self, node: Node, args: Vec<Expr>) -> Expr {
-    //     let node_idx = self.graph.add_node(node);
-    //     for arg in args {
-    //         self.graph.connect_node(arg, node_idx);
-    //     }
-    //     node_idx
-    // }
-    //
-    // fn add_fundsp_node(
-    //     &mut self,
-    //     audio_unit: Box<dyn AudioUnit>,
-    //     is_stereo: bool,
-    //     args: Vec<Expr>,
-    // ) -> Expr {
-    //     let num_inputs = audio_unit.inputs();
-    //     self.add_node(
-    //         Node::FunDSP {
-    //             audio_unit,
-    //             is_stereo,
-    //             input_buffer: vec![0.0; num_inputs],
-    //         },
-    //         args,
-    //     )
-    // }
-
-    // fn parse_node(&mut self, name: &str, first_arg: Option<Expr>) -> Option<Expr> {
-    //     match name {
-    //         "ramp" => {
-    //             let freq = self.parse_arg(first_arg, 1.0);
-    //             Some(self.add_node(
-    //                 Node::Ramp {
-    //                     phase: 0.0,
-    //                     sample_rate: self.sample_rate,
-    //                 },
-    //                 vec![freq],
-    //             ))
-    //         }
-    //         "saw" | "sqr" | "tri" | "organ" | "softsaw" | "rossler" | "lorenz" => {
-    //             let freq = self.parse_arg(first_arg, 100.0);
-    //             Some(self.add_fundsp_node(
-    //                 match name {
-    //                     "saw" => Box::new(saw()),
-    //                     "sqr" => Box::new(square()),
-    //                     "tri" => Box::new(triangle()),
-    //                     "organ" => Box::new(organ()),
-    //                     "softsaw" => Box::new(soft_saw()),
-    //                     "rossler" => Box::new(rossler()),
-    //                     "lorenz" => Box::new(lorenz()),
-    //                     _ => unreachable!(),
-    //                 },
-    //                 false,
-    //                 vec![freq],
-    //             ))
-    //         }
-    //         "noise" => Some(self.add_fundsp_node(Box::new(noise()), false, vec![])),
-    //         "clip" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_fundsp_node(Box::new(clip()), false, vec![input]))
-    //         }
-    //         "round" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_node(Node::Round, vec![input]))
-    //         }
-    //         "floor" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_node(Node::Floor, vec![input]))
-    //         }
-    //         "ceil" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_node(Node::Ceil, vec![input]))
-    //         }
-    //         "lfo" | "sin" => {
-    //             let freq = self.parse_arg(first_arg, 440.0);
-    //             let mut args = vec![freq];
-    //             if let Some(phase_offset) = self.parse_primary() {
-    //                 args.push(phase_offset);
-    //
-    //                 if let Some(fb) = self.parse_primary() {
-    //                     args.push(fb);
-    //                 }
-    //             }
-    //             Some(self.add_node(
-    //                 Node::Osc {
-    //                     phase: 0.0,
-    //                     z: 0.0,
-    //                     sample_rate: self.sample_rate,
-    //                 },
-    //                 args,
-    //             ))
-    //         }
-    //         "sh" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let trig = self.parse_arg(None, 0.0);
-    //             Some(self.add_node(
-    //                 Node::SampleAndHold {
-    //                     value: [0.0; 2],
-    //                     prev: 0.0,
-    //                 },
-    //                 vec![input, trig],
-    //             ))
-    //         }
-    //         "pan" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let pan = self.parse_arg(None, 0.5);
-    //             Some(self.add_fundsp_node(Box::new(panner()), true, vec![input, pan]))
-    //         }
-    //         "seq" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let mut args = vec![input];
-    //             while let Some(arg) = self.parse_primary() {
-    //                 args.push(arg);
-    //             }
-    //             Some(self.add_node(Node::Seq, args))
-    //         }
-    //         "mix" => {
-    //             let mut args = Vec::new();
-    //             while let Some(arg) = self.parse_primary() {
-    //                 args.push(arg);
-    //             }
-    //             Some(self.add_node(Node::Mix, args))
-    //         }
-    //         "onepole" | "smooth" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let cutoff = self.parse_arg(None, 1.0);
-    //             Some(self.add_fundsp_node(Box::new(lowpole()), false, vec![input, cutoff]))
-    //         }
-    //         "lp" | "bp" | "hp" | "moog" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let cutoff = self.parse_arg(None, 500.0);
-    //             let resonance = self.parse_arg(None, 0.707);
-    //             Some(self.add_fundsp_node(
-    //                 match name {
-    //                     "lp" => Box::new(lowpass()),
-    //                     "bp" => Box::new(bandpass()),
-    //                     "hp" => Box::new(highpass()),
-    //                     "moog" => Box::new(moog()),
-    //                     _ => unreachable!(),
-    //                 },
-    //                 false,
-    //                 vec![input, cutoff, resonance],
-    //             ))
-    //         }
-    //         "tanh" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_fundsp_node(Box::new(shape(Tanh(1.0))), false, vec![input]))
-    //         }
-    //         "delay" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             let delay_time = self.parse_arg(None, 100.0);
-    //             Some(self.add_node(
-    //                 Node::Delay {
-    //                     buffer: Box::new([[0.0; 2]; 48000]),
-    //                     write_pos: 0,
-    //                 },
-    //                 vec![input, delay_time],
-    //             ))
-    //         }
-    //         "reverb" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_fundsp_node(
-    //                 Box::new(reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0))),
-    //                 true,
-    //                 vec![input],
-    //             ))
-    //         }
-    //         "buf" => {
-    //             let length = self.parse_num().unwrap_or(self.sample_rate as f32) as usize;
-    //             let frames = vec![[0.0; 2]; length];
-    //             let node_idx = self.graph.add_buffer_node(frames);
-    //             Some(node_idx)
-    //         }
-    //         "file" => {
-    //             let filename = self.parse_str()?;
-    //             let frames = get_audio_frames(&filename).ok()?;
-    //             let node_idx = self.graph.add_buffer_node(frames);
-    //             Some(node_idx)
-    //         }
-    //         "play" => {
-    //             let phase = self.parse_arg(first_arg, 0.0);
-    //             let id = self.parse_arg(None, 0.0);
-    //             Some(self.add_node(Node::BufferReader { id }, vec![phase, id]))
-    //         }
-    //         "tap" => {
-    //             let id = self.parse_arg(None, 0.0);
-    //             Some(self.add_node(Node::BufferTap { id, write_pos: 0 }, vec![]))
-    //         }
-    //         "rec" => {
-    //             let id = self.parse_arg(None, 0.0);
-    //             Some(self.add_node(Node::BufferWriter { id, write_pos: 0 }, vec![]))
-    //         }
-    //         "log" => {
-    //             let input = self.parse_arg(first_arg, 0.0);
-    //             Some(self.add_node(Node::Log, vec![input]))
-    //         }
-    //         _ => None,
-    //     }
-    // }
-
     fn op_precedence(&self, token: &Token) -> Option<u8> {
         match token {
             Token::Chain => Some(0),
@@ -587,6 +215,21 @@ impl Parser {
             Token::Multiply | Token::Divide | Token::Modulo => Some(2),
             Token::Plus | Token::Minus => Some(3),
             Token::Greater | Token::Less | Token::Equal => Some(4),
+            _ => None,
+        }
+    }
+
+    fn op_name(&self, token: &Token) -> Option<&'static str> {
+        match token {
+            Token::Plus => Some("sum"),
+            Token::Minus => Some("diff"),
+            Token::Multiply => Some("mul"),
+            Token::Divide => Some("divide"),
+            Token::Modulo => Some("wrap"),
+            Token::Power => Some("power"),
+            Token::Greater => Some("greater"),
+            Token::Less => Some("less"),
+            Token::Equal => Some("equal"),
             _ => None,
         }
     }
