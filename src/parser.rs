@@ -53,70 +53,35 @@ impl Parser {
     }
 
     pub(crate) fn parse(mut self) -> Option<Expr> {
-        enum Item {
-            Assignment { name: String, value: Expr },
-            Expression(Expr),
+        self.skip_newlines();
+
+        if matches!(self.peek(), Token::Eof) {
+            return None;
         }
 
-        let mut items = Vec::new();
+        // try to parse assignment
+        if let Token::Identifier(name) = self.peek() {
+            let name = name.clone();
+            let saved_pos = self.pos;
+            self.consume();
 
-        loop {
-            self.skip_newlines();
-
-            if matches!(self.peek(), Token::Eof) {
-                break;
-            }
-
-            // Try to parse assignment
-            if let Token::Identifier(name) = self.peek() {
-                let name = name.clone();
-                let saved_pos = self.pos;
+            if matches!(self.peek(), Token::Assign) {
                 self.consume();
-
-                if matches!(self.peek(), Token::Assign) {
-                    self.consume();
-                    if let Some(value) = self.parse_expr(0) {
-                        items.push(Item::Assignment { name, value });
-                        continue;
-                    }
-                }
-
-                self.pos = saved_pos;
-            }
-
-            // Not an assignment, parse as expression
-            if let Some(expr) = self.parse_expr(0) {
-                items.push(Item::Expression(expr));
-            }
-        }
-
-        // Build nested Assign expressions from collected items
-        let mut result = None;
-        for item in items.into_iter().rev() {
-            result = Some(match item {
-                Item::Assignment { name, value } => {
-                    let body = result.unwrap_or(Expr::Ref(name.clone()));
-                    Expr::Assign {
+                if let Some(value) = self.parse_expr(0) {
+                    let body = self.parse().unwrap_or(Expr::Ref(name.clone()));
+                    return Some(Expr::Assign {
                         name,
                         value: Box::new(value),
                         body: Box::new(body),
-                    }
+                    });
                 }
-                Item::Expression(expr) => {
-                    if let Some(prev) = result {
-                        // Mix multiple expressions
-                        Expr::Call {
-                            func: Box::new(Expr::Ref("mix".to_string())),
-                            args: vec![Box::new(expr), Box::new(prev)],
-                        }
-                    } else {
-                        expr
-                    }
-                }
-            });
+            }
+
+            self.pos = saved_pos;
         }
 
-        result
+        // not an assignment, just parse and return one expression
+        self.parse_expr(0)
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Option<Expr> {
