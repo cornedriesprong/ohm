@@ -145,13 +145,13 @@ impl Compiler {
                     node_args,
                 ))
             }
-            "saw" => self.unary_fundsp(&args, saw()),
-            "sqr" => self.unary_fundsp(&args, square()),
-            "tri" => self.unary_fundsp(&args, triangle()),
-            "organ" => self.unary_fundsp(&args, organ()),
-            "softsaw" => self.unary_fundsp(&args, soft_saw()),
-            "rossler" => self.unary_fundsp(&args, rossler()),
-            "lorenz" => self.unary_fundsp(&args, lorenz()),
+            "saw" => self.unary_fundsp(&args, saw(), false),
+            "sqr" => self.unary_fundsp(&args, square(), false),
+            "tri" => self.unary_fundsp(&args, triangle(), false),
+            "organ" => self.unary_fundsp(&args, organ(), false),
+            "softsaw" => self.unary_fundsp(&args, soft_saw(), false),
+            "rossler" => self.unary_fundsp(&args, rossler(), false),
+            "lorenz" => self.unary_fundsp(&args, lorenz(), false),
             "noise" => Some(self.add_fundsp_node(Box::new(noise()), false, vec![])),
             "sum" => self.binary(&args, Node::Sum),
             "diff" => self.binary(&args, Node::Diff),
@@ -162,11 +162,11 @@ impl Compiler {
             "greater" => self.binary(&args, Node::Greater),
             "less" => self.binary(&args, Node::Less),
             "equal" => self.binary(&args, Node::Equal),
-            "clip" => self.unary_fundsp(&args, clip()),
+            "clip" => self.unary_fundsp(&args, clip(), false),
             "round" => self.unary(&args, Node::Round),
             "floor" => self.unary(&args, Node::Floor),
             "ceil" => self.unary(&args, Node::Ceil),
-            "tanh" => self.unary_fundsp(&args, shape(Tanh(1.0))),
+            "tanh" => self.unary_fundsp(&args, shape(Tanh(1.0)), false),
             "log" => self.unary(&args, Node::Log),
             "sh" => self.binary(
                 &args,
@@ -175,11 +175,11 @@ impl Compiler {
                     prev: 0.0,
                 },
             ),
-            "pan" => self.binary_fundsp_stereo(&args, panner()),
+            "pan" => self.binary_fundsp(&args, panner(), true),
             "seq" | "mix" => {
                 Some(self.add_node(if name == "seq" { Node::Seq } else { Node::Mix }, args))
             }
-            "onepole" | "smooth" => self.binary_fundsp(&args, lowpole()),
+            "onepole" | "smooth" => self.binary_fundsp(&args, lowpole(), false),
             "lp" => self.ternary_fundsp(&args, lowpass()),
             "bp" => self.ternary_fundsp(&args, bandpass()),
             "hp" => self.ternary_fundsp(&args, highpass()),
@@ -191,9 +191,10 @@ impl Compiler {
                     write_pos: 0,
                 },
             ),
-            "reverb" => self.unary_fundsp_stereo(
+            "reverb" => self.unary_fundsp(
                 &args,
                 reverb2_stereo(10.0, 2.0, 0.9, 1.0, lowpole_hz(18000.0)),
+                true,
             ),
             "buf" | "file" | "play" | "tap" | "rec" => {
                 println!("Warning: {} not yet implemented in compiler", name);
@@ -225,38 +226,21 @@ impl Compiler {
         &mut self,
         args: &[NodeIndex],
         audio_unit: impl AudioUnit + 'static,
+        stereo: bool,
     ) -> Option<NodeIndex> {
         let input = self.arg(args, 0)?;
-        Some(self.add_fundsp_node(Box::new(audio_unit), false, vec![input]))
-    }
-
-    fn unary_fundsp_stereo(
-        &mut self,
-        args: &[NodeIndex],
-        audio_unit: impl AudioUnit + 'static,
-    ) -> Option<NodeIndex> {
-        let input = self.arg(args, 0)?;
-        Some(self.add_fundsp_node(Box::new(audio_unit), true, vec![input]))
+        Some(self.add_fundsp_node(Box::new(audio_unit), stereo, vec![input]))
     }
 
     fn binary_fundsp(
         &mut self,
         args: &[NodeIndex],
         audio_unit: impl AudioUnit + 'static,
+        stereo: bool,
     ) -> Option<NodeIndex> {
         let arg1 = self.arg(args, 0)?;
         let arg2 = self.arg(args, 1)?;
-        Some(self.add_fundsp_node(Box::new(audio_unit), false, vec![arg1, arg2]))
-    }
-
-    fn binary_fundsp_stereo(
-        &mut self,
-        args: &[NodeIndex],
-        audio_unit: impl AudioUnit + 'static,
-    ) -> Option<NodeIndex> {
-        let arg1 = self.arg(args, 0)?;
-        let arg2 = self.arg(args, 1)?;
-        Some(self.add_fundsp_node(Box::new(audio_unit), true, vec![arg1, arg2]))
+        Some(self.add_fundsp_node(Box::new(audio_unit), stereo, vec![arg1, arg2]))
     }
 
     fn ternary_fundsp(
