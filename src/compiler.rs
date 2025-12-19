@@ -29,11 +29,11 @@ impl Compiler {
 
     pub(crate) fn compile(mut self, exprs: &[Expr]) -> Graph {
         for expr in exprs {
-            if let Some(node_idx) = self.compile_expr(expr) {
-                let _ = node_idx;
-            }
+            self.compile_expr(expr);
         }
+        // connect cycles in 2nd compiler pass
         self.connect_cycles();
+
         self.graph
     }
 
@@ -41,19 +41,19 @@ impl Compiler {
         match expr {
             Expr::Number(n) => Some(self.add_node(Node::Constant(*n), vec![])),
             Expr::Ref(name) => self.binding_to_node.get(self.env.get(name)?).copied(),
-            Expr::FbRef(name) => {
+            Expr::Cycle(name) => {
                 let z1 = self.add_node(Node::Z1 { z: [0.0; 2] }, vec![]);
                 if let Some(&id) = self.env.get(name) {
                     self.cycles.push((z1, id));
                 }
                 Some(z1)
             }
-            Expr::Assign { name, value } => {
+            Expr::Let { name, value } => {
                 let id = self.next_id;
                 self.next_id += 1;
 
-                let node = self.compile_expr(value)?;
                 self.env.insert(name.clone(), id);
+                let node = self.compile_expr(value)?;
                 self.binding_to_node.insert(id, node);
 
                 None
@@ -64,9 +64,9 @@ impl Compiler {
     }
 
     fn connect_cycles(&mut self) {
-        for (z1_node, binding_id) in &self.cycles {
-            if let Some(&target_node) = self.binding_to_node.get(binding_id) {
-                self.graph.connect_node(target_node, *z1_node);
+        for (z1, id) in &self.cycles {
+            if let Some(&node) = self.binding_to_node.get(id) {
+                self.graph.connect_node(node, *z1);
             }
         }
     }

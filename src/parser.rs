@@ -5,8 +5,8 @@ use std::collections::{HashMap, VecDeque};
 pub enum Expr {
     Number(f32),
     Ref(String),
-    FbRef(String),
-    Assign {
+    Cycle(String),
+    Let {
         name: String,
         value: Box<Expr>,
     },
@@ -70,7 +70,7 @@ impl Parser {
                 if matches!(self.peek(), Token::Assign) {
                     self.consume();
                     if let Some(value) = self.parse_expr(0) {
-                        exprs.push(Expr::Assign {
+                        exprs.push(Expr::Let {
                             name,
                             value: Box::new(value),
                         });
@@ -183,7 +183,7 @@ impl Parser {
                 if let Token::Identifier(name) = self.peek() {
                     let name = name.clone();
                     self.consume();
-                    Some(Expr::FbRef(name))
+                    Some(Expr::Cycle(name))
                 } else {
                     panic!("Expected identifier after ~")
                 }
