@@ -27,9 +27,11 @@ impl Compiler {
         }
     }
 
-    pub(crate) fn compile(mut self, expr: &Expr) -> Graph {
-        if let Some(node_idx) = self.compile_expr(expr) {
-            let _ = node_idx;
+    pub(crate) fn compile(mut self, exprs: &[Expr]) -> Graph {
+        for expr in exprs {
+            if let Some(node_idx) = self.compile_expr(expr) {
+                let _ = node_idx;
+            }
         }
         self.connect_cycles();
         self.graph
@@ -46,23 +48,15 @@ impl Compiler {
                 }
                 Some(z1)
             }
-            Expr::Assign { name, value, body } => {
+            Expr::Assign { name, value } => {
                 let id = self.next_id;
                 self.next_id += 1;
 
-                let old = self.env.insert(name.clone(), id);
                 let node = self.compile_expr(value)?;
+                self.env.insert(name.clone(), id);
                 self.binding_to_node.insert(id, node);
 
-                let result = self.compile_expr(body);
-
-                if let Some(old) = old {
-                    self.env.insert(name.clone(), old);
-                } else {
-                    self.env.remove(name);
-                }
-
-                result
+                None
             }
             Expr::Call { func, args } => self.compile_call(func, args),
             Expr::Func { .. } => None,

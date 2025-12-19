@@ -67,14 +67,9 @@ where
     let parse_file = |path| -> Result<(), anyhow::Error> {
         let src = fs::read_to_string(path)?;
         let parser = Parser::new(src);
-        let root = parser.parse();
-
-        let graph = if let Some(expr) = root {
-            let compiler = Compiler::new(sample_rate);
-            compiler.compile(&expr)
-        } else {
-            Graph::new()
-        };
+        let exprs = parser.parse();
+        let compiler = Compiler::new(sample_rate);
+        let graph = compiler.compile(&exprs);
 
         if let Ok(mut container) = container.lock() {
             container.update_graph(graph);

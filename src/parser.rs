@@ -9,7 +9,6 @@ pub enum Expr {
     Assign {
         name: String,
         value: Box<Expr>,
-        body: Box<Expr>,
     },
     Func {
         params: Vec<String>,
@@ -52,36 +51,43 @@ impl Parser {
         }
     }
 
-    pub(crate) fn parse(mut self) -> Option<Expr> {
-        self.skip_newlines();
+    pub(crate) fn parse(mut self) -> Vec<Expr> {
+        let mut exprs = Vec::new();
 
-        if matches!(self.peek(), Token::Eof) {
-            return None;
-        }
+        loop {
+            self.skip_newlines();
 
-        // try to parse assignment
-        if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            let saved_pos = self.pos;
-            self.consume();
-
-            if matches!(self.peek(), Token::Assign) {
-                self.consume();
-                if let Some(value) = self.parse_expr(0) {
-                    let body = self.parse().unwrap_or(Expr::Ref(name.clone()));
-                    return Some(Expr::Assign {
-                        name,
-                        value: Box::new(value),
-                        body: Box::new(body),
-                    });
-                }
+            if matches!(self.peek(), Token::Eof) {
+                break;
             }
 
-            self.pos = saved_pos;
+            // try to parse assignment
+            if let Token::Identifier(name) = self.peek() {
+                let name = name.clone();
+                let prev_pos = self.pos;
+                self.consume();
+
+                if matches!(self.peek(), Token::Assign) {
+                    self.consume();
+                    if let Some(value) = self.parse_expr(0) {
+                        exprs.push(Expr::Assign {
+                            name,
+                            value: Box::new(value),
+                        });
+                        continue;
+                    }
+                }
+
+                self.pos = prev_pos;
+            }
+
+            // not an assignment, just parse and add expression
+            if let Some(expr) = self.parse_expr(0) {
+                exprs.push(expr);
+            }
         }
 
-        // not an assignment, just parse and return one expression
-        self.parse_expr(0)
+        exprs
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Option<Expr> {
