@@ -35,9 +35,12 @@ impl Compiler {
             Expr::Number(n) => Some(self.add_node(Node::Constant(*n), vec![])),
             Expr::Ref(name) => self.env.get(name).copied(),
             Expr::FbRef(name) => {
-                let z1 = if let Some(&existing_node) = self.env.get(name) {
-                    self.add_node(Node::Z1 { z: [0.0; 2] }, vec![existing_node])
+                let z1 = if let Some(&node) = self.env.get(name) {
+                    // if we already have an existing node that the feedback node refers to
+                    // connect it
+                    self.add_node(Node::Z1 { z: [0.0; 2] }, vec![node])
                 } else {
+                    // if not, put it in pending_feedback until we find a node
                     let z1 = self.add_node(Node::Z1 { z: [0.0; 2] }, vec![]);
                     self.pending_feedback
                         .entry(name.clone())
@@ -49,13 +52,13 @@ impl Compiler {
                 Some(z1)
             }
             Expr::Assign { name, value, body } => {
-                let value_node = self.compile_expr(value)?;
-                let old_binding = self.env.insert(name.clone(), value_node);
+                let node = self.compile_expr(value)?;
+                let old_binding = self.env.insert(name.clone(), node);
 
                 if let Some(z1s) = self.pending_feedback.remove(name) {
                     for z1 in z1s {
                         // connect value_node -> z1_node to close the feedback loop
-                        self.graph.connect_node(value_node, z1);
+                        self.graph.connect_node(node, z1);
                     }
                 }
 
