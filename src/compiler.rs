@@ -8,8 +8,10 @@ use std::collections::HashMap;
 /// compile a graph of Expr's into a graph DSP Nodes
 pub(crate) struct Compiler {
     graph: Graph,
-    env: HashMap<String, NodeIndex>,
-    pending_feedback: HashMap<String, Vec<NodeIndex>>,
+    env: HashMap<String, usize>,
+    binding_to_node: HashMap<usize, NodeIndex>,
+    cycles: Vec<(NodeIndex, usize)>,
+    next_id: usize,
     sample_rate: u32,
 }
 
@@ -18,7 +20,9 @@ impl Compiler {
         Self {
             graph: Graph::new(),
             env: HashMap::new(),
-            pending_feedback: HashMap::new(),
+            binding_to_node: HashMap::new(),
+            cycles: Vec::new(),
+            next_id: 0,
             sample_rate,
         }
     }
@@ -27,44 +31,32 @@ impl Compiler {
         if let Some(node_idx) = self.compile_expr(expr) {
             let _ = node_idx;
         }
+        self.connect_cycles();
         self.graph
     }
 
     fn compile_expr(&mut self, expr: &Expr) -> Option<NodeIndex> {
         match expr {
             Expr::Number(n) => Some(self.add_node(Node::Constant(*n), vec![])),
-            Expr::Ref(name) => self.env.get(name).copied(),
+            Expr::Ref(name) => self.binding_to_node.get(self.env.get(name)?).copied(),
             Expr::FbRef(name) => {
-                let z1 = if let Some(&node) = self.env.get(name) {
-                    // if we already have an existing node that the feedback node refers to
-                    // connect it
-                    self.add_node(Node::Z1 { z: [0.0; 2] }, vec![node])
-                } else {
-                    // if not, put it in pending_feedback until we find a node
-                    let z1 = self.add_node(Node::Z1 { z: [0.0; 2] }, vec![]);
-                    self.pending_feedback
-                        .entry(name.clone())
-                        .or_insert_with(Vec::new)
-                        .push(z1);
-                    z1
-                };
-
+                let z1 = self.add_node(Node::Z1 { z: [0.0; 2] }, vec![]);
+                if let Some(&id) = self.env.get(name) {
+                    self.cycles.push((z1, id));
+                }
                 Some(z1)
             }
             Expr::Assign { name, value, body } => {
-                let node = self.compile_expr(value)?;
-                let old_binding = self.env.insert(name.clone(), node);
+                let id = self.next_id;
+                self.next_id += 1;
 
-                if let Some(z1s) = self.pending_feedback.remove(name) {
-                    for z1 in z1s {
-                        // connect value_node -> z1_node to close the feedback loop
-                        self.graph.connect_node(node, z1);
-                    }
-                }
+                let old = self.env.insert(name.clone(), id);
+                let node = self.compile_expr(value)?;
+                self.binding_to_node.insert(id, node);
 
                 let result = self.compile_expr(body);
 
-                if let Some(old) = old_binding {
+                if let Some(old) = old {
                     self.env.insert(name.clone(), old);
                 } else {
                     self.env.remove(name);
@@ -77,6 +69,14 @@ impl Compiler {
         }
     }
 
+    fn connect_cycles(&mut self) {
+        for (z1_node, binding_id) in &self.cycles {
+            if let Some(&target_node) = self.binding_to_node.get(binding_id) {
+                self.graph.connect_node(target_node, *z1_node);
+            }
+        }
+    }
+
     fn compile_call(&mut self, func: &Expr, args: &[Box<Expr>]) -> Option<NodeIndex> {
         let args: Vec<NodeIndex> = args
             .iter()
@@ -86,10 +86,7 @@ impl Compiler {
         match func {
             Expr::Ref(name) => self.compile_builtin(name, args),
             Expr::Func { params, body } => self.apply_user_function(params, body, args),
-            _ => {
-                println!("Warning: higher-order functions not yet supported");
-                None
-            }
+            _ => None,
         }
     }
 
@@ -109,8 +106,12 @@ impl Compiler {
         }
 
         let saved_env = self.env.clone();
-        self.env
-            .extend(params.iter().zip(&args).map(|(p, &n)| (p.clone(), n)));
+        for (param, &arg_node) in params.iter().zip(&args) {
+            let binding_id = self.next_id;
+            self.next_id += 1;
+            self.env.insert(param.clone(), binding_id);
+            self.binding_to_node.insert(binding_id, arg_node);
+        }
         let result = self.compile_expr(body);
         self.env = saved_env;
         result
