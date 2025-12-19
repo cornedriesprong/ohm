@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Graph {
     graph: StableDiGraph<Node, ()>,
-    sorted_nodes: Vec<NodeIndex>,
     inputs: Vec<Vec<usize>>,
     buffers: HashMap<NodeIndex, Vec<Frame>>,
     output_buffers: Vec<Vec<Frame>>,
@@ -17,7 +16,6 @@ impl Graph {
     pub(crate) fn new() -> Self {
         Self {
             graph: StableDiGraph::new(),
-            sorted_nodes: Vec::new(),
             inputs: Vec::new(),
             buffers: HashMap::new(),
             output_buffers: Vec::new(),
@@ -60,8 +58,6 @@ impl Graph {
     }
 
     fn update_processing_order(&mut self) {
-        self.sorted_nodes = petgraph::algo::toposort(&self.graph, None).expect("Graph has cycles");
-
         let node_count = self.graph.node_count();
         if self.output_buffers.len() < node_count {
             self.output_buffers.resize(node_count, Vec::new());
@@ -76,7 +72,7 @@ impl Graph {
         self.inputs.clear();
         self.inputs.resize(node_count, Vec::new());
 
-        for &node_idx in &self.sorted_nodes {
+        for node_idx in self.graph.node_indices() {
             let mut inputs: Vec<usize> = self
                 .graph
                 .edges_directed(node_idx, petgraph::Direction::Incoming)
@@ -93,7 +89,8 @@ impl Graph {
         let num_frames = output.len();
         self.set_buffer_size(num_frames);
 
-        for &node_idx in &self.sorted_nodes {
+        let node_indices: Vec<_> = self.graph.node_indices().collect();
+        for node_idx in node_indices {
             let output_idx = node_idx.index();
 
             unsafe {
@@ -144,7 +141,7 @@ impl Graph {
             }
         }
 
-        if let Some(last_node_idx) = self.sorted_nodes.last() {
+        if let Some(last_node_idx) = self.graph.node_indices().last() {
             let final_output = &self.output_buffers[last_node_idx.index()][..num_frames];
             output.copy_from_slice(final_output);
         } else {
@@ -153,16 +150,18 @@ impl Graph {
     }
 
     pub(crate) fn apply_diff(&mut self, new_graph: Graph) {
+        let old_node_indices: Vec<_> = self.graph.node_indices().collect();
         let mut old_nodes: Vec<(String, NodeIndex)> = Vec::new();
-        for &node_idx in &self.sorted_nodes {
+        for node_idx in old_node_indices {
             let id = self.graph[node_idx].get_id();
             old_nodes.push((id, node_idx));
         }
 
         let old_graph = std::mem::replace(self, new_graph);
 
+        let new_node_indices: Vec<_> = self.graph.node_indices().collect();
         let mut indices = HashSet::new();
-        for &new_idx in &self.sorted_nodes {
+        for new_idx in new_node_indices {
             let new_id = self.graph[new_idx].get_id();
 
             if let Some((_, old_idx)) = old_nodes

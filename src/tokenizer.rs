@@ -20,6 +20,7 @@ pub(crate) enum Token {
     Newline,
     Chain,
     Pipe,
+    Tilde,
     Eof,
 }
 
@@ -102,6 +103,10 @@ pub(crate) fn tokenize(str: String) -> VecDeque<Token> {
             }
             '|' => {
                 tokens.push_back(Token::Pipe);
+                chars.next();
+            }
+            '~' => {
+                tokens.push_back(Token::Tilde);
                 chars.next();
             }
             '0'..='9' | '.' => {

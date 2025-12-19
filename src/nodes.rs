@@ -53,7 +53,6 @@ pub(crate) enum Node {
     },
     Osc {
         phase: f32,
-        z: f32,
         sample_rate: u32,
     },
     Sum,
@@ -82,6 +81,9 @@ pub(crate) enum Node {
     Delay {
         buffer: Box<[Frame; 48000]>,
         write_pos: usize,
+    },
+    Z1 {
+        z: Frame,
     },
     BufferTap {
         id: NodeIndex,
@@ -120,11 +122,7 @@ impl Node {
                     *out = [y; 2];
                 }
             }
-            Node::Osc {
-                phase,
-                z,
-                sample_rate,
-            } => {
+            Node::Osc { phase, sample_rate } => {
                 let freq_input = inputs[0];
                 let sample_rate = *sample_rate as f32;
                 let two_pi = 2.0 * PI;
@@ -142,18 +140,8 @@ impl Node {
                         .map(|f| f[0])
                         .unwrap_or(0.0);
 
-                    let fb_amt = inputs
-                        .get(2)
-                        .and_then(|input| input.get(i))
-                        .map(|f| f[0])
-                        .unwrap_or(0.0);
-
-                    let fb_pm = *z * fb_amt;
-
-                    let y = (*phase + phase_offset + fb_pm).sin();
+                    let y = (*phase + phase_offset).sin();
                     *out = [y; 2];
-
-                    *z = y;
                 }
             }
             Node::Sum => binary_op!(inputs, outputs, +),
@@ -259,6 +247,19 @@ impl Node {
                     *write_pos = (*write_pos + 1) % BUFFER_SIZE;
                 }
             }
+            Node::Z1 { z } => {
+                let input = inputs.get(0);
+                for (i, out) in outputs.iter_mut().enumerate() {
+                    let y = input
+                        .and_then(|inp| inp.get(i))
+                        .copied()
+                        .unwrap_or([0.0; 2]);
+
+                    *out = *z;
+
+                    *z = y;
+                }
+            }
             Node::Log => {
                 for (i, out) in outputs.iter_mut().enumerate() {
                     let input = inputs[0];
@@ -296,6 +297,7 @@ impl Node {
             Node::Mix => "Mix".to_string(),
             Node::Seq => "Seq".to_string(),
             Node::Delay { .. } => "Delay".to_string(),
+            Node::Z1 { .. } => "Z1".to_string(),
             Node::BufferTap { id, .. } => format!("BufferTap({:?})", id),
             Node::BufferWriter { id, .. } => format!("BufferWriter({:?})", id),
             Node::BufferReader { id } => format!("BufferReader({:?})", id),
@@ -308,21 +310,7 @@ impl Node {
     pub(crate) fn transfer_state(&mut self, old: &Node) {
         match (self, old) {
             (Node::Ramp { phase: new, .. }, Node::Ramp { phase: old, .. }) => *new = *old,
-            (
-                Node::Osc {
-                    phase: new_phase,
-                    z: new_z,
-                    ..
-                },
-                Node::Osc {
-                    phase: old_phase,
-                    z: old_z,
-                    ..
-                },
-            ) => {
-                *new_phase = *old_phase;
-                *new_z = *old_z;
-            }
+            (Node::Osc { phase: new, .. }, Node::Osc { phase: old, .. }) => *new = *old,
             (
                 Node::SampleAndHold {
                     value: new_val,
@@ -369,6 +357,9 @@ impl Node {
                     *new_unit = old_unit.clone();
                     new_buf.resize(new_unit.inputs(), 0.0);
                 }
+            }
+            (Node::Z1 { z: new }, Node::Z1 { z: old }) => {
+                *new = *old;
             }
             _ => {}
         }

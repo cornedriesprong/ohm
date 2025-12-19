@@ -5,6 +5,12 @@ use std::collections::{HashMap, VecDeque};
 pub enum Expr {
     Number(f32),
     Ref(String),
+    FbRef(String),
+    Assign {
+        name: String,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
     Func {
         params: Vec<String>,
         body: Box<Expr>,
@@ -47,7 +53,12 @@ impl Parser {
     }
 
     pub(crate) fn parse(mut self) -> Option<Expr> {
-        let mut exprs = Vec::new();
+        enum Item {
+            Assignment { name: String, value: Expr },
+            Expression(Expr),
+        }
+
+        let mut items = Vec::new();
 
         loop {
             self.skip_newlines();
@@ -56,40 +67,56 @@ impl Parser {
                 break;
             }
 
-            if let Some(expr) = self.parse_statement() {
-                exprs.push(expr);
-            }
-        }
-
-        // if there is more than one top-level expression, mix them together at the output
-        if exprs.len() > 1 {
-            Some(Expr::Call {
-                func: Box::new(Expr::Ref("mix".to_string())),
-                args: exprs.into_iter().map(Box::new).collect(),
-            })
-        } else {
-            exprs.last().cloned()
-        }
-    }
-
-    fn parse_statement(&mut self) -> Option<Expr> {
-        if let Token::Identifier(name) = self.peek() {
-            let name = name.clone();
-            let prev_pos = self.pos;
-            self.consume();
-
-            if matches!(self.peek(), Token::Assign) {
+            // Try to parse assignment
+            if let Token::Identifier(name) = self.peek() {
+                let name = name.clone();
+                let saved_pos = self.pos;
                 self.consume();
-                if let Some(expr) = self.parse_expr(0) {
-                    self.env.insert(name, expr);
-                    return None;
+
+                if matches!(self.peek(), Token::Assign) {
+                    self.consume();
+                    if let Some(value) = self.parse_expr(0) {
+                        items.push(Item::Assignment { name, value });
+                        continue;
+                    }
                 }
+
+                self.pos = saved_pos;
             }
 
-            self.pos = prev_pos;
+            // Not an assignment, parse as expression
+            if let Some(expr) = self.parse_expr(0) {
+                items.push(Item::Expression(expr));
+            }
         }
 
-        self.parse_expr(0)
+        // Build nested Assign expressions from collected items
+        let mut result = None;
+        for item in items.into_iter().rev() {
+            result = Some(match item {
+                Item::Assignment { name, value } => {
+                    let body = result.unwrap_or(Expr::Ref(name.clone()));
+                    Expr::Assign {
+                        name,
+                        value: Box::new(value),
+                        body: Box::new(body),
+                    }
+                }
+                Item::Expression(expr) => {
+                    if let Some(prev) = result {
+                        // Mix multiple expressions
+                        Expr::Call {
+                            func: Box::new(Expr::Ref("mix".to_string())),
+                            args: vec![Box::new(expr), Box::new(prev)],
+                        }
+                    } else {
+                        expr
+                    }
+                }
+            });
+        }
+
+        result
     }
 
     fn parse_expr(&mut self, min_prec: u8) -> Option<Expr> {
@@ -99,7 +126,12 @@ impl Parser {
         let mut args = Vec::new();
         while matches!(
             self.peek(),
-            Token::Number(_) | Token::Identifier(_) | Token::LParen | Token::Pipe | Token::Minus
+            Token::Number(_)
+                | Token::Identifier(_)
+                | Token::LParen
+                | Token::Pipe
+                | Token::Minus
+                | Token::Tilde
         ) && self.op_precedence(self.peek()).is_none()
         {
             args.push(Box::new(self.parse_primary()?));
@@ -174,6 +206,15 @@ impl Parser {
                     Some(Expr::Number(-num))
                 } else {
                     None
+                }
+            }
+            Token::Tilde => {
+                if let Token::Identifier(name) = self.peek() {
+                    let name = name.clone();
+                    self.consume();
+                    Some(Expr::FbRef(name))
+                } else {
+                    panic!("Expected identifier after ~")
                 }
             }
             Token::Identifier(name) => {

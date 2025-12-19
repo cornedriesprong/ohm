@@ -9,6 +9,7 @@ use std::collections::HashMap;
 pub(crate) struct Compiler {
     graph: Graph,
     env: HashMap<String, NodeIndex>,
+    pending_feedback: HashMap<String, Vec<NodeIndex>>,
     sample_rate: u32,
 }
 
@@ -17,6 +18,7 @@ impl Compiler {
         Self {
             graph: Graph::new(),
             env: HashMap::new(),
+            pending_feedback: HashMap::new(),
             sample_rate,
         }
     }
@@ -32,21 +34,55 @@ impl Compiler {
         match expr {
             Expr::Number(n) => Some(self.add_node(Node::Constant(*n), vec![])),
             Expr::Ref(name) => self.env.get(name).copied(),
+            Expr::FbRef(name) => {
+                let z1 = if let Some(&existing_node) = self.env.get(name) {
+                    self.add_node(Node::Z1 { z: [0.0; 2] }, vec![existing_node])
+                } else {
+                    let z1 = self.add_node(Node::Z1 { z: [0.0; 2] }, vec![]);
+                    self.pending_feedback
+                        .entry(name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(z1);
+                    z1
+                };
+
+                Some(z1)
+            }
+            Expr::Assign { name, value, body } => {
+                let value_node = self.compile_expr(value)?;
+                let old_binding = self.env.insert(name.clone(), value_node);
+
+                if let Some(z1s) = self.pending_feedback.remove(name) {
+                    for z1 in z1s {
+                        // connect value_node -> z1_node to close the feedback loop
+                        self.graph.connect_node(value_node, z1);
+                    }
+                }
+
+                let result = self.compile_expr(body);
+
+                if let Some(old) = old_binding {
+                    self.env.insert(name.clone(), old);
+                } else {
+                    self.env.remove(name);
+                }
+
+                result
+            }
             Expr::Call { func, args } => self.compile_call(func, args),
             Expr::Func { .. } => None,
         }
     }
 
     fn compile_call(&mut self, func: &Expr, args: &[Box<Expr>]) -> Option<NodeIndex> {
-        // Compile all arguments, return None if any fail
-        let compiled_args: Vec<NodeIndex> = args
+        let args: Vec<NodeIndex> = args
             .iter()
             .map(|arg| self.compile_expr(arg))
             .collect::<Option<_>>()?;
 
         match func {
-            Expr::Ref(name) => self.compile_builtin(name, compiled_args),
-            Expr::Func { params, body } => self.apply_user_function(params, body, compiled_args),
+            Expr::Ref(name) => self.compile_builtin(name, args),
+            Expr::Func { params, body } => self.apply_user_function(params, body, args),
             _ => {
                 println!("Warning: higher-order functions not yet supported");
                 None
@@ -70,7 +106,8 @@ impl Compiler {
         }
 
         let saved_env = self.env.clone();
-        self.env.extend(params.iter().zip(&args).map(|(p, &n)| (p.clone(), n)));
+        self.env
+            .extend(params.iter().zip(&args).map(|(p, &n)| (p.clone(), n)));
         let result = self.compile_expr(body);
         self.env = saved_env;
         result
@@ -100,7 +137,6 @@ impl Compiler {
                 Some(self.add_node(
                     Node::Osc {
                         phase: 0.0,
-                        z: 0.0,
                         sample_rate: self.sample_rate,
                     },
                     node_args,
