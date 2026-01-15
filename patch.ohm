@@ -1,15 +1,6 @@
-t1 = ramp 1
-freq = seq t1 100 300 150
- 
-t2 = ramp 1.5
-ratio = seq t2 1.5 2
-fb = seq t2 1.5 2 0.5 0
-mod = sin (freq * ratio) 0 fb ^ 3
+freq = 102 + sin 0.1 * 5
+x = sin 0.1 * 2.5
+out1 = sin freq (~out2 * x)
+out2 = sin 101 (~out1 * x)
 
-t3 = ramp 0.75
-index = seq t3 0.9 0.2 0.1 0.5 4.0 >> smooth
-carrier = sin freq (mod * index)
-
-bus = carrier >> reverb 
-
-carrier + (bus * 0.2)
+out1 + out2 >> reverb
