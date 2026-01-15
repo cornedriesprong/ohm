@@ -5,7 +5,7 @@ use fundsp::hacker32::*;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 
-/// compile a graph of Expr's into a graph DSP Nodes
+/// compile a graph of Expr's into a graph of DSP Nodes
 pub(crate) struct Compiler {
     graph: Graph,
     env: HashMap<String, usize>,
@@ -79,12 +79,12 @@ impl Compiler {
 
         match func {
             Expr::Ref(name) => self.compile_builtin(name, args),
-            Expr::Func { params, body } => self.apply_user_function(params, body, args),
+            Expr::Func { params, body } => self.compile_user_function(params, body, args),
             _ => None,
         }
     }
 
-    fn apply_user_function(
+    fn compile_user_function(
         &mut self,
         params: &[String],
         body: &Expr,
