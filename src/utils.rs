@@ -1,6 +1,7 @@
 //! Utility functions
 
 use crate::nodes::Frame;
+use fundsp::wave::Wave;
 
 #[inline(always)]
 pub fn cubic_interpolate(buffer: &[Frame], read_head: f32) -> Frame {
@@ -71,4 +72,28 @@ pub fn scale_buffer(frames: &mut [Frame], gain: f32) {
         frame[0] *= gain;
         frame[1] *= gain;
     }
+}
+
+pub fn get_audio_frames(name: &str) -> Result<Vec<Frame>, anyhow::Error> {
+    let filename = if name.ends_with(".wav") {
+        format!("samples/{}", name)
+    } else {
+        format!("samples/{}.wav", name)
+    };
+
+    let wave = Wave::load(filename)?;
+
+    let frames = match wave.channels() {
+        1 => (0..wave.len())
+            .map(|i| {
+                let sample = wave.at(0, i);
+                [sample, sample]
+            })
+            .collect(),
+        _ => (0..wave.len())
+            .map(|i| [wave.at(0, i), wave.at(1, i)])
+            .collect(),
+    };
+
+    Ok(frames)
 }

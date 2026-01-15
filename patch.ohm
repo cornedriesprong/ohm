@@ -1,0 +1,6 @@
+freq = 102 + sin 0.1 * 5
+x = sin 0.1 * 2.5
+out1 = sin freq (~out2 * x)
+out2 = sin 101 (~out1 * x)
+
+out1 + out2 >> reverb

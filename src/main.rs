@@ -1,9 +1,7 @@
-use anyhow::bail;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    FromSample, SizedSample,
+    Device, FromSample, SizedSample, StreamConfig,
 };
-use koto::prelude::*;
 use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::{
     fs,
@@ -15,21 +13,23 @@ use std::{
 mod nodes;
 mod utils;
 
-mod env;
-use crate::env::create_env;
+mod graph;
+use graph::*;
 
-mod op;
-use crate::op::Op;
+mod tokenizer;
 
-mod audio_graph;
-use audio_graph::*;
+mod parser;
+use crate::parser::Parser;
+
+mod compiler;
+use crate::compiler::Compiler;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let filename = if args.len() >= 2 {
         &args[1]
     } else {
-        "patch.koto"
+        "patch.ohm"
     };
 
     let host = cpal::default_host();
@@ -41,64 +41,43 @@ fn main() -> anyhow::Result<()> {
     run::<f32>(&device, &config.into(), filename)
 }
 
-pub fn run<T>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    filename: &str,
-) -> Result<(), anyhow::Error>
+pub fn run<T>(device: &Device, config: &StreamConfig, filename: &str) -> Result<(), anyhow::Error>
 where
     T: SizedSample + FromSample<f32>,
 {
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-
     let container = Container::new();
-    let container: Arc<Mutex<Container>> = Arc::new(Mutex::new(container));
-    let container_clone1 = Arc::clone(&container);
-    let container_clone2 = Arc::clone(&container);
-
-    let mut koto = Koto::default();
-    create_env(&koto, container_clone1, config.sample_rate.0);
+    let container = Arc::new(Mutex::new(container));
+    let container_clone = Arc::clone(&container);
 
     let stream = device.build_output_stream(
         config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            container_clone2.lock().unwrap().process_interleaved(data);
+        move |data, _| {
+            if let Ok(mut container) = container_clone.lock() {
+                container.process(data);
+            }
         },
-        err_fn,
+        |err| eprintln!("an error occurred on stream: {}", err),
         None,
     )?;
 
     stream.play()?;
 
-    let mut update_audio_graph = |path: &Path| -> Result<(), anyhow::Error> {
-        let src = fs::read_to_string(path)?;
-        match koto.compile_and_run(CompileArgs {
-            script: &src,
-            script_path: Some(KString::from(path.to_str().unwrap())),
-            compiler_settings: CompilerSettings {
-                export_top_level_ids: true,
-                ..Default::default()
-            },
-        })? {
-            KValue::Object(obj) => match obj.cast::<Op>() {
-                Ok(expr) => {
-                    let graph = parse_to_graph(expr.to_owned());
-                    let mut guard = container.lock().unwrap();
-                    guard.update_graph(graph);
-                    Ok(())
-                }
-                Err(e) => bail!("Failed to cast to Expr: {}", e),
-            },
-            KValue::Str(str) => {
-                println!("{}", str);
+    let sample_rate = config.sample_rate.0;
 
-                Ok(())
-            }
-            other => bail!("Expected a Map, found '{}'", other.type_as_string(),),
+    let parse_file = |path| -> Result<(), anyhow::Error> {
+        let src = fs::read_to_string(path)?;
+        let parser = Parser::new(src);
+        let exprs = parser.parse();
+        let compiler = Compiler::new(sample_rate);
+        let graph = compiler.compile(&exprs);
+
+        if let Ok(mut container) = container.lock() {
+            container.update_graph(graph);
         }
+        Ok(())
     };
 
-    update_audio_graph(Path::new(filename))?;
+    parse_file(Path::new(filename))?;
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -107,32 +86,30 @@ where
     watcher.watch(path, RecursiveMode::NonRecursive)?;
 
     let mut last_update = Instant::now();
-    let debounce_duration = Duration::from_millis(100); // Adjust as needed
+    let debounce_duration = Duration::from_millis(100);
+
+    let mut check_duration_and_update = || {
+        let now = Instant::now();
+        if now.duration_since(last_update) >= debounce_duration {
+            if let Err(e) = parse_file(path) {
+                eprintln!("Error updating audio graph: {}", e);
+            }
+            last_update = now;
+        }
+    };
 
     for res in rx {
         match res {
             Ok(event) => match event.kind {
                 EventKind::Modify(ModifyKind::Data(_)) => {
-                    let now = Instant::now();
-                    if now.duration_since(last_update) >= debounce_duration {
-                        if let Err(e) = update_audio_graph(path) {
-                            eprintln!("Error updating audio graph: {}", e);
-                        }
-                        last_update = now;
-                    }
+                    check_duration_and_update();
                 }
                 EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
                     // re-watch the file
                     watcher.unwatch(path).ok();
                     watcher.watch(path, RecursiveMode::NonRecursive).ok();
 
-                    let now = Instant::now();
-                    if now.duration_since(last_update) >= debounce_duration {
-                        if let Err(e) = update_audio_graph(path) {
-                            eprintln!("Error updating audio graph: {}", e);
-                        }
-                        last_update = now;
-                    }
+                    check_duration_and_update();
                 }
                 _ => {}
             },
