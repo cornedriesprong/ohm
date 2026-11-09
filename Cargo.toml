@@ -1,16 +1,15 @@
 [package]
-name = "ohm"
+name = "ohm-rs"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-anyhow = "1.0.94"
-cpal = "0.16.0"
-fundsp = "0.20.0"
-notify = "8.0.0"
-petgraph = "0.8.3"
-rtsan-standalone = "0.1.2"
-smallvec = "1.13"
+strum = "0.28.0"
+strum_macros = "0.28"
+anyhow = "1.0.104"
 
-[features]
-rtsan = ["rtsan-standalone/enable"]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal = "0.18.1"

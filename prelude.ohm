@@ -1,0 +1,105 @@
+// converts a sine oscillator to an unipolar oscillator useful for modulation
+lfo = |freq = 0.1| sin freq * 0.5 + 0.5
+
+// one pole lowpass IIR filter
+lp1 = |x coeff = 0.001|
+  s = ~s + (x - ~s) * coeff
+  s
+
+avg = |x coeff = 0.5| (x + ~x) * coeff
+
+// equal power pan, `pos` from -1 (left) to 1 (right). mixes all voices into each side
+pan = |in pos = 0|
+  p = min (max pos (-1)) 1
+  {(mix (in * ((1 - p) / 2) ^ 0.5)) (mix (in * ((1 + p) / 2) ^ 0.5))}
+
+// bucket brigade style stereo ping pong delay: modulated, darkened and saturated echoes.
+// `division` is the delay of each echo as a fraction of a bar, `fb` the gain of each echo
+bbd = |in division fb|
+  m = mix in
+  time = min (max (division * bar) 0.001) 2
+  // smoothed, which bends the pitch. starts at `time` instead of sweeping up from 0
+  t = (~t == 0) * time + (~t != 0) * (~t + (time - ~t) * (1 - 2.718282 ^ (-20 / sr)))
+  // wow: a slow modulation of the delay time
+  a = ~l[t * sr * (1 + 0.004 * sin 0.4)]
+  b = ~r[t * sr * (1 + 0.004 * sin 0.4 0.25)]
+  // longer delays have a lower clock rate, and so a darker sound
+  cutoff = min (max (6000 * (0.05 / t) ^ 0.5) 800) (min 8000 (sr * 0.45))
+  c = 1 - 2.718282 ^ (-6.283185 * cutoff / sr)
+  g = min (max fb 0) 1.2
+  // the input enters left, each echo crosses sides
+  l = lp1 (lp1 (tanh (m + g * b)) c) c
+  r = lp1 (lp1 (tanh (g * a)) c) c
+  {a b}
+
+// feedback comb with a lowpass in the loop
+comb = |x n g damp|
+  f = ~f + (~y[n] - ~f) * (1 - damp)
+  y = x + f * g
+  y
+
+allpass = |x n|
+  v = x + 0.5 * ~v[n]
+  ~v[n] - 0.5 * v
+
+// delays from freeverb, in frames at 44.1 khz
+side = |x spread g damp|
+  s = sr / 44100
+  c = comb x (1116 * s + spread) g damp + comb x (1188 * s + spread) g damp + comb x (1277 * s + spread) g damp + comb x (1356 * s + spread) g damp
+  allpass (allpass c (556 * s + spread)) (441 * s + spread)
+
+rev = |in size = 0.98 damp = 0.2|
+  m = mix in * 0.1
+  {(side m 0 size damp) (side m 23 size damp)}
+
+// karplus strong plucked string: a burst of noise, one period long, whenever `gate` opens,
+// through a delay line of one period. `decay` (0..1) is the gain per period
+pluck = |freq gate decay|
+  n = sr / freq - 0.5
+  g = gate > 0
+  rise = g > ~g
+  left = rise * n + (1 - rise) * max (~left - 1) 0
+  y = noise * (left > 0) + (~y[n] + ~y[n + 1]) * 0.5 * min (max decay 0) 0.9999
+  y
+
+// pink noise: white noise through paul kellet's filter, -3 db per octave
+pink = |amp = 1|
+  w = noise
+  b0 = 0.99886 * ~b0 + w * 0.0555179
+  b1 = 0.99332 * ~b1 + w * 0.0750759
+  b2 = 0.969 * ~b2 + w * 0.153852
+  b3 = 0.8665 * ~b3 + w * 0.3104856
+  b4 = 0.55 * ~b4 + w * 0.5329522
+  b5 = -0.7616 * ~b5 - w * 0.016898
+  b6 = w * 0.115926
+  (b0 + b1 + b2 + b3 + b4 + b5 + ~b6 + w * 0.5362) * 0.11 * amp
+
+// 1/f source: five dice, re-rolled every 1, 2, 4, 8, 16 ticks. roughly -1..1
+voss = |tick c|
+  t2 = tick * (c % 2 == 0)
+  t4 = tick * (c % 4 == 0)
+  t8 = tick * (c % 8 == 0)
+  t16 = tick * (c % 16 == 0)
+  d1 = tick * noise + (1 - tick) * ~d1
+  d2 = t2 * noise + (1 - t2) * ~d2
+  d4 = t4 * noise + (1 - t4) * ~d4
+  d8 = t8 * noise + (1 - t8) * ~d8
+  d16 = t16 * noise + (1 - t16) * ~d16
+  (d1 + d2 + d4 + d8 + d16) * 0.4
+
+voice = |freq cutoff=500| saw freq -> lp cutoff * 0.5
+
+scale = |x k = 7|
+  deg = floor (x * 6 + 0.5)
+  semi = floor (deg / k) * 12 + floor (deg % k * 12 / k)
+  440 * 2 ^ (semi / 12)
+
+synth = |freq|
+  env = (1 - clock) ^ 3
+  voice freq * env
+
+bres = |k n|
+  i = floor (clock * n)
+  (i * k % n) < k
+
+hit = |k n| bres k n * (1 - clock * n % 1) ^ 5

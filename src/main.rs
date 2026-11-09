@@ -1,121 +1,80 @@
-use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-    Device, FromSample, SizedSample, StreamConfig,
-};
-use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
-use std::{
-    fs,
-    path::Path,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
-
-mod nodes;
-mod utils;
-
-mod graph;
-use graph::*;
-
-mod tokenizer;
-
-mod parser;
-use crate::parser::Parser;
-
-mod compiler;
-use crate::compiler::Compiler;
+use anyhow::Context;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use ohm_rs::{Limiter, Program, build, render};
+use std::{fs, sync::mpsc, thread, time::Duration};
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let filename = if args.len() >= 2 {
-        &args[1]
+    let filename: String = if args.len() >= 2 {
+        args[1].clone()
     } else {
-        "patch.ohm"
+        "patch.ohm".to_string()
     };
+
+    let src = fs::read_to_string(&filename)?;
+    let (tx, rx) = mpsc::channel();
+    let mut prog = compile_and_run(&src)?;
+    thread::spawn(move || watch_file(&filename, src, tx));
 
     let host = cpal::default_host();
     let device = host
         .default_output_device()
-        .expect("no output device available");
-    let config = device.default_output_config()?;
-
-    run::<f32>(&device, &config.into(), filename)
-}
-
-pub fn run<T>(device: &Device, config: &StreamConfig, filename: &str) -> Result<(), anyhow::Error>
-where
-    T: SizedSample + FromSample<f32>,
-{
-    let container = Container::new();
-    let container = Arc::new(Mutex::new(container));
-    let container_clone = Arc::clone(&container);
-
-    let stream = device.build_output_stream(
-        config,
-        move |data, _| {
-            if let Ok(mut container) = container_clone.lock() {
-                container.process(data);
-            }
-        },
-        |err| eprintln!("an error occurred on stream: {}", err),
-        None,
-    )?;
-
-    stream.play()?;
-
-    let sample_rate = config.sample_rate.0;
-
-    let parse_file = |path| -> Result<(), anyhow::Error> {
-        let src = fs::read_to_string(path)?;
-        let parser = Parser::new(src);
-        let exprs = parser.parse();
-        let compiler = Compiler::new(sample_rate);
-        let graph = compiler.compile(&exprs);
-
-        if let Ok(mut container) = container.lock() {
-            container.update_graph(graph);
-        }
-        Ok(())
-    };
-
-    parse_file(Path::new(filename))?;
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut watcher = notify::recommended_watcher(tx)?;
-
-    let path = Path::new(filename);
-    watcher.watch(path, RecursiveMode::NonRecursive)?;
-
-    let mut last_update = Instant::now();
-    let debounce_duration = Duration::from_millis(100);
-
-    let mut check_duration_and_update = || {
-        let now = Instant::now();
-        if now.duration_since(last_update) >= debounce_duration {
-            if let Err(e) = parse_file(path) {
-                eprintln!("Error updating audio graph: {}", e);
-            }
-            last_update = now;
-        }
-    };
-
-    for res in rx {
-        match res {
-            Ok(event) => match event.kind {
-                EventKind::Modify(ModifyKind::Data(_)) => {
-                    check_duration_and_update();
+        .context("no output device available")?;
+    let supported_config = device.default_output_config()?;
+    let channels = supported_config.channels() as usize;
+    let config = supported_config.config();
+    let mut limiter = Limiter::default();
+    let stream = device
+        .build_output_stream(
+            config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                while let Ok(mut new) = rx.try_recv() {
+                    new.copy_state_from(&prog);
+                    prog = new;
                 }
-                EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
-                    // re-watch the file
-                    watcher.unwatch(path).ok();
-                    watcher.watch(path, RecursiveMode::NonRecursive).ok();
-
-                    check_duration_and_update();
+                for frame in data.chunks_mut(channels) {
+                    render(&mut prog, frame, config.sample_rate);
+                    limiter.process(frame, config.sample_rate);
                 }
-                _ => {}
             },
-            Err(e) => eprintln!("Watch error: {}", e),
-        }
-    }
+            |err| eprintln!("audio stream error: {err}"),
+            None,
+        )
+        .context("failed to build output stream")?;
+
+    stream.play().context("failed to start stream")?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).ok();
 
     Ok(())
+}
+
+fn watch_file(name: &str, mut prev: String, tx: mpsc::Sender<Program>) {
+    loop {
+        thread::sleep(Duration::from_millis(100));
+
+        if let Ok(src) = fs::read_to_string(name) {
+            if src == prev {
+                continue;
+            }
+            let result = compile_and_run(&src);
+            prev = src;
+
+            match result {
+                Ok(prog) => {
+                    println!("reloaded {name}");
+                    _ = tx.send(prog);
+                }
+                Err(error) => eprintln!("{name} {error:#}"),
+            }
+        }
+    }
+}
+
+fn compile_and_run(src: &str) -> anyhow::Result<Program> {
+    build(
+        &fs::read_to_string("prelude.ohm").context("prelude.ohm not found")?,
+        src,
+    )
 }
