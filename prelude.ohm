@@ -103,3 +103,7 @@ bres = |k n|
   (i * k % n) < k
 
 hit = |k n| bres k n * (1 - clock * n % 1) ^ 5
+
+pm = |freq = 100 fb = 0.2|
+  y = sin freq (~y * fb)
+  y
