@@ -2,21 +2,21 @@
 
 > ohm is a live coding language for music and sound.
 
-## run
+## Run
 
-requires [Rust](https://rustup.rs).
+Requires [Rust](https://rustup.rs).
 
     git clone git@github.com:cornedriesprong/ohm.git
     cd ohm-rs
     cargo run --release
 
-edit `patch.ohm` and save.
+Edit `patch.ohm` and save.
 
-## builtin functions
+## Language
 
-set `bpm = 120` to change the global tempo.
+Set `bpm = 120` to change the global tempo.
 
-### oscillators
+### Oscillators
 
 | name | arguments | output |
 |---|---|---|
@@ -24,13 +24,13 @@ set `bpm = 120` to change the global tempo.
 | `ramp` | `freq=100 phase=0` | 0..1 |
 | `noise` | | white noise, -1..1 |
 
-### filters
+### Filters
 
 | name | arguments | output |
 |---|---|---|
 | `lp` `bp` `hp` | `in cutoff=1000 q=0.707` | state variable filter |
 
-### time
+### Time
 
 | name | output |
 |---|---|
@@ -38,18 +38,18 @@ set `bpm = 120` to change the global tempo.
 | `bar` | bar length in seconds |
 | `sr` | sample rate |
 
-set the tempo with `bpm = 180`. default is 120.
+Set the tempo with `bpm = 180`. Default is 120.
 
-### math
+### Math
 
 | name | arguments |
 |---|---|
 | `floor` `tanh` `abs` | `x` |
 | `min` `max` | `a b` |
 
-operators: `+ - * / ^ %` and `== != > < >= <=`. comparisons return 0 or 1.
+Operators: `+ - * / ^ %` and `== != > < >= <=`. Comparisons return 0 or 1.
 
-### voices
+### Voices
 
 | name | arguments | output |
 |---|---|---|
@@ -57,17 +57,17 @@ operators: `+ - * / ^ %` and `== != > < >= <=`. comparisons return 0 or 1.
 | `map` | `seq fn` | applies `fn` to each item of a sequence, keeps
 | `print` | `x` | prints `x` every sample and passes it through |
 
-### pitches
+### Pitches
 
-notes: `a4`, `c#3`, `eb5`.
-chords: `Am`, `F#m7`, `Bbmaj9`.
-qualities: `m` `dim` `aug` `sus2` `sus4` `6` `m6` `7` `maj7` `m7` `aj9` `m9` `11` `m11` `13` `maj13` `m13`.
+Notes: `a4`, `c#3`, `eb5`.
+Chords: `Am`, `F#m7`, `Bbmaj9`.
+Qualities: `m` `dim` `aug` `sus2` `sus4` `6` `m6` `7` `maj7` `m7` `aj9` `m9` `11` `m11` `13` `maj13` `m13`.
 
-## prelude
+## Prelude
 
-see `prelude.ohm`.
+See `prelude.ohm`.
 
-### generators
+### Generators
 
 | name | arguments | output |
 |---|---|---|
