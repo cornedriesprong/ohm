@@ -2,7 +2,8 @@
 
 > ohm is a live coding language for music and sound.
 
-!ohm is under active development. Syntax may change, patches written today may not compile later on.
+> [!CAUTION]
+> ohm is under active development. Syntax will change; patches written today may break.
 
 ## Run
 
