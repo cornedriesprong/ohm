@@ -1,7 +1,5 @@
 bpm = 180
 
-hit = |k n| bres k n * (1 - clock * n % 1) ^ 3
-
 kick = |k n| 
   env = (hit k n) ^ 3
   pm (env * 120) (lfo * 0.15) * env
