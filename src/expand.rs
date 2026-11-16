@@ -121,8 +121,10 @@ fn is_trivial(voice: &IR) -> bool {
 fn is_contextual(voice: &IR) -> bool {
     match voice {
         IR::Clock(..) | IR::Seq { .. } => true,
-        IR::Rest | IR::Num(..) | IR::Ref { .. } => false,
-        IR::Pitch(operand) | IR::Unary(_, operand) => is_contextual(operand),
+        IR::Rest | IR::Num(..) | IR::Ref { .. } | IR::Shared(..) => false,
+        IR::Pitch(operand) | IR::Unary(_, operand) | IR::Share(_, operand) => {
+            is_contextual(operand)
+        }
         IR::Binary(lhs, _, rhs) => is_contextual(lhs) || is_contextual(rhs),
         IR::Builtin { args: items, .. } | IR::Mix(items) => items.iter().any(is_contextual),
         IR::Tap { index, .. } => is_contextual(index),

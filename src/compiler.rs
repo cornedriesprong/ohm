@@ -1,5 +1,6 @@
 use crate::{
     ast::{BinaryOp, Builtin, UnaryOp},
+    cse::Cse,
     env::Resolved,
     ir::IR,
     vm::{FilterMode, OpCode, Program, RING_LEN, Waveform},
@@ -29,6 +30,7 @@ impl Display for CompileError {
 impl std::error::Error for CompileError {}
 
 pub(crate) fn compile(prog: &mut Program, resolved: &Resolved) -> Result<(), CompileError> {
+    let mut cse = Cse::default();
     let mut refs = HashSet::from(["bpm".to_string()]);
     // ring buffer length of each tapped name
     let mut taps = HashMap::new();
@@ -59,7 +61,7 @@ pub(crate) fn compile(prog: &mut Program, resolved: &Resolved) -> Result<(), Com
             for (i, expr) in voices.iter().enumerate() {
                 let key = format!("{name}/{i}");
                 let slot = prog.slots[&key];
-                compile_expr(prog, expr, &key, i)?;
+                compile_expr(prog, &cse.share(expr, i), &key, i)?;
                 if let Some((start, len)) = prog.region(&format!("~{key}")) {
                     prog.ops.push(OpCode::Write {
                         start,
@@ -67,6 +69,7 @@ pub(crate) fn compile(prog: &mut Program, resolved: &Resolved) -> Result<(), Com
                     });
                 }
                 prog.ops.push(OpCode::Store(slot));
+                cse.store(&key);
             }
         }
     }
@@ -84,9 +87,22 @@ pub(crate) fn compile(prog: &mut Program, resolved: &Resolved) -> Result<(), Com
             1 => voices.remove(0),
             _ => IR::Mix(voices),
         };
-        compile_expr(prog, &voice, &format!("output/{i}"), i)?;
+        compile_expr(prog, &cse.share(&voice, i), &format!("output/{i}"), i)?;
     }
     prog.channels = channels;
+
+    let read: HashSet<_> = prog
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            OpCode::Shared(id) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    prog.ops
+        .retain(|op| !matches!(op, OpCode::Tee(id) if !read.contains(id)));
+    prog.shared
+        .resize(read.iter().max().map_or(0, |id| id + 1), 0.0);
 
     Ok(())
 }
@@ -121,8 +137,8 @@ fn collect_refs(refs: &mut HashSet<String>, taps: &mut HashMap<String, usize>, e
             collect_refs(refs, taps, input);
             items.iter().for_each(|item| collect_refs(refs, taps, item));
         }
-        IR::Pitch(pitch) => collect_refs(refs, taps, pitch),
-        IR::Rest | IR::Num(..) | IR::Clock(..) => {}
+        IR::Pitch(pitch) | IR::Share(_, pitch) => collect_refs(refs, taps, pitch),
+        IR::Rest | IR::Num(..) | IR::Clock(..) | IR::Shared(..) => {}
     }
 }
 
@@ -193,6 +209,11 @@ fn compile_expr(
                 length: items.len(),
             });
         }
+        IR::Share(id, expr) => {
+            compile_expr(prog, expr, path, voice)?;
+            prog.ops.push(OpCode::Tee(*id));
+        }
+        IR::Shared(id) => prog.ops.push(OpCode::Shared(*id)),
     }
     Ok(())
 }
@@ -532,6 +553,55 @@ pub(crate) mod tests {
                 OpCode::Num(1.0),
                 OpCode::Tap { start: 4, mask: 3 }
             ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn compile_shared() -> Result<(), CompileError> {
+        // a repeated expression runs once
+        let prog = compile_src("sin 100 + sin 100")?;
+        assert_eq!(
+            prog.ops,
+            vec![
+                OpCode::Num(100.0),
+                OpCode::Num(0.0),
+                OpCode::Osc {
+                    waveform: Waveform::Sin,
+                    phase_slot: 0
+                },
+                OpCode::Tee(2),
+                OpCode::Shared(2),
+                OpCode::Binary(BinaryOp::Add)
+            ]
+        );
+
+        // the last item of a seq runs first
+        let prog = compile_src("<(sin 100) 1 (sin 100)>")?;
+        assert_eq!(
+            prog.ops,
+            vec![
+                OpCode::Clock { rate: 1.0 },
+                OpCode::PushPhase { length: 3 },
+                OpCode::Num(100.0),
+                OpCode::Num(0.0),
+                OpCode::Osc {
+                    waveform: Waveform::Sin,
+                    phase_slot: 0
+                },
+                OpCode::Tee(4),
+                OpCode::Num(1.0),
+                OpCode::Shared(4),
+                OpCode::Seq { length: 3 }
+            ]
+        );
+
+        // every noise is a new value
+        let prog = compile_src("noise - noise")?;
+        assert_eq!(
+            prog.ops,
+            vec![OpCode::Noise, OpCode::Noise, OpCode::Binary(BinaryOp::Sub)]
         );
 
         Ok(())

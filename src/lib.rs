@@ -1,5 +1,6 @@
 mod ast;
 mod compiler;
+mod cse;
 mod env;
 mod expand;
 mod ir;

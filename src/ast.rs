@@ -1,6 +1,6 @@
 use strum_macros::{Display, EnumString};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum UnaryOp {
     Negate,
     Floor,
@@ -8,7 +8,7 @@ pub(crate) enum UnaryOp {
     Abs,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BinaryOp {
     Add,
     Sub,
@@ -38,7 +38,7 @@ pub(crate) enum Ast {
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, EnumString, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
 #[strum(serialize_all = "lowercase")]
 pub(crate) enum Builtin {
     Ramp,

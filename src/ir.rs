@@ -27,4 +27,6 @@ pub(crate) enum IR {
         input: Box<IR>,
     },
     Mix(Vec<IR>),
+    Share(usize, Box<IR>),
+    Shared(usize),
 }

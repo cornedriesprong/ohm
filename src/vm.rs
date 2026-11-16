@@ -14,6 +14,7 @@ pub struct Program {
     pub channels: usize,
     pub bpm_slot: Option<usize>,
     state: Vec<f32>,
+    pub(crate) shared: Vec<f32>,
     buffer: Vec<f32>,
     regions: HashMap<String, (usize, usize)>,
     frame: usize,
@@ -34,6 +35,7 @@ impl Program {
         Self {
             ops: Vec::new(),
             state: Vec::new(),
+            shared: Vec::new(),
             channels: 0,
             slots: HashMap::new(),
             bpm_slot: None,
@@ -131,6 +133,8 @@ pub(crate) enum OpCode {
     Print,
     Store(usize),
     Load(usize),
+    Tee(usize),
+    Shared(usize),
     Write {
         start: usize,
         mask: usize,
@@ -316,6 +320,8 @@ pub fn render(prog: &mut Program, output: &mut [f32], sample_rate: u32) {
             }
             OpCode::Store(slot) => prog.state[*slot] = finite_or(stack.pop(), 0.0),
             OpCode::Load(slot) => stack.push(prog.state[*slot]),
+            OpCode::Tee(id) => prog.shared[*id] = stack.top(),
+            OpCode::Shared(id) => stack.push(prog.shared[*id]),
             OpCode::Write { start, mask } => {
                 prog.buffer[start + (prog.frame & mask)] = finite_or(stack.top(), 0.0)
             }
@@ -813,6 +819,18 @@ mod tests {
             super::render(&mut prog, &mut output[..2], SAMPLE_RATE);
         }
         assert_eq!(output[..2], [2.0, 1.0]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn run_shared() -> Result<(), CompileError> {
+        // a repeated expression runs once and is read back
+        let mut prog = run_src("x = ~x + 1\n(~x[1] * 2) + (~x[1] * 2)")?;
+        assert!(prog.ops.iter().any(|op| matches!(op, OpCode::Tee(..))));
+        for expected in [0.0, 4.0, 8.0] {
+            assert_approx_eq(render(&mut prog, SAMPLE_RATE), expected);
+        }
 
         Ok(())
     }
