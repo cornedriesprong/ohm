@@ -15,9 +15,46 @@ Requires [Rust](https://rustup.rs).
 
 Edit `patch.ohm` and save.
 
+## Design
+
+ohm was designed with the following goals in mind:
+
+- to allow improvisation
+- to have a minimal & expressive syntax
+- to be modular and composable
+
 ## Language
 
-Set `bpm = 120` to change the global tempo.
+In ohm every expression yields a *signal*, i.e., a continuous stream of samples. So even just evaluating a single number like `1` will output a constant DC offset value. There is no distinction between audio and control signals. Everything runs at audio rate, and you can send any signal to any input.
+
+### Signals
+
+Depending on their context, signals can perform different functions:
+
+1. Generate sound: `sin 440`
+2. Control parameters (either static or modulating): `voice 200 + lfo 0.5 * 20`
+3. Logic / control flow
+4. Timing / sequencing
+
+### Sequences
+
+Sequencing in ohm is driven by phasors, i.e., signals that ramp from 0 to 1 over a given period. The global `clock` function outputs a phasor derived from the global bpm; for example, set `bpm = 140` to change the tempo.
+
+Multiply or divide a clock signal to derive related rates, e.g., `clock * 2` or `clock / 2`.
+
+To step through values in order, put them in angle brackets: `<200 300 100>`. Sequences are driven by the global `clock` implicitly and can be nested.
+
+### Stacks
+
+Putting expressions in curly braces creates a stack of parallel signals: `saw {200 300}`. The signal graph downstream of the stack will get expanded (duplicated) to the number of channels. This can be used for polyphony as well as stereo or multichannel output. Stacks can be destructured to get their individual elements: `{l r} = saw -> pan 0.2` Stacks can be nested inside sequences or vice versa.
+
+### `->` operator
+
+Compose functions from left to right using the `->` operator: `saw 200 -> lp 1500`. The left side's output will be applied as the first argument to the right side. By convention, functions take an input signal as their first argument.
+
+## Builtin functions
+
+!any parameters at have a default argument (e.g., `freq=100`) are optional and can be omitted.
 
 ### Oscillators
 
@@ -65,6 +102,10 @@ Operators: `+ - * / ^ %` and `== != > < >= <=`. Comparisons return 0 or 1.
 Notes: `a4`, `c#3`, `eb5`.
 Chords: `Am`, `F#m7`, `Bbmaj9`.
 Qualities: `m` `dim` `aug` `sus2` `sus4` `6` `m6` `7` `maj7` `m7` `aj9` `m9` `11` `m11` `13` `maj13` `m13`.
+
+### Sequences
+
+Sequencing throughout ohm happens using unipolar phasor signals, i.e., a signal
 
 ## Prelude
 
